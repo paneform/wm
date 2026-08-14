@@ -209,6 +209,9 @@ public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
 
     public func run(_ command: CLICommand) async throws -> CLIExitCode {
         switch command {
+        case .help:
+            writeLine(Data(CLIHelp.utf8), to: output.stdout)
+            return .success
         case .request(let method, let params, let url):
             let response = try await client.request(try encoder.encode(CLIRequest(requestID: id(), method: method, params: params)), at: url)
             writeLine(response.json, to: output.stdout)

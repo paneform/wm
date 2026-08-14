@@ -2,6 +2,14 @@ import Foundation
 import Testing
 @testable import WMCLI
 
+@Test func parsesHelpCommands() throws {
+    let parser = CLIParser()
+    #expect(try parser.parseInvocation(["help"]) == .init(command: .help))
+    #expect(try parser.parseInvocation(["--help"]) == .init(command: .help))
+    #expect(try parser.parse(["help"]) == .help)
+    #expect(throws: CLIParseError.self) { try parser.parseInvocation(["help", "extra"]) }
+}
+
 @Test func parsesPrettyAsGlobalFlag() throws {
     let parser = CLIParser()
     #expect(try parser.parseInvocation(["--pretty", "state"]) == .init(

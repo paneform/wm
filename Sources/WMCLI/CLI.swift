@@ -70,6 +70,7 @@ public enum LifecycleCommand: String, Sendable, Equatable {
 }
 
 public enum CLICommand: Sendable, Equatable {
+    case help
     case daemon(DaemonConfiguration)
     case request(method: String, params: [String: JSONValue] = [:], url: URL)
     case subscribe(SubscriptionConfiguration)
@@ -102,6 +103,9 @@ public struct CLIParser: Sendable {
     public init() {}
 
     public func parseInvocation(_ arguments: [String]) throws -> CLIInvocation {
+        if arguments == ["help"] || arguments == ["--help"] {
+            return CLIInvocation(command: .help)
+        }
         let prettyCount = arguments.count(where: { $0 == "--pretty" })
         guard prettyCount < 2 else { throw CLIParseError("duplicate --pretty flag") }
         let pretty = prettyCount == 1
@@ -113,6 +117,9 @@ public struct CLIParser: Sendable {
         guard let command = arguments.first else { throw CLIParseError("missing command") }
         let rest = Array(arguments.dropFirst())
         switch command {
+        case "help":
+            guard rest.isEmpty else { throw CLIParseError("unexpected argument for help") }
+            return .help
         case "daemon": return .daemon(try parseDaemon(rest))
         case "ping": return try request("daemon.ping", rest)
         case "pause": return try request("daemon.pause", rest)

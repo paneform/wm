@@ -37,6 +37,25 @@ private final class MockClient: CLIWebSocketClient, @unchecked Sendable {
     }
 }
 
+@Test func helpWritesStructuredTextWithoutInvokingClient() async throws {
+    let capture = Capture()
+    let client = MockClient()
+    let runner = CLIRunner(client: client, output: .init(
+        stdout: { data in Task { await capture.out(data) } },
+        stderr: { data in Task { await capture.err(data) } }
+    ))
+
+    #expect(await runner.run(arguments: ["--help"]) == .success)
+    try await Task.sleep(for: .milliseconds(10))
+    let help = String(decoding: try #require(await capture.stdout.first), as: UTF8.self)
+    #expect(help.contains("COMMANDS\n"))
+    #expect(help.contains("    frame set WINDOW_ID X Y WIDTH HEIGHT"))
+    #expect(help.contains("GLOBAL FLAGS\n  --pretty"))
+    #expect(help.hasSuffix("\n"))
+    #expect(await capture.stderr.isEmpty)
+    #expect(client.capturedRequests().isEmpty)
+}
+
 @Test func runnerBuildsCanonicalRequestAndEmitsJSONLine() async throws {
     let capture = Capture()
     let client = MockClient()

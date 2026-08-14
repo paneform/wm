@@ -19,6 +19,9 @@ import WMWorkspace
                 stderr: { FileHandle.standardError.write($0) }
             ).processing(pretty: invocation.pretty)
             switch invocation.command {
+            case .help:
+                output.stdout(Data(CLIHelp.utf8))
+                exit(CLIExitCode.success.rawValue)
             case .daemon(let configuration): exit(await runDaemon(configuration))
             case .verify(let url): exit(await verify(url: url, output: output))
             default:
