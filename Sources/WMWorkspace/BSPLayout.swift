@@ -42,6 +42,16 @@ extension Workspace {
         )
         return root.layout(in: content, gap: max(0, gap), minimumSizes: minimumSizes)
     }
+
+    public func canFit(
+        in bounds: WorkspaceLayoutRect,
+        minimumSizes: [WorkspaceWindowID: WorkspaceMinimumSize]
+    ) -> Bool {
+        guard let root = bsp.root else { return true }
+        let minimum = root.minimumSize(gap: max(0, gap), minimumSizes: minimumSizes)
+        return minimum.width <= max(0, bounds.width - margin.left - margin.right)
+            && minimum.height <= max(0, bounds.height - margin.top - margin.bottom)
+    }
 }
 
 private extension BSPNode {

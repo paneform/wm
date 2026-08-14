@@ -234,6 +234,18 @@ import Testing
     #expect(layout["ghostty"] == .init(x: 808, y: 32, width: 704, height: 950))
 }
 
+@Test func bspLayoutReportsWhenMinimumSizesCannotFit() {
+    let workspace = tiled("tile", display: "d", windows: ["a", "b", "c"])
+    let bounds = WorkspaceLayoutRect(x: 0, y: 32, width: 1512, height: 950)
+
+    #expect(!workspace.canFit(in: bounds, minimumSizes: [
+        "a": .init(width: 700), "b": .init(width: 800), "c": .init(width: 744),
+    ]))
+    #expect(workspace.canFit(in: bounds, minimumSizes: [
+        "a": .init(width: 400), "b": .init(width: 400), "c": .init(width: 400),
+    ]))
+}
+
 private func sampleState() -> WorkspaceState {
     WorkspaceState(
         workspaces: [tiled("source", display: "d", windows: ["a", "b", "c"], visible: true, focused: true)],

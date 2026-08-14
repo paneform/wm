@@ -405,19 +405,24 @@ actor DaemonHandler: WebSocketRequestHandler {
         retainSessionWindows(inventory.windows)
         let windowsByID = sessionWindows
         let previousParkedFrames = after.parkedWindowFrames
+        var restoredIDs: Set<String> = []
         var changed: [(NormalizedWindow, InventoryRect)] = []
         do {
+            let displayFrames = axDisplayFrames(inventory.displays)
+            let incomingDisplayID = after[workspace: name]?.displayID
+            let incomingDisplay = incomingDisplayID.flatMap { displayFrames[$0] }
             for id in incomingIDs {
                 guard let window = windowsByID[id], let restore = after.parkedWindowFrames[id], let current = window.frame else { continue }
-                _ = try await geometry.set(window: window, params: frameParams(id, restore.inventoryRect))
+                let saved = restore.inventoryRect
+                let target = isCenteredOnDisplay(saved, displays: Array(displayFrames.values)) ? saved : incomingDisplay ?? saved
+                _ = try await geometry.set(window: window, params: frameParams(id, target))
                 changed.append((window, current))
-                after.parkedWindowFrames.removeValue(forKey: id)
+                restoredIDs.insert(id)
             }
             let outgoingDisplayID = before.focusedWorkspaceName.flatMap { before[workspace: $0]?.displayID }
             let outgoingDisplay = inventory.displays.first { $0.id == outgoingDisplayID }
                 ?? inventory.displays.first(where: \.isPrimary)
                 ?? inventory.displays.first
-            let displayFrames = axDisplayFrames(inventory.displays)
             for id in outgoingIDs.subtracting(incomingIDs).sorted() {
                 guard let window = windowsByID[id], let original = window.frame else { continue }
                 guard let outgoingDisplay,
@@ -442,6 +447,7 @@ actor DaemonHandler: WebSocketRequestHandler {
             }
             try await tileWorkspace(after, named: name, inventory: inventory)
             try await focusWorkspaceWindow(after, named: name, inventory: inventory)
+            for id in restoredIDs { after.parkedWindowFrames.removeValue(forKey: id) }
         } catch {
             for (window, previousFrame) in changed.reversed() {
                 _ = try? await geometry.set(window: window, params: frameParams(window.id, previousFrame))
@@ -472,6 +478,16 @@ actor DaemonHandler: WebSocketRequestHandler {
         )
         var targets = workspace.layout(in: bounds, minimumSizes: windowMinimumSizes)
         let windows = try workspace.windowIDs.map { try resolveWindow($0, in: inventory.windows) }
+        if !workspace.canFit(in: bounds, minimumSizes: windowMinimumSizes) {
+            let fallback = WorkspaceLayoutRect(
+                x: bounds.x + workspace.margin.left,
+                y: bounds.y + workspace.margin.top,
+                width: max(0, bounds.width - workspace.margin.left - workspace.margin.right),
+                height: max(0, bounds.height - workspace.margin.top - workspace.margin.bottom)
+            )
+            for window in windows { _ = try await geometry.set(window: window, params: layoutParams(window.id, fallback)) }
+            return
+        }
         let originals = Dictionary(uniqueKeysWithValues: windows.compactMap { window in window.frame.map { (window.id, $0) } })
         var moved: [NormalizedWindow] = []
         do {

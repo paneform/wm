@@ -36,6 +36,11 @@ final class WindowParkingTests: XCTestCase {
         XCTAssertFalse(plan.accepts(.init(x: 0, y: 400, width: 800, height: 600)))
         XCTAssertFalse(plan.accepts(.init(x: 0, y: 1030, width: 700, height: 600)))
     }
+
+    func testDetectsWhetherRestoreFrameIntersectsADisplay() {
+        XCTAssertTrue(isCenteredOnDisplay(.init(x: 100, y: 100, width: 500, height: 500), displays: [display]))
+        XCTAssertFalse(isCenteredOnDisplay(.init(x: -1472, y: 950, width: 1512, height: 950), displays: [display]))
+    }
 }
 
 private let display = InventoryRect(x: 0, y: 0, width: 1920, height: 1080)

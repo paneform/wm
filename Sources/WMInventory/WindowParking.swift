@@ -75,3 +75,8 @@ public func axDisplayFrames(_ displays: [DisplayObservation]) -> [String: Invent
         return (display.id, InventoryRect(x: frame.x, y: primaryTop - frame.y - frame.height, width: frame.width, height: frame.height))
     })
 }
+
+public func isCenteredOnDisplay(_ frame: InventoryRect, displays: [InventoryRect]) -> Bool {
+    let center = (x: frame.x + frame.width / 2, y: frame.y + frame.height / 2)
+    return displays.contains { center.x >= $0.x && center.x < $0.maxX && center.y >= $0.y && center.y < $0.maxY }
+}
