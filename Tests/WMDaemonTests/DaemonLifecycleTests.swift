@@ -69,7 +69,148 @@ import WMWorkspace
     #expect(parkIndex != nil && retileIndex != nil && parkIndex! < retileIndex!)
 }
 
-private func inventory(_ ids: [String]) -> InventorySnapshot {
+@Test func healthyStartupAuditRemovesDefinitivelyAbsentMembers() throws {
+    let state = startupState(staleID: "window:cg:155", liveID: "window:cg:200")
+    let candidate = StartupIntentAudit.candidate(
+        state: state, inventory: completeInventory(["window:cg:200"])
+    )
+
+    #expect(candidate[workspace: "visible"]?.windowIDs == ["window:cg:200"])
+    #expect(candidate[workspace: "visible"]?.focusedWindowID == "window:cg:200")
+    #expect(candidate[workspace: "visible"]?.bsp.root == .leaf(windowID: "window:cg:200"))
+    #expect(candidate.parkedWindowFrames["window:cg:155"] == nil)
+    try candidate.validate()
+}
+
+@Test func unrelatedFailedAXScanStillPrunesStaleCGMember() {
+    let state = startupState(staleID: "window:cg:155", liveID: "window:cg:200")
+    let candidate = StartupIntentAudit.candidate(
+        state: state, inventory: completeInventory(["window:cg:200"], appStatus: .failed)
+    )
+
+    #expect(candidate[workspace: "visible"]?.windowIDs == ["window:cg:200"])
+    #expect(candidate.parkedWindowFrames["window:cg:155"] == nil)
+}
+
+@Test func unhealthyCGInventoryPreservesStartupIntent() {
+    let state = startupState(staleID: "window:cg:155", liveID: "window:cg:200")
+    var inventory = completeInventory(["window:cg:200"])
+    inventory.sourceHealth = [.init(source: .coreGraphics, status: .unhealthy, permissionGranted: false)]
+
+    #expect(StartupIntentAudit.candidate(state: state, inventory: inventory) == state)
+}
+
+@Test func periodicHealthyCGReconciliationPrunesStaleMembersBeforeEffects() throws {
+    let state = startupState(staleID: "window:cg:13547", liveID: "window:cg:200")
+    let reconciled = StartupIntentAudit.candidate(
+        state: state, inventory: completeInventory(["window:cg:200"], appStatus: .failed)
+    )
+
+    #expect(reconciled[workspace: "visible"]?.windowIDs == ["window:cg:200"])
+    #expect(WorkspaceIntentAudit(state: reconciled, inventory: completeInventory(["window:cg:200"]))
+        .orderedSteps.allSatisfy { $0.windowOrWorkspaceID != "window:cg:13547" })
+    try reconciled.validate()
+}
+
+@Test func periodicUnhealthyCGRetainsStaleMembersConservatively() {
+    let state = startupState(staleID: "window:cg:13547", liveID: "window:cg:200")
+    var inventory = completeInventory(["window:cg:200"])
+    inventory.sourceHealth = [.init(source: .coreGraphics, status: .degraded, permissionGranted: true)]
+
+    #expect(StartupIntentAudit.candidate(state: state, inventory: inventory) == state)
+}
+
+@Test func explicitFocusCandidateDoesNotPruneDuringDegradedCGInventory() {
+    let state = startupState(staleID: "window:cg:13547", liveID: "window:cg:200")
+    var inventory = completeInventory(["window:cg:200"])
+    inventory.sourceHealth = [.init(source: .coreGraphics, status: .degraded, permissionGranted: true)]
+    #expect(StartupIntentAudit.candidate(state: state, inventory: inventory) == state)
+}
+
+@Test func observerClampReportsOnceAndDoesNotBlockLaterWork() {
+    var reliability = ObserverGeometryReliability()
+    let clamp = ObserverGeometryReliability.Clamp(
+        requestedWidth: 752, requestedHeight: 950, observedWidth: 723, observedHeight: 950
+    )
+    var completed: [String] = []
+
+    #expect(reliability.shouldAttempt(windowID: "settings", requestedWidth: 752, requestedHeight: 950))
+    let firstReport = reliability.record(windowID: "settings", clamp: clamp)
+    #expect(firstReport)
+    completed.append("other-window")
+    completed.append("focus")
+
+    #expect(!reliability.shouldAttempt(windowID: "settings", requestedWidth: 752, requestedHeight: 950))
+    let repeatedReport = reliability.record(windowID: "settings", clamp: clamp)
+    #expect(!repeatedReport)
+    #expect(reliability.shouldAttempt(windowID: "settings", requestedWidth: 800, requestedHeight: 950))
+    completed.append("later-focus")
+    #expect(completed == ["other-window", "focus", "later-focus"])
+}
+
+@Test func failedStartupAuditPreservesPersistedState() throws {
+    enum AuditFailure: Error { case failed }
+    let state = startupState(staleID: "window:cg:155", liveID: "window:cg:200")
+    var persisted = state
+
+    #expect(throws: AuditFailure.failed) {
+        try StartupIntentAudit.run(
+            state: state, inventory: completeInventory(["window:cg:200"]),
+            audit: { _ in throw AuditFailure.failed },
+            commit: { persisted = $0 }
+        )
+    }
+    #expect(persisted == state)
+}
+
+@Test func externalActivationUsesFrontmostApplicationAfterLifecycleChanges() {
+    var retained = inventory(["old", "replacement"]).windows
+    retained[0].pid = 10
+    retained[0].focused = true
+    retained[1].pid = 20
+    retained[1].main = true
+
+    #expect(resolveRetainedFocusedWindowID(
+        windows: retained, focusedWindowID: nil, frontmostPID: 20
+    ) == "replacement")
+}
+
+private func startupState(staleID: String, liveID: String) -> WorkspaceState {
+    WorkspaceState(
+        workspaces: [.init(
+            name: "visible", origin: .configured, displayID: "display:1", visible: true, focused: true,
+            windowIDs: [staleID, liveID], focusedWindowID: staleID,
+            bsp: .init(root: .split(
+                axis: .vertical, ratio: 0.5,
+                first: .leaf(windowID: staleID), second: .leaf(windowID: liveID)
+            ))
+        )],
+        focusedWorkspaceName: "visible",
+        displays: ["display:1": .init(visibleWorkspaceName: "visible")],
+        parkedWindowFrames: [staleID: .init(x: 1, y: 2, width: 3, height: 4)]
+    )
+}
+
+private func completeInventory(
+    _ ids: [String], appStatus: AppScanStatus = .succeeded
+) -> InventorySnapshot {
+    var snapshot = inventory(ids)
+    snapshot.rawCGWindows = ids.compactMap { id in
+        guard let value = UInt32(id.replacingOccurrences(of: "window:cg:", with: "")) else { return nil }
+        return .init(cgWindowID: value, pid: 1)
+    }
+    snapshot.sourceHealth = [
+        .init(source: .accessibility, status: .healthy, permissionGranted: true),
+        .init(source: .coreGraphics, status: .healthy, permissionGranted: true),
+    ]
+    snapshot.appScans = [.init(
+        application: .init(pid: 1, name: "Test"), status: appStatus,
+        durationMilliseconds: 1, windowCount: ids.count, issues: []
+    )]
+    return snapshot
+}
+
+private func inventory(_ ids: [String], enumeration: SourceStatus? = nil) -> InventorySnapshot {
     let windows = ids.map { id in
         NormalizedWindow(
             id: id, pid: 1, appName: "Test", frame: .init(x: 0, y: 0, width: 100, height: 100),
@@ -79,6 +220,8 @@ private func inventory(_ ids: [String]) -> InventorySnapshot {
     }
     return .init(
         timestamp: Date(timeIntervalSince1970: 0), durationMilliseconds: 0, displays: [], rawAXWindows: [],
-        rawCGWindows: [], windows: windows, rejectedAXWindows: [], joinDecisions: [], sourceHealth: [], appScans: []
+        rawCGWindows: [], windows: windows, rejectedAXWindows: [], joinDecisions: [],
+        sourceHealth: enumeration.map { [.init(source: .accessibility, status: $0, permissionGranted: true, issues: [])] } ?? [],
+        appScans: []
     )
 }

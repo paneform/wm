@@ -23,11 +23,15 @@ actor DaemonHandler: WebSocketRequestHandler {
     private var workspaceSubscriptions: [UUID: [String: WorkspaceSubscription]] = [:]
     private var workspaceSequence: UInt64 = 0
     private var windowMinimumSizes: [String: WorkspaceMinimumSize] = [:]
+    private var observerGeometryReliability = ObserverGeometryReliability()
     private var sessionWindows: [String: NormalizedWindow] = [:]
     private var lifecycle = ManagedWindowLifecycle()
     private var daemonLifecycle = DaemonLifecycle()
+    private let transactions = TransactionCoordinator<JSONValue>()
     private var lastTransitionTrace: JSONValue = .null
     private var sender: (@Sendable (String, UUID) -> Void)?
+    private var internalErrorReporter: (@Sendable (String) -> Void)?
+
 
     init(state: State, workspaces: WorkspaceController) {
         self.state = state
@@ -36,11 +40,19 @@ actor DaemonHandler: WebSocketRequestHandler {
     }
 
     func installSender(_ sender: @escaping @Sendable (String, UUID) -> Void) { self.sender = sender }
+    func installInternalErrorReporter(_ reporter: @escaping @Sendable (String) -> Void) { internalErrorReporter = reporter }
 
     func reconcileExternalFocus(
         windowID: String?, frontmostPID: Int32?, inventory: InventorySnapshot, allowWhilePaused: Bool = false
     ) async throws {
         if !allowWhilePaused { try daemonLifecycle.requireMutationAllowed() }
+        try await reconcileExternalFocusAuthorized(windowID: windowID, frontmostPID: frontmostPID, inventory: inventory)
+    }
+
+    private func reconcileExternalFocusAuthorized(
+        windowID: String?, frontmostPID: Int32?, inventory: InventorySnapshot,
+        tolerateGeometryClamp: Bool = false
+    ) async throws {
         retainSessionWindows(inventory.windows)
         let windowID = resolveRetainedFocusedWindowID(
             windows: Array(sessionWindows.values), focusedWindowID: windowID, frontmostPID: frontmostPID
@@ -51,19 +63,63 @@ actor DaemonHandler: WebSocketRequestHandler {
         let displayID = before[workspace: name]?.displayID
         var mutation = try await workspaces.previewFocus(name: name, displayID: displayID)
         mutation.workspaceState.setFocusedWindow(windowID, in: name)
-        try await reconcileWorkspaceFocus(before: before, after: &mutation.workspaceState, name: name, inventory: inventory)
+        try await reconcileWorkspaceFocus(
+            before: before, after: &mutation.workspaceState, name: name, inventory: inventory,
+            tolerateGeometryClamp: tolerateGeometryClamp
+        )
         try await workspaces.commitFocus(mutation)
         await publishWorkspaceMutation(mutation, before: before, reason: .workspaceFocused)
     }
 
+    func reconcileApplicationActivation(frontmostPID: Int32, inventory: InventorySnapshot) async throws {
+        let receipt = try await submitInternal(name: "observer.activation", idempotencyKey: "activation:\(frontmostPID)") { [weak self] in
+            guard let self else { throw CancellationError() }
+            try await self.reconcileExternalFocusAuthorized(
+                windowID: nil, frontmostPID: frontmostPID, inventory: inventory, tolerateGeometryClamp: true
+            )
+        }
+        if let failure = receipt.transaction.failure { throw failure }
+    }
+
+    func reconcilePeriodicObservation(
+        _ inventory: InventorySnapshot, displayID: String, focusedWindowID: String?, frontmostPID: Int32?
+    ) async throws {
+        let receipt = try await submitInternal(name: "observer.periodic", idempotencyKey: "observer.periodic") { [weak self] in
+            guard let self else { throw CancellationError() }
+            try await self.reconcileObservedWindowsAuthorized(inventory, displayID: displayID)
+            try await self.reconcileExternalFocusAuthorized(
+                windowID: focusedWindowID, frontmostPID: frontmostPID, inventory: inventory, tolerateGeometryClamp: true
+            )
+        }
+        if let failure = receipt.transaction.failure { throw failure }
+    }
+
+    static func focusCandidateIDs(
+        workspace: WMWorkspace.Workspace, inventory: InventorySnapshot
+    ) -> [String] {
+        let liveIDs = Set(inventory.windows.map(\.id))
+        let preferred = workspace.focusedWindowID.map { [$0] } ?? []
+        return (preferred + workspace.windowIDs.reversed().filter { $0 != workspace.focusedWindowID })
+            .filter(liveIDs.contains)
+    }
+
     func reconcileObservedWindows(_ inventory: InventorySnapshot, displayID: String) async throws {
         try daemonLifecycle.requireMutationAllowed()
+        try await reconcileObservedWindowsAuthorized(inventory, displayID: displayID)
+    }
+
+    private func reconcileObservedWindowsAuthorized(_ inventory: InventorySnapshot, displayID: String) async throws {
+        let committed = await workspaces.snapshot()
+        try await workspaces.commit(StartupIntentAudit.candidate(state: committed, inventory: inventory))
         let update = lifecycle.reconcile(inventory)
         try await applyLifecycleUpdate(update, displayID: displayID)
     }
 
-    func auditCommittedIntent(_ inventory: InventorySnapshot) async throws {
-        let committed = await workspaces.snapshot()
+    func auditCommittedIntent(
+        _ inventory: InventorySnapshot, state proposed: WMWorkspace.WorkspaceState? = nil
+    ) async throws {
+        let committed: WMWorkspace.WorkspaceState
+        if let proposed { committed = proposed } else { committed = await workspaces.snapshot() }
         retainSessionWindows(inventory.windows)
         await geometry.reconcile(windows: inventory.windows)
         let audit = WorkspaceIntentAudit(state: committed, inventory: inventory)
@@ -80,6 +136,13 @@ actor DaemonHandler: WebSocketRequestHandler {
                 try await tileWorkspace(committed, named: step.windowOrWorkspaceID, inventory: inventory)
             }
         }
+    }
+
+    func auditStartupIntent(_ inventory: InventorySnapshot) async throws {
+        let committed = await workspaces.snapshot()
+        let candidate = StartupIntentAudit.candidate(state: committed, inventory: inventory)
+        try await auditCommittedIntent(inventory, state: candidate)
+        try await workspaces.commit(candidate)
     }
 
     func beginTermination() { daemonLifecycle.beginTermination() }
@@ -110,6 +173,7 @@ actor DaemonHandler: WebSocketRequestHandler {
                 sessionWindows.removeValue(forKey: lifetime.windowID)
             }
             windowMinimumSizes.removeValue(forKey: lifetime.windowID)
+            observerGeometryReliability.clear(windowID: lifetime.windowID)
         }
         await geometry.evict(lifetimes: update.verifiedClosedLifetimes)
         let before = await workspaces.snapshot()
@@ -213,6 +277,37 @@ actor DaemonHandler: WebSocketRequestHandler {
     }
 
     private func route(_ request: Request) async -> ServerMessage {
+        if request.method.isMutation && request.method != .daemonPause && request.method != .daemonResume {
+            do {
+                let mode = try returnMode(request.params["return_mode"])
+                let key = request.method.isIdempotent ? canonicalKey(request) : nil
+                let commandRequest = Request(
+                    requestId: request.requestId, method: request.method,
+                    params: request.params.filter { $0.key != "return_mode" }
+                )
+                let receipt = try await transactions.submit(.init(
+                    name: request.method.rawValue, idempotencyKey: key,
+                    authorize: { [weak self] in await self?.mutationBarrier() },
+                    operate: { [weak self] in
+                    guard let self else { throw CancellationError() }
+                    let response = await self.routeDirect(commandRequest)
+                    guard case let .response(value) = response else { throw CancellationError() }
+                    if let error = value.error { throw TransactionFailure(error) }
+                    return .init(result: value.result ?? .null, committedStateVersion: value.stateVersion)
+                }, escalate: { [weak self] in try await self?.fullReconciliation() }), mode: mode)
+                return .response(.init(requestId: request.requestId, result: json(receipt), stateVersion: await currentVersion()))
+            } catch TransactionCoordinatorError.queueFull {
+                return .response(.init(requestId: request.requestId, error: .init(code: .notReady, message: "transaction queue is full", retryable: true), stateVersion: await currentVersion()))
+            } catch let error as WorkspaceRequestError {
+                return .response(.init(requestId: request.requestId, error: .init(code: error.code, message: error.message, retryable: false), stateVersion: await currentVersion()))
+            } catch {
+                return .response(.init(requestId: request.requestId, error: .init(code: .internalError, message: "transaction submission failed", retryable: false), stateVersion: await currentVersion()))
+            }
+        }
+        return await routeDirect(request)
+    }
+
+    private func routeDirect(_ request: Request) async -> ServerMessage {
         do {
             if request.method == .inventoryRefresh { _ = await router.route(.init(requestID: request.requestId, method: request.method.rawValue)) }
             var committed = try await state.state()
@@ -224,7 +319,10 @@ actor DaemonHandler: WebSocketRequestHandler {
                 try daemonLifecycle.requireMutationAllowed()
             }
             switch request.method {
-            case .stateGet: result = json(userState(committed))
+            case .stateGet:
+                var value = userState(committed)
+                if case .object(var object) = value { object["transactions"] = json(await transactions.metadata()); value = .object(object) }
+                result = value
             case .stateObserved: result = json(snapshot.inventory)
             case .healthGet: result = json(protocolHealth(snapshot.health))
             case .displayList: result = json(["displays": snapshot.inventory.displays])
@@ -285,24 +383,50 @@ actor DaemonHandler: WebSocketRequestHandler {
                 _ = daemonLifecycle.pause()
                 result = .object(["paused": .bool(true)])
             case .daemonResume:
-                committed = try await state.refresh()
-                guard committed.snapshot.health.capabilities["accessibility"] as? Bool == true,
-                      committed.snapshot.health.capabilities["core_graphics"] as? Bool == true else {
-                    throw DaemonLifecycleRequestError.permissionDenied
+                await transactions.beginRecovery(reason: "daemon resume reconciliation")
+                do {
+                    committed = try await state.refresh()
+                    guard committed.snapshot.health.capabilities["accessibility"] as? Bool == true,
+                          committed.snapshot.health.capabilities["core_graphics"] as? Bool == true else {
+                        throw DaemonLifecycleRequestError.permissionDenied
+                    }
+                    let inventory = committed.snapshot.inventory
+                    try await auditCommittedIntent(inventory)
+                    guard let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id else {
+                        throw WorkspaceRequestError.displayRequired
+                    }
+                    let update = lifecycle.reconcile(inventory)
+                    try await applyLifecycleUpdate(update, displayID: displayID)
+                    try await reconcileExternalFocus(
+                        windowID: committed.snapshot.focusedWindowID, frontmostPID: nil, inventory: inventory,
+                        allowWhilePaused: true
+                    )
+                    _ = daemonLifecycle.resume()
+                    await transactions.endRecovery(success: true)
+                    result = .object(["paused": .bool(false), "reconciled": .bool(true)])
+                } catch {
+                    await transactions.endRecovery(success: false, failure: .init(code: .notReady, message: "resume reconciliation failed", retryable: true))
+                    throw error
                 }
-                let inventory = committed.snapshot.inventory
-                try await auditCommittedIntent(inventory)
-                guard let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id else {
-                    throw WorkspaceRequestError.displayRequired
+            case .transactionGet:
+                guard case .string(let id)? = request.params["transaction_id"] else { throw WorkspaceRequestError.transactionRequired }
+                result = json(try await transactions.status(id))
+            case .commandBatch:
+                let batch = try decodeParams(BatchRequest.self, from: .object(request.params))
+                guard !batch.commands.isEmpty, batch.commands.count <= 64,
+                      batch.commands.allSatisfy({ $0.method.isMutation && $0.method != .commandBatch }) else {
+                    throw WorkspaceRequestError.invalidBatch
                 }
-                let update = lifecycle.reconcile(inventory)
-                try await applyLifecycleUpdate(update, displayID: displayID)
-                try await reconcileExternalFocus(
-                    windowID: committed.snapshot.focusedWindowID, frontmostPID: nil, inventory: inventory,
-                    allowWhilePaused: true
-                )
-                _ = daemonLifecycle.resume()
-                result = .object(["paused": .bool(false), "reconciled": .bool(true)])
+                var values: [JSONValue] = [], stoppedAt: Int?
+                for (index, command) in batch.commands.enumerated() {
+                    let response = await routeDirect(.init(requestId: request.requestId, method: command.method, params: command.params))
+                    guard case .response(let value) = response else { stoppedAt = index; break }
+                    if let error = value.error {
+                        values.append(.object(["ok": .bool(false), "error": json(error)])); stoppedAt = index; break
+                    }
+                    values.append(.object(["ok": .bool(true), "result": value.result ?? .null]))
+                }
+                result = json(BatchResult(results: values, stoppedAt: stoppedAt))
             case .workspaceList:
                 result = workspaceList(await workspaces.snapshot())
             case .workspaceFocus:
@@ -311,6 +435,7 @@ actor DaemonHandler: WebSocketRequestHandler {
                 let displayID = try resolveDisplay(params.displayId, inventory: snapshot.inventory, workspaceState: before)
                 let mutation = try await workspaces.previewFocus(name: params.name, displayID: displayID)
                 var reconciled = mutation
+                reconciled.workspaceState = StartupIntentAudit.candidate(state: reconciled.workspaceState, inventory: snapshot.inventory)
                 try await reconcileWorkspaceFocus(
                     before: before,
                     after: &reconciled.workspaceState,
@@ -335,6 +460,33 @@ actor DaemonHandler: WebSocketRequestHandler {
                 try await workspaces.commitFocus(mutation)
                 await publishWorkspaceMutation(mutation, before: before, reason: .workspaceFocused)
                 result = workspaceMutation(mutation)
+            case .workspaceMoveWindowBulk:
+                let params = try decodeParams(WorkspaceMoveWindowParams.self, from: .object(request.params))
+                let ids = Array(Set(params.windowIds)).sorted()
+                guard !ids.isEmpty, ids.count <= 128, ids.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 256 }) else {
+                    throw WorkspaceRequestError.invalidBulk
+                }
+                try validateWindows(ids, inventory: snapshot.inventory)
+                let before = await workspaces.snapshot()
+                let windowsByID = Dictionary(uniqueKeysWithValues: snapshot.inventory.windows.map { ($0.id, $0) })
+                let displayID = ids.compactMap { windowsByID[$0]?.displayID }.first
+                let mutation = try await workspaces.previewMoveWindows(ids, to: params.workspace, displayID: displayID)
+                try await workspaces.commitFocus(mutation)
+                var failures: [BulkItemFailure] = []
+                do {
+                    var reconciled = mutation.workspaceState
+                    try await reconcileWorkspaceFocus(before: before, after: &reconciled, name: params.workspace, inventory: snapshot.inventory)
+                } catch let failure as WindowGeometryFailure {
+                    let itemFailure = TransactionFailure(
+                        code: ErrorCode(rawValue: failure.code.rawValue) ?? .internalError,
+                        message: failure.message, retryable: failure.code == .inventoryStale
+                    )
+                    failures = ids.map { .init(windowId: $0, failure: itemFailure) }
+                } catch {
+                    failures = ids.map { .init(windowId: $0, failure: .init(code: .internalError, message: "window operation failed", retryable: true)) }
+                }
+                await publishWorkspaceMutation(mutation, before: before, reason: .workspaceFocused)
+                result = json(BulkTransactionResult(windowIds: ids, failures: failures))
             case .workspaceMoveDisplay:
                 let params = try decodeParams(WorkspaceMoveDisplayParams.self, from: .object(request.params))
                 _ = try resolveDisplay(params.displayId, inventory: snapshot.inventory, workspaceState: await workspaces.snapshot())
@@ -427,6 +579,40 @@ actor DaemonHandler: WebSocketRequestHandler {
     private func errorResponse(_ id: String, _ code: ErrorCode, _ message: String) async -> String { encode(.response(.init(requestId: id, error: .init(code: code, message: message, retryable: false), stateVersion: await currentVersion()))) }
     private func encode(_ message: ServerMessage) -> String { String(data: (try? ProtocolCodec.encode(message)) ?? Data(), encoding: .utf8) ?? "{}" }
     private func json<T: Encodable>(_ value: T) -> JSONValue { (try? ProtocolCodec.decode(JSONValue.self, from: ProtocolCodec.encode(value))) ?? .null }
+    private func returnMode(_ value: JSONValue?) throws -> TransactionReturnMode {
+        guard let value else { return .completion }
+        guard case .string(let raw) = value, let mode = TransactionReturnMode(rawValue: raw) else {
+            throw WorkspaceRequestError.invalidReturnMode
+        }
+        return mode
+    }
+    private func mutationBarrier() -> TransactionFailure? {
+        do { try daemonLifecycle.requireMutationAllowed(); return nil }
+        catch DaemonLifecycleError.paused { return .init(code: .paused, message: "daemon is paused", retryable: true) }
+        catch { return .init(code: .notReady, message: "daemon is terminating") }
+    }
+    private func fullReconciliation() async throws {
+        let committed = try await state.refresh()
+        try await auditCommittedIntent(committed.snapshot.inventory)
+    }
+    private func submitInternal(
+        name: String, idempotencyKey: String? = nil, operation: @escaping @Sendable () async throws -> Void
+    ) async throws -> TransactionReceipt<JSONValue> {
+        try await transactions.submit(.init(
+            name: name, idempotencyKey: idempotencyKey, authorize: { [weak self] in await self?.mutationBarrier() },
+            operate: { [weak self] in
+                try await operation()
+                return .init(result: .object([:]), committedStateVersion: await self?.currentVersion() ?? 0)
+            }, escalate: { [weak self] in try await self?.fullReconciliation() },
+            reportInternalError: { [weak self] error in await self?.reportInternalTransactionError(name: name, error: error) }
+        ))
+    }
+    private func reportInternalTransactionError(name: String, error: String) {
+        internalErrorReporter?("internal transaction \(name) failed: \(String(error.prefix(512)))")
+    }
+    private func canonicalKey(_ request: Request) -> String {
+        "\(request.method.rawValue):\(JSONValue.object(request.params.filter { $0.key != "return_mode" }).canonicalForm)"
+    }
     private func requestID(in data: Data?) -> String? { data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["request_id"] as? String }
 
     private func decodeParams<T: Decodable>(_ type: T.Type, from value: JSONValue) throws -> T {
@@ -541,8 +727,7 @@ actor DaemonHandler: WebSocketRequestHandler {
         inventory: InventorySnapshot
     ) async throws {
         guard let workspace = state.workspaces.first(where: { $0.name == name }) else { return }
-        let preferred = workspace.focusedWindowID.map { [$0] } ?? []
-        let ids = preferred + workspace.windowIDs.reversed().filter { $0 != workspace.focusedWindowID }
+        let ids = Self.focusCandidateIDs(workspace: workspace, inventory: inventory)
         guard !ids.isEmpty else { return }
         var lastFailure: WindowGeometryFailure?
         for id in ids {
@@ -560,7 +745,8 @@ actor DaemonHandler: WebSocketRequestHandler {
         before: WMWorkspace.WorkspaceState,
         after: inout WMWorkspace.WorkspaceState,
         name: String,
-        inventory: InventorySnapshot
+        inventory: InventorySnapshot,
+        tolerateGeometryClamp: Bool = false
     ) async throws {
         let transition = WorkspaceTransitionPlan(before: before, after: after, destination: name)
         let incomingIDs = transition.incomingWindowIDs
@@ -626,7 +812,14 @@ actor DaemonHandler: WebSocketRequestHandler {
                 changed.append((window, current))
                 restoredIDs.insert(id)
             }
-            try await tileWorkspace(after, named: name, inventory: inventory, forceStack: incomingIsBSP && !incomingIDs.isDisjoint(with: after.parkedWindowFrames.keys))
+            if tolerateGeometryClamp {
+                await tileWorkspaceForObserver(
+                    after, named: name, inventory: inventory,
+                    forceStack: incomingIsBSP && !incomingIDs.isDisjoint(with: after.parkedWindowFrames.keys)
+                )
+            } else {
+                try await tileWorkspace(after, named: name, inventory: inventory, forceStack: incomingIsBSP && !incomingIDs.isDisjoint(with: after.parkedWindowFrames.keys))
+            }
             try await focusWorkspaceWindow(after, named: name, inventory: inventory)
             if incomingIsBSP { restoredIDs.formUnion(incomingIDs) }
             for id in restoredIDs { after.parkedWindowFrames.removeValue(forKey: id) }
@@ -720,6 +913,54 @@ actor DaemonHandler: WebSocketRequestHandler {
                 ))
             }
             throw error
+        }
+    }
+
+    private func tileWorkspaceForObserver(
+        _ state: WMWorkspace.WorkspaceState, named name: String, inventory: InventorySnapshot, forceStack: Bool
+    ) async {
+        guard let workspace = state[workspace: name], workspace.mode == .bsp,
+              let display = inventory.displays.first(where: { $0.id == workspace.displayID }) else { return }
+        let bounds = WorkspaceLayoutRect(
+            x: display.visibleFrame.x,
+            y: display.frame.y + display.frame.height - display.visibleFrame.y - display.visibleFrame.height,
+            width: display.visibleFrame.width, height: display.visibleFrame.height
+        )
+        let fallback = WorkspaceLayoutRect(
+            x: bounds.x + workspace.margin.left, y: bounds.y + workspace.margin.top,
+            width: max(0, bounds.width - workspace.margin.left - workspace.margin.right),
+            height: max(0, bounds.height - workspace.margin.top - workspace.margin.bottom)
+        )
+        let targets = forceStack || !workspace.canFit(in: bounds, minimumSizes: windowMinimumSizes)
+            ? Dictionary(uniqueKeysWithValues: workspace.windowIDs.map { ($0, fallback) })
+            : workspace.layout(in: bounds, minimumSizes: windowMinimumSizes)
+        for id in workspace.windowIDs {
+            guard let target = targets[id], target.width > 0, target.height > 0,
+                  observerGeometryReliability.shouldAttempt(
+                    windowID: id, requestedWidth: target.width, requestedHeight: target.height
+                  ),
+                  let window = try? resolveWindow(id, in: inventory.windows) else { continue }
+            do {
+                _ = try await geometry.set(window: window, params: layoutParams(id, target))
+                observerGeometryReliability.clear(windowID: id)
+            } catch let failure as WindowGeometryFailure {
+                guard failure.code == .geometryVerificationFailed, let observed = failure.observedFrame else {
+                    reportInternalTransactionError(name: "observer.geometry", error: String(describing: failure)); continue
+                }
+                let clamp = ObserverGeometryReliability.Clamp(
+                    requestedWidth: target.width, requestedHeight: target.height,
+                    observedWidth: observed.width, observedHeight: observed.height
+                )
+                if observerGeometryReliability.record(windowID: id, clamp: clamp) {
+                    windowMinimumSizes[id] = .init(width: observed.width, height: observed.height)
+                    reportInternalTransactionError(
+                        name: "observer.geometry",
+                        error: "window \(id) clamped requested \(target.width)x\(target.height) to \(observed.width)x\(observed.height)"
+                    )
+                }
+            } catch {
+                reportInternalTransactionError(name: "observer.geometry", error: String(describing: error))
+            }
         }
     }
 
@@ -839,6 +1080,10 @@ private enum WorkspaceRequestError: Error {
     case displayNotFound(String)
     case windowRequired
     case windowNotFound(String)
+    case transactionRequired
+    case invalidReturnMode
+    case invalidBatch
+    case invalidBulk
 
     var code: ErrorCode {
         switch self {
@@ -846,6 +1091,9 @@ private enum WorkspaceRequestError: Error {
         case .displayNotFound: .displayNotFound
         case .windowRequired: .windowNotFound
         case .windowNotFound: .windowNotFound
+        case .transactionRequired: .invalidParams
+        case .invalidReturnMode: .invalidParams
+        case .invalidBatch, .invalidBulk: .invalidParams
         }
     }
 
@@ -855,6 +1103,10 @@ private enum WorkspaceRequestError: Error {
         case .displayNotFound(let id): "unknown display: \(id)"
         case .windowRequired: "no focused window is available"
         case .windowNotFound(let id): "unknown window: \(id)"
+        case .transactionRequired: "transaction_id is required"
+        case .invalidReturnMode: "return_mode must be completion or instant"
+        case .invalidBatch: "batch requires 1...64 mutation commands"
+        case .invalidBulk: "bulk requires 1...128 valid window IDs"
         }
     }
 }
@@ -865,7 +1117,16 @@ private extension WMProtocol.Method {
     var isMutation: Bool {
         switch self {
         case .windowManage, .windowUnmanage, .windowFrameSet, .workspaceFocus, .workspaceMoveWindow,
-             .workspaceMoveDisplay, .workspaceSetMode, .inventoryRefresh, .daemonPause, .daemonResume: true
+             .workspaceMoveWindowBulk, .workspaceMoveDisplay, .workspaceSetMode, .inventoryRefresh,
+             .commandBatch, .daemonPause, .daemonResume: true
+        default: false
+        }
+    }
+
+    var isIdempotent: Bool {
+        switch self {
+        case .windowManage, .windowUnmanage, .windowFrameSet, .workspaceFocus, .workspaceMoveDisplay,
+             .workspaceSetMode, .inventoryRefresh: true
         default: false
         }
     }

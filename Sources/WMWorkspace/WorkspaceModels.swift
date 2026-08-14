@@ -253,6 +253,17 @@ public struct WorkspaceState: Codable, Equatable, Sendable {
         workspaces[index].focusedWindowID = windowID
     }
 
+    public mutating func removeWindow(_ windowID: WorkspaceWindowID, from workspaceName: WorkspaceName) {
+        guard let index = workspaces.firstIndex(where: { $0.name == workspaceName }) else { return }
+        workspaces[index].windowIDs.removeAll { $0 == windowID }
+        workspaces[index].bsp.root = workspaces[index].bsp.root?.removing(windowID: windowID)
+        if workspaces[index].focusedWindowID == windowID {
+            workspaces[index].focusedWindowID = workspaces[index].bsp.root?.windowIDs.last
+                ?? workspaces[index].windowIDs.last
+        }
+        parkedWindowFrames.removeValue(forKey: windowID)
+    }
+
     private enum CodingKeys: String, CodingKey {
         case workspaces, displays
         case focusedWorkspaceName = "focused_workspace_name"

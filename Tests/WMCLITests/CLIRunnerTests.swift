@@ -89,6 +89,25 @@ private final class MockClient: CLIWebSocketClient, @unchecked Sendable {
     #expect(await capture.stdout == [response + Data([0x0A])])
 }
 
+@Test func workspaceFocusReturnsCompletionReceiptDirectly() async throws {
+    let response = Data(#"{"type":"response","request_id":"req-1","ok":true,"result":{"transaction":{"transaction_id":"tx-1","phase":"committed","command":"workspace.focus","accepted_at":"2026-08-14T00:00:00Z","completed_at":"2026-08-14T00:00:01Z","coalesced_requests":0,"reconciliation_escalated":false},"result":{"effect_status":"verified"}},"state_version":2}"#.utf8)
+    let capture = Capture()
+    let client = MockClient(response: .init(json: response, ok: true))
+    let runner = CLIRunner(client: client, output: .init(
+        stdout: { data in Task { await capture.out(data) } },
+        stderr: { data in Task { await capture.err(data) } }
+    ), id: { "req-1" })
+
+    #expect(await runner.run(arguments: ["workspace", "focus", "T"]) == .success)
+    try await Task.sleep(for: .milliseconds(10))
+    let request = try #require(client.capturedRequests().first)
+    let json = try #require(JSONSerialization.jsonObject(with: request.0) as? [String: Any])
+    let params = try #require(json["params"] as? [String: Any])
+    #expect(json["method"] as? String == "workspace.focus")
+    #expect(params["return_mode"] == nil)
+    #expect(await capture.stdout == [response + Data([0x0A])])
+}
+
 @Test func invalidFrameNeverInvokesClient() async {
     let client = MockClient()
     let runner = CLIRunner(client: client, output: .init(stdout: { _ in }, stderr: { _ in }))

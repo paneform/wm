@@ -59,7 +59,7 @@ import WMWorkspace
             guard let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id else {
                 throw StartupError.noDisplay
             }
-            try await handler.auditCommittedIntent(inventory)
+            try await handler.auditStartupIntent(inventory)
             try await handler.reconcileObservedWindows(inventory, displayID: displayID)
         } catch {
             FileHandle.standardError.write(Data("inventory initialization failed: \(error)\n".utf8))
@@ -67,6 +67,9 @@ import WMWorkspace
         }
         let server = WebSocketServer(configuration: .init(host: configuration.host, port: configuration.port, allowedOrigins: Set(configuration.allowedOrigins)), handler: handler)
         await handler.installSender { text, client in try? server.send(text, to: client) }
+        await handler.installInternalErrorReporter { message in
+            FileHandle.standardError.write(Data("\(message)\n".utf8))
+        }
         do { try server.start() } catch {
             FileHandle.standardError.write(Data("daemon start failed: \(error)\n".utf8))
             return CLIExitCode.unavailable.rawValue
@@ -86,11 +89,9 @@ import WMWorkspace
                 }
                 guard await !handler.isPaused() else { return }
                 guard let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id else { return }
-                try await handler.reconcileObservedWindows(inventory, displayID: displayID)
-                try await handler.reconcileExternalFocus(
-                    windowID: committed.snapshot.focusedWindowID,
-                    frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier,
-                    inventory: inventory
+                try await handler.reconcilePeriodicObservation(
+                    inventory, displayID: displayID, focusedWindowID: committed.snapshot.focusedWindowID,
+                    frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier
                 )
         }
         let observation = InventoryObservationLoop(
@@ -104,8 +105,19 @@ import WMWorkspace
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
             queue: .main
-        ) { _ in
-            Task { try? await observe() }
+        ) { notification in
+            guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+            Task {
+                do {
+                    guard await !handler.isPaused() else { return }
+                    let committed = try await state.refresh()
+                    try await handler.reconcileApplicationActivation(
+                        frontmostPID: application.processIdentifier, inventory: committed.snapshot.inventory
+                    )
+                } catch {
+                    FileHandle.standardError.write(Data("application activation reconciliation failed: \(error)\n".utf8))
+                }
+            }
         }
         let stream = AsyncStream<Void> { continuation in
             signal(SIGINT, SIG_IGN)

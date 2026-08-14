@@ -122,6 +122,8 @@ public struct CLIParser: Sendable {
         case "workspace": return try parseWorkspace(rest)
         case "diagnostics": return try nestedRequest("diagnostics", child: "inventory", method: "diagnostics.inventory", rest)
         case "inventory": return try nestedRequest("inventory", child: "refresh", method: "inventory.refresh", rest)
+        case "transaction": return try parseTransaction(rest)
+        case "batch": return try parseBatch(rest)
         case "subscribe": return .subscribe(try parseSubscription(rest))
         case "start", "restart", "install-service", "uninstall-service":
             return try lifecycle(command, rest, allowsForce: false)
@@ -130,6 +132,21 @@ public struct CLIParser: Sendable {
         case "verify": return .verify(try parseURLOnly(rest))
         default: throw CLIParseError("unknown command: \(command)")
         }
+    }
+
+    private func parseTransaction(_ arguments: [String]) throws -> CLICommand {
+        guard arguments.first == "get", arguments.count >= 2 else { throw CLIParseError("expected 'transaction get ID'") }
+        return .request(method: "transaction.get", params: ["transaction_id": .string(arguments[1])],
+                        url: try parseURLOnly(Array(arguments.dropFirst(2))))
+    }
+
+    private func parseBatch(_ arguments: [String]) throws -> CLICommand {
+        guard let raw = arguments.first, arguments.count >= 1 else { throw CLIParseError("expected batch JSON") }
+        guard let data = raw.data(using: .utf8),
+              let value = try? JSONDecoder().decode(JSONValue.self, from: data),
+              case .array(let commands) = value else { throw CLIParseError("batch must be a JSON array") }
+        return .request(method: "command.batch", params: ["commands": .array(commands)],
+                        url: try parseURLOnly(Array(arguments.dropFirst())))
     }
 
     private func parseDaemon(_ arguments: [String]) throws -> DaemonConfiguration {
@@ -225,6 +242,7 @@ public struct CLIParser: Sendable {
         case "list": return try request("workspace.list", values)
         case "focus": return try parseWorkspaceFocus(values)
         case "move-window": return try parseWorkspaceMoveWindow(values)
+        case "move-window-bulk": return try parseWorkspaceMoveWindowBulk(values)
         case "move-display": return try parseWorkspaceMoveDisplay(values)
         case "mode": return try parseWorkspaceMode(values)
         default: throw CLIParseError("unknown workspace command: \(operation)")
@@ -266,6 +284,21 @@ public struct CLIParser: Sendable {
         return .request(method: "workspace.move_window", params: [
             "window_ids": .array(windowIDs), "workspace": .string(workspace),
         ], url: url)
+    }
+
+    private func parseWorkspaceMoveWindowBulk(_ arguments: [String]) throws -> CLICommand {
+        guard let workspace = arguments.first, !workspace.isEmpty else { throw CLIParseError("missing workspace name") }
+        var ids: [JSONValue] = [], url = defaultWMWebSocketURL, index = 1
+        while index < arguments.count {
+            if arguments[index] == "--url" { url = try webSocketURL(try value(after: &index, in: arguments)) }
+            else {
+                guard !arguments[index].hasPrefix("-") else { throw CLIParseError("unknown bulk argument: \(arguments[index])") }
+                ids.append(.string(arguments[index]))
+            }
+            index += 1
+        }
+        guard !ids.isEmpty, ids.count <= 128 else { throw CLIParseError("bulk requires 1...128 window IDs") }
+        return .request(method: "workspace.move_window_bulk", params: ["workspace": .string(workspace), "window_ids": .array(ids)], url: url)
     }
 
     private func parseWorkspaceMoveDisplay(_ arguments: [String]) throws -> CLICommand {

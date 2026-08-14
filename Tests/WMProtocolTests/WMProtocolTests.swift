@@ -44,6 +44,17 @@ final class WMProtocolTests: XCTestCase {
         try roundTrip(DiagnosticInventory(rawAxWindows: [ax], rawCgWindows: [cg], normalizedWindows: [window], rejectedAxWindows: [.init(window: ax, reasons: ["role"])], joinDecisions: [.init(axIndex: 0, cgIndex: 0, confidence: .exact, signals: ["pid"])], sourceHealth: ["core_graphics": .init(status: .healthy)]))
         try roundTrip(DisplayList(displays: [display])); try roundTrip(WindowList(windows: [window])); try roundTrip(DaemonPing(sessionId: "session", daemonVersion: "dev", ready: true, currentSequence: 43, stateVersion: 8))
         try roundTrip(EntityDelta(added: [window], updated: [], removed: ["window:old"])); try roundTrip(Invalidation(topic: .windowInventory, stateVersion: 8))
+        let transaction = TransactionMetadata(transactionId: "transaction:1", phase: .queued, command: "workspace.focus", acceptedAt: Date(timeIntervalSince1970: 1), coalescedRequests: 2, reconciliationEscalated: true)
+        try roundTrip(transaction)
+        try roundTrip(TransactionQueryMetadata(pendingTransactions: [transaction], recovery: .init(active: true, reason: "topology", queuedTransactions: 1)))
+        try roundTrip(BatchRequest(commands: [.init(method: .workspaceFocus, params: ["name": .string("T")])]))
+        try roundTrip(BatchResult(results: [.object(["ok": .bool(true)])]))
+    }
+
+    func testCanonicalJSONIgnoresObjectInsertionOrderAndNormalizesNegativeZero() {
+        let first = JSONValue.object(["nested": .object(["b": .number(-0.0), "a": .string("x")])])
+        let second = JSONValue.object(["nested": .object(["a": .string("x"), "b": .number(0.0)])])
+        XCTAssertEqual(first.canonicalForm, second.canonicalForm)
     }
 
     func testWireNamesAndNullsMatchContract() throws {

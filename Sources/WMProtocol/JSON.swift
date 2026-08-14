@@ -32,6 +32,22 @@ public enum JSONValue: Codable, Equatable, Sendable {
     }
 }
 
+public extension JSONValue {
+    var canonicalForm: String {
+        switch self {
+        case .null: "null"
+        case .bool(let value): value ? "true" : "false"
+        case .number(let value): value == 0 ? "0" : String(value.bitPattern, radix: 16)
+        case .string(let value): "s\(value.utf8.count):\(value)"
+        case .array(let values): "[" + values.map(\.canonicalForm).joined(separator: ",") + "]"
+        case .object(let values):
+            "{" + values.keys.sorted().map { key in
+                "\(key.utf8.count):\(key)=\(values[key]!.canonicalForm)"
+            }.joined(separator: ",") + "}"
+        }
+    }
+}
+
 public enum ProtocolCodec {
     public static func makeEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()

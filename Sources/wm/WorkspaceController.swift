@@ -22,6 +22,12 @@ actor WorkspaceController {
 
     func snapshot() -> WMWorkspace.WorkspaceState { state }
 
+    func commit(_ candidate: WMWorkspace.WorkspaceState) throws {
+        guard candidate != state else { return }
+        try store.save(candidate)
+        state = candidate
+    }
+
     func focus(name: String, displayID: String?) throws -> WMWorkspace.WorkspaceMutationResult {
         try commit { try $0.focusWorkspace(named: name, displayID: displayID) }
     }

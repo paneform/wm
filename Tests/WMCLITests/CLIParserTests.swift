@@ -30,6 +30,9 @@ import Testing
         (["observe", "workspace", "T"], "observe.workspace"),
         (["diagnostics", "inventory"], "diagnostics.inventory"),
         (["inventory", "refresh"], "inventory.refresh"),
+        (["transaction", "get", "transaction:1"], "transaction.get"),
+        (["batch", #"[{"method":"workspace.focus","params":{"name":"T"}}]"#], "command.batch"),
+        (["workspace", "move-window-bulk", "T", "window:1"], "workspace.move_window_bulk"),
     ]
     for (arguments, expected) in mappings {
         guard case .request(let method, _, let url) = try parser.parse(arguments) else {
