@@ -13,13 +13,16 @@ import WMWorkspace
     static func main() async {
         let arguments = Array(CommandLine.arguments.dropFirst())
         do {
-            let command = try CLIParser().parse(arguments)
-            switch command {
+            let invocation = try CLIParser().parseInvocation(arguments)
+            let output = CLIOutput(
+                stdout: { FileHandle.standardOutput.write($0) },
+                stderr: { FileHandle.standardError.write($0) }
+            ).processing(pretty: invocation.pretty)
+            switch invocation.command {
             case .daemon(let configuration): exit(await runDaemon(configuration))
-            case .verify(let url): exit(await verify(url: url))
+            case .verify(let url): exit(await verify(url: url, output: output))
             default:
-                let output = CLIOutput(stdout: { FileHandle.standardOutput.write($0) }, stderr: { FileHandle.standardError.write($0) })
-                exit(try await CLIRunner(client: ConcreteWebSocketClient(), output: output).run(command).rawValue)
+                exit(try await CLIRunner(client: ConcreteWebSocketClient(), output: output).run(invocation.command).rawValue)
             }
         } catch {
             FileHandle.standardError.write(Data("{\"ok\":false,\"error\":{\"code\":\"usage\",\"message\":\"\(escaped(String(describing: error)))\"}}\n".utf8))
@@ -131,7 +134,7 @@ import WMWorkspace
         return shutdownFailures.isEmpty ? CLIExitCode.success.rawValue : CLIExitCode.commandFailed.rawValue
     }
 
-    private static func verify(url: URL) async -> Int32 {
+    private static func verify(url: URL, output: CLIOutput) async -> Int32 {
         do {
             let client = WebSocketClient(url: url)
             try client.connect()
@@ -160,7 +163,7 @@ import WMWorkspace
             let unsubscribe = ClientMessage.unsubscribe(.init(requestId: "verify-unsubscribe", subscriptionId: subscriptionID))
             try client.send(text: String(data: try ProtocolCodec.encode(unsubscribe), encoding: .utf8)!)
             guard case .response(let unsubscribed) = try ProtocolCodec.decode(ServerMessage.self, from: Data(try client.receive().utf8)), unsubscribed.isSuccess else { throw VerifyError.expectedUnsubscribeResponse }
-            FileHandle.standardOutput.write(Data("{\"ok\":true,\"verified\":[\"welcome\",\"request_response\",\"subscribe_initial_event\",\"refresh_event\",\"unsubscribe\"]}\n".utf8))
+            output.stdout(Data("{\"ok\":true,\"verified\":[\"welcome\",\"request_response\",\"subscribe_initial_event\",\"refresh_event\",\"unsubscribe\"]}\n".utf8))
             return 0
         } catch {
             FileHandle.standardError.write(Data("{\"ok\":false,\"error\":\"\(escaped(String(describing: error)))\"}\n".utf8))

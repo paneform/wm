@@ -74,6 +74,16 @@ public enum CLICommand: Sendable, Equatable {
     case verify(URL)
 }
 
+public struct CLIInvocation: Sendable, Equatable {
+    public let command: CLICommand
+    public let pretty: Bool
+
+    public init(command: CLICommand, pretty: Bool = false) {
+        self.command = command
+        self.pretty = pretty
+    }
+}
+
 public struct CLIParseError: Error, Sendable, Equatable, CustomStringConvertible {
     public let message: String
 
@@ -86,6 +96,14 @@ public struct CLIParseError: Error, Sendable, Equatable, CustomStringConvertible
 
 public struct CLIParser: Sendable {
     public init() {}
+
+    public func parseInvocation(_ arguments: [String]) throws -> CLIInvocation {
+        let prettyCount = arguments.count(where: { $0 == "--pretty" })
+        guard prettyCount < 2 else { throw CLIParseError("duplicate --pretty flag") }
+        let pretty = prettyCount == 1
+        let command = try parse(arguments.filter { $0 != "--pretty" })
+        return CLIInvocation(command: command, pretty: pretty)
+    }
 
     public func parse(_ arguments: [String]) throws -> CLICommand {
         guard let command = arguments.first else { throw CLIParseError("missing command") }

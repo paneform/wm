@@ -121,3 +121,35 @@ private final class MockClient: CLIWebSocketClient, @unchecked Sendable {
     try await Task.sleep(for: .milliseconds(10))
     #expect(await capture.stdout == [event + Data([0x0A])])
 }
+
+@Test func prettyFlagFormatsEveryStdoutMessageThroughOutputPipeline() async throws {
+    let capture = Capture()
+    let events = [
+        Data(#"{"type":"event","sequence":1}"#.utf8),
+        Data(#"{"type":"event","sequence":2}"#.utf8),
+    ]
+    let runner = CLIRunner(client: MockClient(events: events), output: .init(
+        stdout: { data in Task { await capture.out(data) } },
+        stderr: { data in Task { await capture.err(data) } }
+    ), id: { "fixed" })
+
+    #expect(await runner.run(arguments: ["subscribe", "window.inventory", "--pretty"]) == .success)
+    try await Task.sleep(for: .milliseconds(10))
+    let stdout = await capture.stdout
+    #expect(stdout.count == 2)
+    #expect(stdout.allSatisfy { String(decoding: $0, as: UTF8.self).contains("\n  \"sequence\"") })
+    #expect(stdout.allSatisfy { $0.last == 0x0A })
+}
+
+@Test func outputPipelinePassesNonJSONThroughUnchanged() async throws {
+    let capture = Capture()
+    let output = CLIOutput(
+        stdout: { data in Task { await capture.out(data) } },
+        stderr: { data in Task { await capture.err(data) } }
+    ).processing(pretty: true)
+    let data = Data("not json\n".utf8)
+
+    output.stdout(data)
+    try await Task.sleep(for: .milliseconds(10))
+    #expect(await capture.stdout == [data])
+}

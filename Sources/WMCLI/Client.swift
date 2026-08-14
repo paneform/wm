@@ -156,6 +156,19 @@ public struct CLIOutput: Sendable {
         self.stdout = stdout
         self.stderr = stderr
     }
+
+    public func processing(pretty: Bool) -> CLIOutput {
+        guard pretty else { return self }
+        return CLIOutput(stdout: { data in stdout(prettyJSON(data)) }, stderr: stderr)
+    }
+}
+
+private func prettyJSON(_ data: Data) -> Data {
+    guard let value = try? JSONSerialization.jsonObject(with: data),
+          var formatted = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+    else { return data }
+    if formatted.last != 0x0A { formatted.append(0x0A) }
+    return formatted
 }
 
 public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
@@ -178,7 +191,9 @@ public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
 
     public func run(arguments: [String]) async -> CLIExitCode {
         do {
-            return try await run(CLIParser().parse(arguments))
+            let invocation = try CLIParser().parseInvocation(arguments)
+            return try await CLIRunner(client: client, output: output.processing(pretty: invocation.pretty), id: id)
+                .run(invocation.command)
         } catch let error as CLIParseError {
             writeError(code: "usage", message: error.message)
             return .usage

@@ -2,6 +2,16 @@ import Foundation
 import Testing
 @testable import WMCLI
 
+@Test func parsesPrettyAsGlobalFlag() throws {
+    let parser = CLIParser()
+    #expect(try parser.parseInvocation(["--pretty", "state"]) == .init(
+        command: .request(method: "state.get", params: [:], url: defaultWMWebSocketURL), pretty: true
+    ))
+    #expect(try parser.parseInvocation(["state", "--pretty"]).pretty)
+    #expect(try parser.parseInvocation(["state"]).pretty == false)
+    #expect(throws: CLIParseError.self) { try parser.parseInvocation(["--pretty", "state", "--pretty"]) }
+}
+
 @Test func documentedCommandsMapToCanonicalMethods() throws {
     let parser = CLIParser()
     let mappings: [([String], String)] = [
