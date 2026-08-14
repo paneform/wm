@@ -84,8 +84,10 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
         let strategies = Array(WindowGeometryStrategy.all.prefix(params.attempts))
         for (index, strategy) in strategies.enumerated() {
             do {
-                if strategy == .delayedPositionThenSize { try await adapter.delay() }
-                for component in strategy.components { try await adapter.write(component, frame: requested, to: handle) }
+                for step in strategy.steps {
+                    if step.delayed { try await adapter.delay() }
+                    try await adapter.write(step.component, frame: requested, to: handle)
+                }
             } catch {
                 throw mapAdapter(error, defaultCode: .geometryRejected)
             }
@@ -162,12 +164,16 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
 }
 
 private extension WindowGeometryStrategy {
-    static let all: [Self] = [.positionThenSize, .sizeThenPosition, .delayedPositionThenSize]
+    static let all: [Self] = [.positionThenSize, .sizeThenPosition, .delayedPositionThenSize, .convergedSizeThenPosition]
 
-    var components: [WindowGeometryComponent] {
+    var steps: [(component: WindowGeometryComponent, delayed: Bool)] {
         switch self {
-        case .positionThenSize, .delayedPositionThenSize: [.position, .size]
-        case .sizeThenPosition: [.size, .position]
+        case .positionThenSize: [(.position, false), (.size, false)]
+        case .sizeThenPosition: [(.size, false), (.position, false)]
+        case .delayedPositionThenSize: [(.position, true), (.size, false)]
+        case .convergedSizeThenPosition: [
+            (.size, false), (.position, true), (.size, true), (.position, true),
+        ]
         }
     }
 }

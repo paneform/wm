@@ -10,9 +10,13 @@ final class InventoryTests: XCTestCase {
 
         XCTAssertEqual(resolveFocusedWindowID(windows: [other, secondary, main], frontmostPID: 2), "main")
 
-        var explicitlyFocused = other
+        var staleFocused = other
+        staleFocused.focused = true
+        XCTAssertEqual(resolveFocusedWindowID(windows: [staleFocused, main], frontmostPID: 2), "main")
+
+        var explicitlyFocused = secondary
         explicitlyFocused.focused = true
-        XCTAssertEqual(resolveFocusedWindowID(windows: [explicitlyFocused, main], frontmostPID: 2), "other")
+        XCTAssertEqual(resolveFocusedWindowID(windows: [main, explicitlyFocused], frontmostPID: 2), "secondary")
     }
     func testDuplicateAndZeroCGIDsAreSafeAndExplained() {
         let frame = InventoryRect(x: 10, y: 20, width: 800, height: 600)

@@ -55,6 +55,7 @@ import WMWorkspace
                 guard let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id else { return }
                 let ids = inventory.windows.filter { $0.classification == .normal }.map(\.id)
                 _ = try await workspaces.reconcileObservedWindows(ids, displayID: displayID)
+                try await handler.reconcileExternalFocus(windowID: committed.snapshot.focusedWindowID, inventory: inventory)
             },
             report: { error in
                 FileHandle.standardError.write(Data("automatic inventory refresh failed: \(error)\n".utf8))

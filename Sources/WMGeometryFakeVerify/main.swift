@@ -28,12 +28,12 @@ import WMProtocol
 
         await service.reconcile(windows: [])
         _ = try await service.get(window: window)
-        guard await adapter.createdHandles == 2 else { throw VerificationError.invalidation }
+        guard await adapter.createdHandles == 1 else { throw VerificationError.retention }
         print("geometry fake verification passed")
     }
 }
 
-private enum VerificationError: Error { case continuity, inventory, invalidation }
+private enum VerificationError: Error { case continuity, inventory, retention }
 
 private actor FakeAdapter: WindowGeometryAdapter {
     private var frame: InventoryRect
@@ -41,7 +41,7 @@ private actor FakeAdapter: WindowGeometryAdapter {
     private(set) var createdHandles = 0
 
     init(frame: InventoryRect) { self.frame = frame }
-    func reconcile(windows: [NormalizedWindow]) { handles = handles.filter { Set(windows.map(\.id)).contains($0.key) } }
+    func reconcile(windows: [NormalizedWindow]) {}
     func resolve(_ window: NormalizedWindow) -> WindowGeometryHandle {
         if let handle = handles[window.id] { return handle }
         createdHandles += 1

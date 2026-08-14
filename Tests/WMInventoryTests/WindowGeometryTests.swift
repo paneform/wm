@@ -41,6 +41,17 @@ func testSecondStrategyCanSucceed() async throws {
     XCTAssertEqual(writes, [.position, .size, .size, .position])
 }
 
+func testConvergedStrategyReappliesPositionAfterWindowReanchors() async throws {
+    let adapter = ReanchoringGeometryAdapter(frame: initialFrame)
+    let result = try await WindowGeometryService(adapter: adapter).set(
+        window: window,
+        params: .init(windowID: window.id, frame: requestedFrame, attempts: 4)
+    )
+
+    XCTAssertEqual(result.strategy, .convergedSizeThenPosition)
+    XCTAssertEqual(result.observedFrame, requestedFrame)
+}
+
 func testUnresolvedIdentityNeverWrites() async throws {
     for error in [WindowGeometryAdapterError.notFound, .stale, .ambiguous] {
         let adapter = FakeGeometryAdapter(frame: initialFrame, resolveError: error)
@@ -77,7 +88,7 @@ func testSequentialCommandsReuseExplicitHandleAfterFrameChanges() async throws {
     XCTAssertEqual(createdHandles, 1)
 }
 
-func testReconcileInvalidatesDisappearedWindowHandle() async throws {
+func testReconcileRetainsHandleAcrossTemporaryInventoryOmission() async throws {
     let adapter = FakeGeometryAdapter(frame: initialFrame)
     let service = WindowGeometryService(adapter: adapter)
     _ = try await service.get(window: window)
@@ -85,7 +96,7 @@ func testReconcileInvalidatesDisappearedWindowHandle() async throws {
     _ = try await service.get(window: window)
 
     let createdHandles = await adapter.createdHandles
-    XCTAssertEqual(createdHandles, 2)
+    XCTAssertEqual(createdHandles, 1)
 }
 }
 
@@ -117,8 +128,7 @@ private actor FakeGeometryAdapter: WindowGeometryAdapter {
     }
 
     func reconcile(windows: [NormalizedWindow]) {
-        let ids = Set(windows.map(\.id))
-        handles = handles.filter { ids.contains($0.key) }
+        // Session handles survive temporary scan omissions.
     }
 
     func validateControllability(of handle: WindowGeometryHandle) {}
@@ -131,6 +141,30 @@ private actor FakeGeometryAdapter: WindowGeometryAdapter {
     }
 
     func delay() {}
+}
+
+private actor ReanchoringGeometryAdapter: WindowGeometryAdapter {
+    private var frame: InventoryRect
+    private var writes = 0
+
+    init(frame: InventoryRect) { self.frame = frame }
+    func resolve(_ window: NormalizedWindow) -> WindowGeometryHandle { .init(rawValue: window.id) }
+    func validateControllability(of handle: WindowGeometryHandle) {}
+    func readFrame(of handle: WindowGeometryHandle) -> InventoryRect { frame }
+    func delay() {}
+
+    func write(_ component: WindowGeometryComponent, frame requested: InventoryRect, to handle: WindowGeometryHandle) {
+        writes += 1
+        guard writes >= 7 else { return }
+        switch component {
+        case .size:
+            frame.width = requested.width
+            frame.height = requested.height
+        case .position:
+            frame.x = requested.x
+            frame.y = requested.y
+        }
+    }
 }
 
 private let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)

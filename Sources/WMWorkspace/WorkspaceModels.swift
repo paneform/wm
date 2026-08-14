@@ -243,6 +243,16 @@ public struct WorkspaceState: Codable, Equatable, Sendable {
         workspaces.first { $0.name == name }
     }
 
+    public func workspaceName(containing windowID: WorkspaceWindowID) -> WorkspaceName? {
+        workspaces.first { $0.windowIDs.contains(windowID) }?.name
+    }
+
+    public mutating func setFocusedWindow(_ windowID: WorkspaceWindowID, in workspaceName: WorkspaceName) {
+        guard let index = workspaces.firstIndex(where: { $0.name == workspaceName }),
+              workspaces[index].windowIDs.contains(windowID) else { return }
+        workspaces[index].focusedWindowID = windowID
+    }
+
     private enum CodingKeys: String, CodingKey {
         case workspaces, displays
         case focusedWorkspaceName = "focused_workspace_name"

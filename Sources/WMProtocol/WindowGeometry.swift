@@ -50,6 +50,7 @@ public enum WindowGeometryStrategy: String, Codable, Equatable, Sendable {
     case positionThenSize = "position_then_size"
     case sizeThenPosition = "size_then_position"
     case delayedPositionThenSize = "delayed_position_then_size"
+    case convergedSizeThenPosition = "converged_size_then_position"
 }
 
 public struct WindowFrameSetResult: Codable, Equatable, Sendable {

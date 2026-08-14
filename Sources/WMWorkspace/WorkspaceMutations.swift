@@ -25,13 +25,14 @@ extension WorkspaceState {
             var modified = Set<WorkspaceName>()
             var deleted: [WorkspaceName] = []
             state.revealAndFocus(name, modified: &modified, deleted: &deleted)
-            return (WorkspaceMutationResult(workspaceState: state, modifiedWorkspaces: modified.sorted(), deletedWorkspaces: deleted.sorted()), created)
+            return (WorkspaceMutationResult(workspaceState: state, modifiedWorkspaces: modified.sorted(), deletedWorkspaces: deleted.sorted()), !modified.isEmpty || !deleted.isEmpty)
         }
     }
 
     public mutating func moveWindows(
         _ windowIDs: [WorkspaceWindowID],
-        to destinationName: WorkspaceName
+        to destinationName: WorkspaceName,
+        displayID: WorkspaceDisplayID? = nil
     ) throws -> WorkspaceMutationResult {
         try mutate { state in
             guard !windowIDs.isEmpty else {
@@ -50,7 +51,7 @@ extension WorkspaceState {
                 return source.name
             }
             if state.index(of: destinationName) == nil {
-                guard let sourceDisplay = state[workspace: sources[0]]?.displayID else {
+                guard let sourceDisplay = displayID ?? state[workspace: sources[0]]?.displayID else {
                     throw WorkspaceMutationError.windowNotFound(windowIDs[0])
                 }
                 state.workspaces.append(.init(name: destinationName, origin: .runtime, displayID: sourceDisplay))
@@ -162,27 +163,11 @@ extension WorkspaceState {
         try mutate { state in
             let observed = Set(observedWindowIDs)
             let assigned = Set(state.workspaces.flatMap(\.windowIDs))
-            let removed = assigned.subtracting(observed)
             let added = observed.subtracting(assigned).sorted()
             var modified: Set<WorkspaceName> = []
 
-            for index in state.workspaces.indices {
-                let original = state.workspaces[index].windowIDs
-                let retained = original.filter { observed.contains($0) }
-                guard retained != original else { continue }
-                state.workspaces[index].windowIDs = retained
-                for id in original where !observed.contains(id) {
-                    state.workspaces[index].bsp.root = state.workspaces[index].bsp.root?.removing(windowID: id)
-                }
-                if !retained.contains(state.workspaces[index].focusedWindowID ?? "") {
-                    state.workspaces[index].focusedWindowID = retained.last
-                }
-                modified.insert(state.workspaces[index].name)
-            }
-            for id in removed { state.parkedWindowFrames.removeValue(forKey: id) }
-
             if !added.isEmpty {
-                let destination = state.focusedWorkspaceName ?? "1"
+                let destination = "1"
                 if state.index(of: destination) == nil {
                     state.workspaces.append(.init(name: destination, origin: .configured, displayID: defaultDisplayID))
                 }
@@ -192,15 +177,12 @@ extension WorkspaceState {
                 modified.insert(destination)
             }
 
-            var deleted: [WorkspaceName] = []
-            state.deleteEmptyParkedRuntimeWorkspaces(modified: &modified, deleted: &deleted)
             return (
                 WorkspaceMutationResult(
                     workspaceState: state,
-                    modifiedWorkspaces: modified.sorted(),
-                    deletedWorkspaces: deleted.sorted()
+                    modifiedWorkspaces: modified.sorted()
                 ),
-                !removed.isEmpty || !added.isEmpty
+                !added.isEmpty
             )
         }
     }
@@ -220,9 +202,14 @@ private extension WorkspaceState {
             throw WorkspaceMutationError.invalidState(error.issues)
         }
         var candidate = self
-        let (result, changed) = try operation(&candidate)
+        let (operationResult, changed) = try operation(&candidate)
         do { try candidate.validate() } catch let error as WorkspaceValidationError {
             throw WorkspaceMutationError.invalidState(error.issues)
+        }
+        var result = operationResult
+        if var mutation = result as? WorkspaceMutationResult {
+            mutation.workspaceState = candidate
+            result = mutation as! T
         }
         if changed { self = candidate }
         return result
@@ -301,6 +288,9 @@ private extension WorkspaceState {
             }
             modified.remove(name)
             deleted.append(name)
+        }
+        for displayID in displays.keys where displays[displayID]?.previousWorkspaceName == displays[displayID]?.visibleWorkspaceName {
+            displays[displayID]?.previousWorkspaceName = nil
         }
     }
 }

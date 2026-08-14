@@ -18,6 +18,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     private var workspaceSubscriptions: [UUID: [String: Set<EventTopic>]] = [:]
     private var workspaceSequence: UInt64 = 0
     private var windowMinimumSizes: [String: WorkspaceMinimumSize] = [:]
+    private var sessionWindows: [String: NormalizedWindow] = [:]
     private var sender: (@Sendable (String, UUID) -> Void)?
 
     init(state: State, workspaces: WorkspaceController) {
@@ -27,6 +28,19 @@ actor DaemonHandler: WebSocketRequestHandler {
     }
 
     func installSender(_ sender: @escaping @Sendable (String, UUID) -> Void) { self.sender = sender }
+
+    func reconcileExternalFocus(windowID: String?, inventory: InventorySnapshot) async throws {
+        retainSessionWindows(inventory.windows)
+        guard let windowID else { return }
+        let before = await workspaces.snapshot()
+        guard let name = before.workspaceName(containing: windowID), name != before.focusedWorkspaceName else { return }
+        let displayID = before[workspace: name]?.displayID
+        var mutation = try await workspaces.previewFocus(name: name, displayID: displayID)
+        mutation.workspaceState.setFocusedWindow(windowID, in: name)
+        try await reconcileWorkspaceFocus(before: before, after: &mutation.workspaceState, name: name, inventory: inventory)
+        try await workspaces.commitFocus(mutation)
+        await publishWorkspaceMutation(mutation, before: before, reason: .workspaceFocused)
+    }
 
     func connected(clientID: UUID) async -> [String] {
         guard let committed = try? await state.state() else { return [] }
@@ -119,6 +133,7 @@ actor DaemonHandler: WebSocketRequestHandler {
             if request.method == .inventoryRefresh { _ = await router.route(.init(requestID: request.requestId, method: request.method.rawValue)) }
             var committed = try await state.state()
             let snapshot = committed.snapshot
+            retainSessionWindows(snapshot.inventory.windows)
             await geometry.reconcile(windows: snapshot.inventory.windows)
             let result: JSONValue
             switch request.method {
@@ -127,6 +142,10 @@ actor DaemonHandler: WebSocketRequestHandler {
             case .healthGet: result = json(protocolHealth(snapshot.health))
             case .displayList: result = json(["displays": snapshot.inventory.displays])
             case .windowList: result = json(["windows": snapshot.inventory.windows])
+            case .observeWindow:
+                committed = try await state.refresh()
+                retainSessionWindows(committed.snapshot.inventory.windows)
+                result = observeWindows(params: request.params, inventory: committed.snapshot.inventory, workspaceState: await workspaces.snapshot())
             case .windowFrameGet:
                 let params = try decodeParams(WindowFrameGetParams.self, from: .object(request.params))
                 let window = try resolveWindow(params.windowID, in: snapshot.inventory.windows)
@@ -171,13 +190,16 @@ actor DaemonHandler: WebSocketRequestHandler {
                 result = workspaceMutation(reconciled)
             case .workspaceMoveWindow:
                 let params = try decodeParams(WorkspaceMoveWindowParams.self, from: .object(request.params))
+                if params.windowIds.isEmpty { committed = try await state.refresh() }
+                let currentSnapshot = committed.snapshot
                 var ids = params.windowIds
-                if ids.isEmpty, let focused = snapshot.focusedWindowID { ids = [focused] }
+                if ids.isEmpty, let focused = currentSnapshot.focusedWindowID { ids = [focused] }
                 guard !ids.isEmpty else { throw WorkspaceRequestError.windowRequired }
-                try validateWindows(ids, inventory: snapshot.inventory)
+                try validateWindows(ids, inventory: currentSnapshot.inventory)
                 let before = await workspaces.snapshot()
-                var mutation = try await workspaces.previewMoveWindows(ids, to: params.workspace)
-                try await reconcileWorkspaceFocus(before: before, after: &mutation.workspaceState, name: params.workspace, inventory: snapshot.inventory)
+                let liveDisplayID = ids.compactMap { id in currentSnapshot.inventory.windows.first { $0.id == id }?.displayID }.first
+                var mutation = try await workspaces.previewMoveWindows(ids, to: params.workspace, displayID: liveDisplayID)
+                try await reconcileWorkspaceFocus(before: before, after: &mutation.workspaceState, name: params.workspace, inventory: currentSnapshot.inventory)
                 try await workspaces.commitFocus(mutation)
                 await publishWorkspaceMutation(mutation, before: before, reason: .workspaceFocused)
                 result = workspaceMutation(mutation)
@@ -274,10 +296,56 @@ actor DaemonHandler: WebSocketRequestHandler {
     }
 
     private func resolveWindow(_ id: String, in windows: [NormalizedWindow]) throws -> NormalizedWindow {
-        guard let window = windows.first(where: { $0.id == id }) else {
+        guard let window = windows.first(where: { $0.id == id }) ?? sessionWindows[id] else {
             throw WindowGeometryFailure(code: .windowNotFound, message: "unknown window: \(id)")
         }
         return window
+    }
+
+    private func retainSessionWindows(_ windows: [NormalizedWindow]) {
+        for window in windows where window.classification == .normal {
+            sessionWindows[window.id] = window
+        }
+    }
+
+    private func observeWindows(
+        params: [String: JSONValue],
+        inventory: InventorySnapshot,
+        workspaceState: WMWorkspace.WorkspaceState
+    ) -> JSONValue {
+        let liveByID = Dictionary(uniqueKeysWithValues: inventory.windows.map { ($0.id, $0) })
+        let ids = Set(liveByID.keys).union(sessionWindows.keys).sorted()
+        let reports = ids.compactMap { id -> JSONValue? in
+            let observed = liveByID[id]
+            let expected = sessionWindows[id]
+            guard matchesObserveFilter(params, id: id, window: observed ?? expected) else { return nil }
+            let workspace = workspaceState.workspaces.first { $0.windowIDs.contains(id) }
+            let parked = workspaceState.parkedWindowFrames[id]
+            return .object([
+                "window_id": .string(id),
+                "observed": observed.map(json) ?? .null,
+                "expected": expected.map(json) ?? .null,
+                "workspace": workspace.map { .string($0.name) } ?? .null,
+                "workspace_visible": workspace.map { .bool($0.visible) } ?? .null,
+                "expected_parked": .bool(parked != nil),
+                "restore_frame": parked.map(json) ?? .null,
+                "session_retained": .bool(expected != nil),
+            ])
+        }
+        return .object([
+            "focused_window_id": inventory.windows.first(where: { $0.focused == true }).map { .string($0.id) } ?? .null,
+            "focused_workspace_name": workspaceState.focusedWorkspaceName.map(JSONValue.string) ?? .null,
+            "windows": .array(reports),
+        ])
+    }
+
+    private func matchesObserveFilter(_ params: [String: JSONValue], id: String, window: NormalizedWindow?) -> Bool {
+        guard let window else { return false }
+        if case .number(let pid)? = params["pid"], window.pid != Int32(pid) { return false }
+        if case .string(let value)? = params["window_id"], id != value { return false }
+        if case .string(let value)? = params["app"], !window.appName.localizedCaseInsensitiveContains(value) { return false }
+        if case .string(let value)? = params["exe"], !(window.executablePath ?? "").localizedCaseInsensitiveContains(value) { return false }
+        return true
     }
 
     private func resolveDisplay(
@@ -334,7 +402,8 @@ actor DaemonHandler: WebSocketRequestHandler {
     ) async throws {
         let incomingIDs = Set(after[workspace: name]?.windowIDs ?? [])
         let outgoingIDs = Set(before.focusedWorkspaceName.flatMap { before[workspace: $0]?.windowIDs } ?? [])
-        let windowsByID = Dictionary(uniqueKeysWithValues: inventory.windows.map { ($0.id, $0) })
+        retainSessionWindows(inventory.windows)
+        let windowsByID = sessionWindows
         let previousParkedFrames = after.parkedWindowFrames
         var changed: [(NormalizedWindow, InventoryRect)] = []
         do {
@@ -348,22 +417,21 @@ actor DaemonHandler: WebSocketRequestHandler {
             let outgoingDisplay = inventory.displays.first { $0.id == outgoingDisplayID }
                 ?? inventory.displays.first(where: \.isPrimary)
                 ?? inventory.displays.first
-            let rightEdge = outgoingDisplay.map { $0.frame.x + $0.frame.width } ?? 0
-            let bottomEdge = outgoingDisplay.map { $0.frame.y + $0.frame.height } ?? 0
-            for (index, id) in outgoingIDs.subtracting(incomingIDs).sorted().enumerated() {
+            let displayFrames = axDisplayFrames(inventory.displays)
+            for id in outgoingIDs.subtracting(incomingIDs).sorted() {
                 guard let window = windowsByID[id], let original = window.frame else { continue }
-                let parked = InventoryRect(
-                    x: rightEdge + 100 + Double(index * 40),
-                    y: bottomEdge + 100 + Double(index * 40),
-                    width: original.width,
-                    height: original.height
-                )
+                guard let outgoingDisplay,
+                      let outgoingFrame = displayFrames[outgoingDisplay.id],
+                      let parking = WindowParkingPlan(
+                        displayFrame: outgoingFrame,
+                        otherDisplayFrames: displayFrames.filter { $0.key != outgoingDisplay.id }.map(\.value),
+                        windowFrame: original
+                      ) else {
+                    throw WindowGeometryFailure(code: .geometryVerificationFailed, message: "no exposed display corner is available for parking")
+                }
                 changed.append((window, original))
-                let observed = try await geometry.park(window: window, frame: parked)
-                guard observed.x >= rightEdge - 40,
-                      observed.y >= bottomEdge - 40,
-                      observed.width == parked.width,
-                      observed.height == parked.height else {
+                let observed = try await geometry.park(window: window, frame: parking.targetFrame)
+                guard parking.accepts(observed) else {
                     throw WindowGeometryFailure(
                         code: .geometryVerificationFailed,
                         message: "window did not reach the parking corner",
@@ -394,7 +462,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     ) async throws {
         guard let workspace = state.workspaces.first(where: { $0.name == name }),
               workspace.mode == .bsp,
-              workspace.windowIDs.count > 1,
+              !workspace.windowIDs.isEmpty,
               let display = inventory.displays.first(where: { $0.id == workspace.displayID }) else { return }
         let bounds = WorkspaceLayoutRect(
             x: display.visibleFrame.x,
@@ -445,7 +513,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     }
 
     private func layoutParams(_ id: String, _ frame: WorkspaceLayoutRect) -> WindowFrameSetParams {
-        .init(windowID: id, frame: .init(x: frame.x, y: frame.y, width: frame.width, height: frame.height))
+        .init(windowID: id, frame: .init(x: frame.x, y: frame.y, width: frame.width, height: frame.height), attempts: 4)
     }
 
 

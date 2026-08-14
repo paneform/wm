@@ -55,6 +55,23 @@ import Testing
     #expect(state[workspace: "empty"] == nil)
 }
 
+@Test func focusingPopulatedWorkspaceAfterEmptyRuntimeWorkspaceKeepsHistoryValid() throws {
+    var state = WorkspaceState(
+        workspaces: [tiled("T", display: "d", windows: ["ghostty"], visible: true, focused: true)],
+        focusedWorkspaceName: "T",
+        displays: ["d": .init(visibleWorkspaceName: "T")]
+    )
+
+    _ = try state.focusWorkspace(named: "B")
+    #expect(state.displays["d"] == .init(visibleWorkspaceName: "B", previousWorkspaceName: "T"))
+    try state.validate()
+
+    _ = try state.focusWorkspace(named: "T")
+    #expect(state[workspace: "B"] == nil)
+    #expect(state.displays["d"] == .init(visibleWorkspaceName: "T"))
+    try state.validate()
+}
+
 @Test func moveWindowsCollapsesSourcesAndInsertsDeterministically() throws {
     var state = sampleState()
     let result = try state.moveWindows(["b", "a"], to: "destination")
@@ -75,6 +92,19 @@ import Testing
         try state.moveWindows(["a", "missing"], to: "destination")
     }
     #expect(state == original)
+}
+
+@Test func newDestinationUsesLiveWindowDisplay() throws {
+    var state = sampleState()
+    _ = try state.moveWindows(["a"], to: "destination", displayID: "live-display")
+
+    #expect(state[workspace: "destination"]?.displayID == "live-display")
+}
+
+@Test func singleWindowBSPUsesFullBounds() {
+    let workspace = tiled("single", display: "d", windows: ["zen"])
+
+    #expect(workspace.layout(in: .init(x: 0, y: 32, width: 1512, height: 950))["zen"] == .init(x: 0, y: 32, width: 1512, height: 950))
 }
 
 @Test func moveDisplayUpdatesBothHistorySlots() throws {
@@ -134,32 +164,53 @@ import Testing
     #expect(String(decoding: data, as: UTF8.self).contains("\"focused_workspace_name\""))
 }
 
-@Test func observedWindowReconciliationAdoptsAndRemovesDeterministically() throws {
+@Test func findsWorkspaceContainingExternallyFocusedWindow() {
+    let state = WorkspaceState(workspaces: [
+        tiled("one", display: "d", windows: ["a"]),
+        tiled("two", display: "d", windows: ["b"]),
+    ])
+
+    #expect(state.workspaceName(containing: "b") == "two")
+    #expect(state.workspaceName(containing: "missing") == nil)
+}
+
+@Test func externalFocusOverridesRememberedWorkspaceWindow() {
+    var state = WorkspaceState(workspaces: [
+        .init(name: "one", origin: .configured, displayID: "d", windowIDs: ["zen", "messages"], focusedWindowID: "messages"),
+    ])
+
+    state.setFocusedWindow("zen", in: "one")
+    #expect(state[workspace: "one"]?.focusedWindowID == "zen")
+}
+
+@Test func observedWindowReconciliationPreservesMissingAssignmentsAndAdoptsIntoOne() throws {
     var state = WorkspaceState(
         workspaces: [
             .init(
-                name: "1", origin: .configured, displayID: "d", visible: true, focused: true,
+                name: "1", origin: .configured, displayID: "d",
                 windowIDs: ["keep", "closed"], focusedWindowID: "closed",
                 bsp: .init(root: .split(
                     axis: .vertical, ratio: 0.5,
                     first: .leaf(windowID: "keep"), second: .leaf(windowID: "closed")
                 ))
-            )
+            ),
+            tiled("focused", display: "d", windows: ["focused-window"], visible: true, focused: true),
         ],
-        focusedWorkspaceName: "1",
-        displays: ["d": .init(visibleWorkspaceName: "1")],
+        focusedWorkspaceName: "focused",
+        displays: ["d": .init(visibleWorkspaceName: "focused")],
         parkedWindowFrames: ["closed": .init(x: 1, y: 2, width: 3, height: 4)]
     )
 
-    let result = try state.reconcileObservedWindows(["new-b", "keep", "new-a"], defaultDisplayID: "d")
+    let result = try state.reconcileObservedWindows(["new-b", "keep", "new-a", "focused-window"], defaultDisplayID: "d")
 
     #expect(result.modifiedWorkspaces == ["1"])
-    #expect(state[workspace: "1"]?.windowIDs == ["keep", "new-a", "new-b"])
-    #expect(state[workspace: "1"]?.bsp.root?.windowIDs == ["keep", "new-a", "new-b"])
+    #expect(state[workspace: "1"]?.windowIDs == ["keep", "closed", "new-a", "new-b"])
+    #expect(state[workspace: "1"]?.bsp.root?.windowIDs == ["keep", "closed", "new-a", "new-b"])
     #expect(state[workspace: "1"]?.focusedWindowID == "new-b")
-    #expect(state.parkedWindowFrames["closed"] == nil)
+    #expect(state[workspace: "focused"]?.windowIDs == ["focused-window"])
+    #expect(state.parkedWindowFrames["closed"] == .init(x: 1, y: 2, width: 3, height: 4))
 
-    let unchanged = try state.reconcileObservedWindows(["new-b", "keep", "new-a"], defaultDisplayID: "d")
+    let unchanged = try state.reconcileObservedWindows(["new-b", "keep", "new-a", "focused-window"], defaultDisplayID: "d")
     #expect(unchanged.modifiedWorkspaces.isEmpty)
 }
 

@@ -18,18 +18,13 @@ public struct AXWindowGeometryAdapter: WindowGeometryAdapter, @unchecked Sendabl
 
     public func reconcile(windows: [NormalizedWindow]) async {
         let windowsByID = Dictionary(uniqueKeysWithValues: windows.map { ($0.id, $0) })
-        storage.lock.withLock {
-            for (windowID, handle) in storage.handlesByWindowID where windowsByID[windowID] == nil {
-                storage.handlesByWindowID.removeValue(forKey: windowID)
-                storage.elements.removeValue(forKey: handle.rawValue)
-            }
-        }
-        for window in windows {
-            guard let handle = storage.lock.withLock({ storage.handlesByWindowID[window.id] }),
-                  let element = storage.lock.withLock({ storage.elements[handle.rawValue] }) else { continue }
+        let retained = storage.lock.withLock { storage.handlesByWindowID }
+        for (windowID, handle) in retained {
+            guard let window = windowsByID[windowID],
+                   let element = storage.lock.withLock({ storage.elements[handle.rawValue] }) else { continue }
             if !isSameLogicalWindow(element, window) || (try? frame(element)) == nil {
                 storage.lock.withLock {
-                    storage.handlesByWindowID.removeValue(forKey: window.id)
+                    storage.handlesByWindowID.removeValue(forKey: windowID)
                     storage.elements.removeValue(forKey: handle.rawValue)
                 }
             }

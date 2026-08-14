@@ -98,6 +98,7 @@ public struct CLIParser: Sendable {
         case "display": return try nestedRequest("display", child: "list", method: "display.list", rest)
         case "monitor": return try nestedRequest("monitor", child: "list", method: "display.list", rest)
         case "window": return try parseWindow(rest)
+        case "observe": return try parseObserve(rest)
         case "workspace": return try parseWorkspace(rest)
         case "diagnostics": return try nestedRequest("diagnostics", child: "inventory", method: "diagnostics.inventory", rest)
         case "inventory": return try nestedRequest("inventory", child: "refresh", method: "inventory.refresh", rest)
@@ -143,6 +144,28 @@ public struct CLIParser: Sendable {
         case "frame": return try parseWindowFrame(Array(arguments.dropFirst()))
         default: throw CLIParseError("expected 'window list' or 'window frame'")
         }
+    }
+
+    private func parseObserve(_ arguments: [String]) throws -> CLICommand {
+        guard arguments.first == "window" else { throw CLIParseError("expected 'observe window'") }
+        var params: [String: JSONValue] = [:]
+        var url = defaultWMWebSocketURL
+        var index = 1
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--pid":
+                let raw = try value(after: &index, in: arguments)
+                guard let pid = Int(raw), pid > 0 else { throw CLIParseError("invalid pid: \(raw)") }
+                params["pid"] = .number(Double(pid))
+            case "--exe": params["exe"] = .string(try value(after: &index, in: arguments))
+            case "--app": params["app"] = .string(try value(after: &index, in: arguments))
+            case "--id": params["window_id"] = .string(try value(after: &index, in: arguments))
+            case "--url": url = try webSocketURL(try value(after: &index, in: arguments))
+            default: throw CLIParseError("unknown observe window argument: \(arguments[index])")
+            }
+            index += 1
+        }
+        return .request(method: "observe.window", params: params, url: url)
     }
 
     private func parseWorkspace(_ arguments: [String]) throws -> CLICommand {

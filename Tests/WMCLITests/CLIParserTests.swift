@@ -12,6 +12,7 @@ import Testing
         (["display", "list"], "display.list"),
         (["monitor", "list"], "display.list"),
         (["window", "list"], "window.list"),
+        (["observe", "window"], "observe.window"),
         (["diagnostics", "inventory"], "diagnostics.inventory"),
         (["inventory", "refresh"], "inventory.refresh"),
     ]
@@ -23,6 +24,15 @@ import Testing
         #expect(method == expected)
         #expect(url == defaultWMWebSocketURL)
     }
+}
+
+@Test func parsesObserveWindowFilters() throws {
+    #expect(try CLIParser().parse([
+        "observe", "window", "--pid", "1930", "--exe", "Ghostty", "--app", "ghost", "--id", "window:cg:155",
+    ]) == .request(method: "observe.window", params: [
+        "pid": .number(1930), "exe": .string("Ghostty"), "app": .string("ghost"), "window_id": .string("window:cg:155"),
+    ], url: defaultWMWebSocketURL))
+    #expect(throws: CLIParseError.self) { try CLIParser().parse(["observe", "window", "--pid", "nope"]) }
 }
 
 @Test func parsesDaemonAndClientOptions() throws {
