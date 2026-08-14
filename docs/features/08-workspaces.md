@@ -216,6 +216,10 @@ Topics:
 Delta projection contains added, updated, and removed workspace names/entities.
 Snapshot projection contains complete workspace state.
 
+A successful workspace subscription response is immediately followed by a
+complete workspace snapshot. Workspace changes caused by inventory reconciliation
+publish through the same subscription path as explicit workspace mutations.
+
 ## Persistence
 
 Path:
