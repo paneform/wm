@@ -1,4 +1,5 @@
 import Foundation
+import WMProtocol
 
 public let defaultWMWebSocketURL = URL(string: "ws://127.0.0.1:17832/v1")!
 
@@ -31,17 +32,20 @@ public struct DaemonConfiguration: Sendable, Equatable {
 public struct SubscriptionConfiguration: Sendable, Equatable {
     public var topics: [String]
     public var projection: CLIProjection
+    public var detail: SnapshotDetail
     public var afterSequence: UInt64?
     public var url: URL
 
     public init(
         topics: [String],
         projection: CLIProjection = .delta,
+        detail: SnapshotDetail = .concise,
         afterSequence: UInt64? = nil,
         url: URL = defaultWMWebSocketURL
     ) {
         self.topics = topics
         self.projection = projection
+        self.detail = detail
         self.afterSequence = afterSequence
         self.url = url
     }
@@ -404,6 +408,7 @@ public struct CLIParser: Sendable {
     private func parseSubscription(_ arguments: [String]) throws -> SubscriptionConfiguration {
         var topics: [String] = []
         var projection = CLIProjection.delta
+        var detail = SnapshotDetail.concise
         var afterSequence: UInt64?
         var url = defaultWMWebSocketURL
         var index = 0
@@ -413,6 +418,10 @@ public struct CLIParser: Sendable {
                 let raw = try value(after: &index, in: arguments)
                 guard let parsed = CLIProjection(rawValue: raw) else { throw CLIParseError("invalid projection: \(raw)") }
                 projection = parsed
+            case "--detail":
+                let raw = try value(after: &index, in: arguments)
+                guard let parsed = SnapshotDetail(rawValue: raw) else { throw CLIParseError("invalid detail: \(raw)") }
+                detail = parsed
             case "--after-sequence":
                 let raw = try value(after: &index, in: arguments)
                 guard let parsed = UInt64(raw) else { throw CLIParseError("invalid sequence: \(raw)") }
@@ -424,7 +433,7 @@ public struct CLIParser: Sendable {
             }
             index += 1
         }
-        return SubscriptionConfiguration(topics: topics, projection: projection, afterSequence: afterSequence, url: url)
+        return SubscriptionConfiguration(topics: topics, projection: projection, detail: detail, afterSequence: afterSequence, url: url)
     }
 
     private func lifecycle(_ raw: String, _ arguments: [String], allowsForce: Bool) throws -> CLICommand {

@@ -1,4 +1,5 @@
 import Foundation
+import WMProtocol
 import WMWebSocket
 
 public enum JSONValue: Sendable, Equatable, Codable {
@@ -57,10 +58,11 @@ public struct CLISubscribeRequest: Sendable, Equatable, Codable {
     public let subscriptionID: String
     public let topics: [String]
     public let projection: CLIProjection
+    public let detail: SnapshotDetail
     public let afterSequence: UInt64?
 
     enum CodingKeys: String, CodingKey {
-        case type, topics, projection
+        case type, topics, projection, detail
         case requestID = "request_id"
         case subscriptionID = "subscription_id"
         case afterSequence = "after_sequence"
@@ -71,6 +73,7 @@ public struct CLISubscribeRequest: Sendable, Equatable, Codable {
         subscriptionID: String,
         topics: [String],
         projection: CLIProjection,
+        detail: SnapshotDetail,
         afterSequence: UInt64?
     ) {
         type = "subscribe"
@@ -78,6 +81,7 @@ public struct CLISubscribeRequest: Sendable, Equatable, Codable {
         self.subscriptionID = subscriptionID
         self.topics = topics
         self.projection = projection
+        self.detail = detail
         self.afterSequence = afterSequence
     }
 }
@@ -212,7 +216,8 @@ public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
         case .subscribe(let configuration):
             let request = CLISubscribeRequest(
                 requestID: id(), subscriptionID: id(), topics: configuration.topics,
-                projection: configuration.projection, afterSequence: configuration.afterSequence
+                projection: configuration.projection, detail: configuration.detail,
+                afterSequence: configuration.afterSequence
             )
             for try await message in client.subscribe(try encoder.encode(request), at: configuration.url) {
                 writeLine(message, to: output.stdout)

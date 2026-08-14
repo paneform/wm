@@ -220,6 +220,12 @@ A successful workspace subscription response is immediately followed by a
 complete workspace snapshot. Workspace changes caused by inventory reconciliation
 publish through the same subscription path as explicit workspace mutations.
 
+`state.snapshot` provides an authoritative subscriber-formatted state. Its default
+`detail: "concise"` form groups sorted workspaces beneath displays, includes every
+available display identifier, and embeds focused state plus health for displays,
+workspaces, and windows. `detail: "verbose"` adds complete display, workspace, and
+window objects under each concise item's `details` field.
+
 ## Persistence
 
 Path:

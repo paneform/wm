@@ -50,6 +50,7 @@ private let workspace = WorkspaceState(
     #expect(Method.observeWorkspace.rawValue == "observe.workspace")
     #expect(EventTopic.workspaceDisplayChanged.rawValue == "workspace.display_changed")
     #expect(EventTopic.workspaceModeChanged.rawValue == "workspace.mode_changed")
+    #expect(EventTopic.stateSnapshot.rawValue == "state.snapshot")
     #expect(ErrorCode.workspaceNotFound.rawValue == "workspace_not_found")
     #expect(ErrorCode.displayNotFound.rawValue == "display_not_found")
 }

@@ -93,6 +93,7 @@ import WMWorkspace
                     inventory, displayID: displayID, focusedWindowID: committed.snapshot.focusedWindowID,
                     frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier
                 )
+                await handler.publishStateSnapshot()
         }
         let observation = InventoryObservationLoop(
             observe: observe,

@@ -21,6 +21,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     private let version = "0.0.1-dev"
     private var subscriptions: [UUID: [String: Task<Void, Never>]] = [:]
     private var workspaceSubscriptions: [UUID: [String: WorkspaceSubscription]] = [:]
+    private var stateSnapshotSubscriptions: [UUID: [String: SnapshotDetail]] = [:]
     private var workspaceSequence: UInt64 = 0
     private var windowMinimumSizes: [String: WorkspaceMinimumSize] = [:]
     private var observerGeometryReliability = ObserverGeometryReliability()
@@ -215,9 +216,22 @@ actor DaemonHandler: WebSocketRequestHandler {
             try? await state.unsubscribe(id: key(clientID, id))
         }
         workspaceSubscriptions.removeValue(forKey: clientID)
+        stateSnapshotSubscriptions.removeValue(forKey: clientID)
     }
 
     private func subscribe(_ request: Subscribe, clientID: UUID) async -> [String] {
+        if request.topics.contains(.stateSnapshot) {
+            guard request.afterSequence == nil else {
+                return [await errorResponse(request.requestId, .replayUnavailable, "state snapshot replay is unavailable")]
+            }
+            stateSnapshotSubscriptions[clientID, default: [:]][request.subscriptionId] = request.detail
+            let response = encode(ServerMessage.response(.init(
+                requestId: request.requestId,
+                result: .object(["subscription_id": .string(request.subscriptionId)]),
+                stateVersion: await currentVersion()
+            )))
+            return [response, await stateSnapshotEvent(detail: request.detail)]
+        }
         let workspaceTopics = Set(request.topics.filter(\.isWorkspace))
         if !workspaceTopics.isEmpty {
             guard request.afterSequence == nil else {
@@ -259,6 +273,9 @@ actor DaemonHandler: WebSocketRequestHandler {
     }
 
     private func unsubscribe(_ request: Unsubscribe, clientID: UUID) async -> [String] {
+        if stateSnapshotSubscriptions[clientID]?.removeValue(forKey: request.subscriptionId) != nil {
+            return [encode(.response(.init(requestId: request.requestId, result: .object([:]), stateVersion: await currentVersion())))]
+        }
         if workspaceSubscriptions[clientID]?.removeValue(forKey: request.subscriptionId) != nil {
             return [encode(.response(.init(requestId: request.requestId, result: .object([:]), stateVersion: await currentVersion())))]
         }
@@ -570,6 +587,103 @@ actor DaemonHandler: WebSocketRequestHandler {
         case .refreshed: data = .object([:])
         }
         return .event(.init(sequence: event.sequence, stateVersion: event.stateVersion, timestamp: event.timestamp, topic: EventTopic(rawValue: event.topic.rawValue)!, data: data))
+    }
+
+    func publishStateSnapshot() async {
+        guard stateSnapshotSubscriptions.values.contains(where: { !$0.isEmpty }) else { return }
+        for (clientID, subscriptions) in stateSnapshotSubscriptions {
+            for detail in Set(subscriptions.values) {
+                sender?(await stateSnapshotEvent(detail: detail), clientID)
+            }
+        }
+    }
+
+    private func stateSnapshotEvent(detail: SnapshotDetail) async -> String {
+        let committed = try? await state.state()
+        return encode(.event(.init(
+            sequence: committed?.sequence ?? workspaceSequence,
+            stateVersion: committed?.stateVersion ?? 0,
+            timestamp: Date(),
+            topic: .stateSnapshot,
+            data: await stateSnapshot(committed, detail: detail)
+        )))
+    }
+
+    private func stateSnapshot(
+        _ committed: CommittedState<PrototypeSnapshot>?, detail: SnapshotDetail
+    ) async -> JSONValue {
+        guard let committed else { return .object(["displays": .array([]), "health": .null]) }
+        let inventory = committed.snapshot.inventory
+        let workspaceState = await workspaces.snapshot()
+        let windows = Dictionary(uniqueKeysWithValues: inventory.windows.map { ($0.id, $0) })
+        let displays = inventory.displays.map { display -> JSONValue in
+            let workspaces = workspaceState.workspaces
+                .filter { $0.displayID == display.id }
+                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            var result: [String: JSONValue] = [
+                "id": .string(display.id),
+                "name": .string(display.name),
+                "identifiers": json(display.identifiers),
+                "health": healthyState,
+                "workspaces": .array(workspaces.map { workspaceSnapshot($0, windows: windows, detail: detail) }),
+            ]
+            if detail == .verbose { result["details"] = json(display) }
+            return .object(result)
+        }
+        return .object([
+            "session_id": .string(sessionID),
+            "state_version": .number(Double(committed.stateVersion)),
+            "sequence": .number(Double(committed.sequence)),
+            "focused_workspace_name": workspaceState.focusedWorkspaceName.map(JSONValue.string) ?? .null,
+            "health": json(protocolHealth(committed.snapshot.health)),
+            "displays": .array(displays),
+        ])
+    }
+
+    private func workspaceSnapshot(
+        _ workspace: WMWorkspace.Workspace,
+        windows: [String: NormalizedWindow],
+        detail: SnapshotDetail
+    ) -> JSONValue {
+        var result: [String: JSONValue] = [
+            "name": .string(workspace.name),
+            "focused": .bool(workspace.focused),
+            "visible": .bool(workspace.visible),
+            "health": healthyState,
+            "windows": .array(workspace.windowIDs.map { windowSnapshot(
+                id: $0, window: windows[$0] ?? sessionWindows[$0], focused: workspace.focusedWindowID == $0,
+                detail: detail
+            ) }),
+        ]
+        if detail == .verbose { result["details"] = workspaceJSON(workspace) }
+        return .object(result)
+    }
+
+    private func windowSnapshot(
+        id: String, window: NormalizedWindow?, focused: Bool, detail: SnapshotDetail
+    ) -> JSONValue {
+        guard let window else {
+            return .object([
+                "id": .string(id), "exe": .null, "app_name": .null, "focused": .bool(focused),
+                "health": .object(["status": .string("unhealthy"), "issues": .array([.string("window is not currently observed")])]),
+            ])
+        }
+        var result: [String: JSONValue] = [
+            "id": .string(id),
+            "exe": window.executablePath.map(JSONValue.string) ?? .null,
+            "app_name": .string(window.appName),
+            "focused": .bool(focused),
+            "health": .object([
+                "status": .string(window.health.rawValue),
+                "issues": .array(window.healthIssues.map(JSONValue.string)),
+            ]),
+        ]
+        if detail == .verbose { result["details"] = json(window) }
+        return .object(result)
+    }
+
+    private var healthyState: JSONValue {
+        .object(["status": .string("healthy"), "issues": .array([])])
     }
 
     private func protocolHealth(_ value: InventoryHealth) -> Health {
@@ -1052,6 +1166,7 @@ actor DaemonHandler: WebSocketRequestHandler {
                 }
             }
         }
+        await publishStateSnapshot()
     }
 
     private func workspaceSnapshotEvent(topic: EventTopic) async -> String {

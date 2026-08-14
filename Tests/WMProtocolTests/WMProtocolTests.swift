@@ -59,7 +59,7 @@ final class WMProtocolTests: XCTestCase {
 
     func testWireNamesAndNullsMatchContract() throws {
         let data = try ProtocolCodec.encode(ClientMessage.subscribe(.init(requestId: "req", subscriptionId: "sub", topics: [.displayInventory])))
-        XCTAssertEqual(String(data: data, encoding: .utf8), #"{"after_sequence":null,"projection":"delta","request_id":"req","subscription_id":"sub","topics":["display.inventory"],"type":"subscribe"}"#)
+        XCTAssertEqual(String(data: data, encoding: .utf8), #"{"after_sequence":null,"detail":"concise","projection":"delta","request_id":"req","subscription_id":"sub","topics":["display.inventory"],"type":"subscribe"}"#)
         let displayJSON = try XCTUnwrap(String(data: ProtocolCodec.encode(display), encoding: .utf8))
         XCTAssertTrue(displayJSON.contains(#""is_builtin":true"#)); XCTAssertTrue(displayJSON.contains(#""cg_direct_display_id":"1""#)); XCTAssertFalse(displayJSON.contains(#""pointer_warp""#))
         let windowJSON = try XCTUnwrap(String(data: ProtocolCodec.encode(window), encoding: .utf8))
