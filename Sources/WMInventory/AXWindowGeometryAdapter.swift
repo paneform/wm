@@ -1,4 +1,5 @@
 import ApplicationServices
+import AppKit
 import Foundation
 
 public struct AXWindowGeometryAdapter: WindowGeometryAdapter, @unchecked Sendable {
@@ -94,6 +95,31 @@ public struct AXWindowGeometryAdapter: WindowGeometryAdapter, @unchecked Sendabl
     }
 
     public func delay() async throws { try await Task.sleep(for: delayDuration) }
+
+    public func focus(_ handle: WindowGeometryHandle) async throws {
+        let element = try element(for: handle)
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(element, &pid) == .success else { throw WindowGeometryAdapterError.stale }
+        guard let runningApplication = NSRunningApplication(processIdentifier: pid),
+              runningApplication.activate(options: [.activateAllWindows]) else {
+            throw WindowGeometryAdapterError.rejected
+        }
+        let app = AXUIElementCreateApplication(pid)
+        guard AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue) == .success,
+              AXUIElementPerformAction(element, kAXRaiseAction as CFString) == .success,
+              AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue) == .success,
+              AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue) == .success else {
+            throw WindowGeometryAdapterError.rejected
+        }
+    }
+
+    public func isFocused(_ handle: WindowGeometryHandle) async throws -> Bool {
+        let element = try element(for: handle)
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(element, &pid) == .success else { throw WindowGeometryAdapterError.stale }
+        return NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+    }
+
 
     private func matches(_ element: AXUIElement, _ window: NormalizedWindow) -> Bool {
         guard isSameLogicalWindow(element, window) else { return false }

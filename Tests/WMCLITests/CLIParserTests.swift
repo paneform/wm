@@ -83,3 +83,40 @@ import Testing
     #expect(throws: CLIParseError.self) { try CLIParser().parse(["ping", "--url", "http://localhost"]) }
     #expect(throws: CLIParseError.self) { try CLIParser().parse(["subscribe", "--projection", "full"]) }
 }
+
+@Test func parsesWorkspaceCommandsWithCanonicalParams() throws {
+    let parser = CLIParser()
+    #expect(try parser.parse(["workspace", "list"]) == .request(
+        method: "workspace.list", params: [:], url: defaultWMWebSocketURL
+    ))
+    #expect(try parser.parse(["workspace", "focus", "T"]) == .request(
+        method: "workspace.focus", params: ["name": .string("T"), "display_id": .null], url: defaultWMWebSocketURL
+    ))
+    #expect(try parser.parse(["workspace", "focus", "T", "--display", "display:2"]) == .request(
+        method: "workspace.focus", params: ["name": .string("T"), "display_id": .string("display:2")], url: defaultWMWebSocketURL
+    ))
+    #expect(try parser.parse(["workspace", "move-window", "T"]) == .request(
+        method: "workspace.move_window", params: ["workspace": .string("T"), "window_ids": .array([])], url: defaultWMWebSocketURL
+    ))
+    #expect(try parser.parse(["workspace", "move-window", "T", "window:1", "window:2"]) == .request(
+        method: "workspace.move_window", params: [
+            "workspace": .string("T"), "window_ids": .array([.string("window:1"), .string("window:2")]),
+        ], url: defaultWMWebSocketURL
+    ))
+    #expect(try parser.parse(["workspace", "move-display", "T", "display:2"]) == .request(
+        method: "workspace.move_display", params: ["workspace": .string("T"), "display_id": .string("display:2")], url: defaultWMWebSocketURL
+    ))
+    #expect(try parser.parse(["workspace", "mode", "T", "floating"]) == .request(
+        method: "workspace.set_mode", params: ["workspace": .string("T"), "mode": .string("floating")], url: defaultWMWebSocketURL
+    ))
+}
+
+@Test func rejectsInvalidWorkspaceCommands() {
+    let invalid = [
+        ["workspace"], ["workspace", "focus"], ["workspace", "move-window"],
+        ["workspace", "move-display", "T"], ["workspace", "mode", "T", "stacked"],
+    ]
+    for arguments in invalid {
+        #expect(throws: CLIParseError.self) { try CLIParser().parse(arguments) }
+    }
+}

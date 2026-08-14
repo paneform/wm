@@ -5,6 +5,7 @@ import WMCore
 import WMInventory
 import WMProtocol
 import WMWebSocket
+import WMWorkspace
 
 @main struct WMMain {
     static func main() async {
@@ -27,11 +28,20 @@ import WMWebSocket
     @MainActor private static func runDaemon(_ configuration: DaemonConfiguration) async -> Int32 {
         let scanner = InventoryScanner()
         let state = InventoryState(provider: SystemInventoryProvider(scanner: scanner))
-        do { _ = try await state.refresh() } catch {
+        let workspaces = WorkspaceController(buildVersion: "0.0.1-dev")
+        do {
+            let committed = try await state.refresh()
+            let inventory = committed.snapshot.inventory
+            guard let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id else {
+                throw StartupError.noDisplay
+            }
+            let windowIDs = inventory.windows.filter { $0.classification == .normal }.map(\.id)
+            _ = try await workspaces.reconcileObservedWindows(windowIDs, displayID: displayID)
+        } catch {
             FileHandle.standardError.write(Data("inventory initialization failed: \(error)\n".utf8))
             return CLIExitCode.unavailable.rawValue
         }
-        let handler = DaemonHandler(state: state)
+        let handler = DaemonHandler(state: state, workspaces: workspaces)
         let server = WebSocketServer(configuration: .init(host: configuration.host, port: configuration.port, allowedOrigins: Set(configuration.allowedOrigins)), handler: handler)
         await handler.installSender { text, client in try? server.send(text, to: client) }
         do { try server.start() } catch {
@@ -89,4 +99,5 @@ import WMWebSocket
 }
 
 private enum VerifyError: Error { case expectedWelcome, expectedResponse, expectedSubscribeResponse, expectedEvent, expectedUnsubscribeResponse }
+private enum StartupError: Error { case noDisplay }
 private func escaped(_ value: String) -> String { value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") }

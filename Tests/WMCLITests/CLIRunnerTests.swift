@@ -21,9 +21,7 @@ private final class MockClient: CLIWebSocketClient, @unchecked Sendable {
     }
 
     func request(_ message: Data, at url: URL) async throws -> CLIResponse {
-        lock.lock()
-        requests.append((message, url))
-        lock.unlock()
+        lock.withLock { requests.append((message, url)) }
         return response
     }
 

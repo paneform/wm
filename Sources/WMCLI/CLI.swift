@@ -98,6 +98,7 @@ public struct CLIParser: Sendable {
         case "display": return try nestedRequest("display", child: "list", method: "display.list", rest)
         case "monitor": return try nestedRequest("monitor", child: "list", method: "display.list", rest)
         case "window": return try parseWindow(rest)
+        case "workspace": return try parseWorkspace(rest)
         case "diagnostics": return try nestedRequest("diagnostics", child: "inventory", method: "diagnostics.inventory", rest)
         case "inventory": return try nestedRequest("inventory", child: "refresh", method: "inventory.refresh", rest)
         case "subscribe": return .subscribe(try parseSubscription(rest))
@@ -142,6 +143,73 @@ public struct CLIParser: Sendable {
         case "frame": return try parseWindowFrame(Array(arguments.dropFirst()))
         default: throw CLIParseError("expected 'window list' or 'window frame'")
         }
+    }
+
+    private func parseWorkspace(_ arguments: [String]) throws -> CLICommand {
+        guard let operation = arguments.first else { throw CLIParseError("missing workspace command") }
+        let values = Array(arguments.dropFirst())
+        switch operation {
+        case "list": return try request("workspace.list", values)
+        case "focus": return try parseWorkspaceFocus(values)
+        case "move-window": return try parseWorkspaceMoveWindow(values)
+        case "move-display": return try parseWorkspaceMoveDisplay(values)
+        case "mode": return try parseWorkspaceMode(values)
+        default: throw CLIParseError("unknown workspace command: \(operation)")
+        }
+    }
+
+    private func parseWorkspaceFocus(_ arguments: [String]) throws -> CLICommand {
+        guard let name = arguments.first, !name.isEmpty else { throw CLIParseError("missing workspace name") }
+        var display: JSONValue = .null
+        var url = defaultWMWebSocketURL
+        var index = 1
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--display": display = .string(try value(after: &index, in: arguments))
+            case "--url": url = try webSocketURL(try value(after: &index, in: arguments))
+            default: throw CLIParseError("unknown workspace focus argument: \(arguments[index])")
+            }
+            index += 1
+        }
+        return .request(method: "workspace.focus", params: ["name": .string(name), "display_id": display], url: url)
+    }
+
+    private func parseWorkspaceMoveWindow(_ arguments: [String]) throws -> CLICommand {
+        guard let workspace = arguments.first, !workspace.isEmpty else { throw CLIParseError("missing workspace name") }
+        var windowIDs: [JSONValue] = []
+        var url = defaultWMWebSocketURL
+        var index = 1
+        while index < arguments.count {
+            if arguments[index] == "--url" {
+                url = try webSocketURL(try value(after: &index, in: arguments))
+            } else {
+                guard !arguments[index].hasPrefix("-") else {
+                    throw CLIParseError("unknown workspace move-window argument: \(arguments[index])")
+                }
+                windowIDs.append(.string(arguments[index]))
+            }
+            index += 1
+        }
+        return .request(method: "workspace.move_window", params: [
+            "window_ids": .array(windowIDs), "workspace": .string(workspace),
+        ], url: url)
+    }
+
+    private func parseWorkspaceMoveDisplay(_ arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2 else { throw CLIParseError("expected workspace name and display ID") }
+        return .request(method: "workspace.move_display", params: [
+            "workspace": .string(arguments[0]), "display_id": .string(arguments[1]),
+        ], url: try parseURLOnly(Array(arguments.dropFirst(2))))
+    }
+
+    private func parseWorkspaceMode(_ arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2 else { throw CLIParseError("expected workspace name and mode") }
+        guard ["bsp", "floating"].contains(arguments[1]) else {
+            throw CLIParseError("invalid workspace mode: \(arguments[1])")
+        }
+        return .request(method: "workspace.set_mode", params: [
+            "workspace": .string(arguments[0]), "mode": .string(arguments[1]),
+        ], url: try parseURLOnly(Array(arguments.dropFirst(2))))
     }
 
     private func parseWindowFrame(_ arguments: [String]) throws -> CLICommand {

@@ -18,6 +18,19 @@ public struct Capabilities: Codable, Equatable, Sendable {
     public init(accessibility: Bool, screenRecording: Bool, windowInventory: Bool, pointerWarp: Bool?) {
         self.accessibility = accessibility; self.screenRecording = screenRecording; self.windowInventory = windowInventory; self.pointerWarp = pointerWarp
     }
+    enum CodingKeys: String, CodingKey {
+        case accessibility
+        case screenRecording = "screen_recording"
+        case windowInventory = "window_inventory"
+        case pointerWarp = "pointer_warp"
+    }
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(accessibility, forKey: .accessibility)
+        try container.encode(screenRecording, forKey: .screenRecording)
+        try container.encode(windowInventory, forKey: .windowInventory)
+        try container.encode(pointerWarp, forKey: .pointerWarp)
+    }
 }
 
 public struct Health: Codable, Equatable, Sendable {
@@ -51,6 +64,13 @@ public struct Display: Codable, Equatable, Sendable {
     public var identifiers: DisplayIdentifiers
     public init(id: String, name: String, isBuiltin: Bool, isPrimary: Bool, frame: Rectangle, visibleFrame: Rectangle, backingScale: Double, identifiers: DisplayIdentifiers) {
         self.id = id; self.name = name; self.isBuiltin = isBuiltin; self.isPrimary = isPrimary; self.frame = frame; self.visibleFrame = visibleFrame; self.backingScale = backingScale; self.identifiers = identifiers
+    }
+    enum CodingKeys: String, CodingKey {
+        case id, name, frame, identifiers
+        case isBuiltin = "is_builtin"
+        case isPrimary = "is_primary"
+        case visibleFrame = "visible_frame"
+        case backingScale = "backing_scale"
     }
 }
 

@@ -12,7 +12,8 @@ func testExactFrameSucceedsOnFirstStrategy() async throws {
     XCTAssertTrue(result.verified)
     XCTAssertEqual(result.attempts, 1)
     XCTAssertEqual(result.strategy, .positionThenSize)
-    XCTAssertEqual(await adapter.writes, [.position, .size])
+    let writes = await adapter.writes
+    XCTAssertEqual(writes, [.position, .size])
 }
 
 func testClampedFrameFailsVerificationWithObservedFrame() async throws {
@@ -36,7 +37,8 @@ func testSecondStrategyCanSucceed() async throws {
 
     XCTAssertEqual(result.attempts, 2)
     XCTAssertEqual(result.strategy, .sizeThenPosition)
-    XCTAssertEqual(await adapter.writes, [.position, .size, .size, .position])
+    let writes = await adapter.writes
+    XCTAssertEqual(writes, [.position, .size, .size, .position])
 }
 
 func testUnresolvedIdentityNeverWrites() async throws {
@@ -46,7 +48,8 @@ func testUnresolvedIdentityNeverWrites() async throws {
             _ = try await WindowGeometryService(adapter: adapter).set(window: window, params: .init(windowID: window.id, frame: requestedFrame))
             XCTFail("expected resolution failure")
         } catch is WindowGeometryFailure {}
-        XCTAssertTrue(await adapter.writes.isEmpty)
+        let writes = await adapter.writes
+        XCTAssertTrue(writes.isEmpty)
     }
 }
 
@@ -57,7 +60,8 @@ func testInvalidValuesRejectBeforePlatformCalls() async throws {
         _ = try await WindowGeometryService(adapter: adapter).set(window: window, params: .init(windowID: window.id, frame: invalid, tolerance: 21, attempts: 6))
         XCTFail("expected invalid frame")
     } catch is WindowGeometryFailure {}
-    XCTAssertEqual(await adapter.resolveCalls, 0)
+    let resolveCalls = await adapter.resolveCalls
+    XCTAssertEqual(resolveCalls, 0)
 }
 
 func testSequentialCommandsReuseExplicitHandleAfterFrameChanges() async throws {
@@ -67,8 +71,10 @@ func testSequentialCommandsReuseExplicitHandleAfterFrameChanges() async throws {
     let observed = try await service.get(window: window)
 
     XCTAssertEqual(observed.frame, requestedFrame)
-    XCTAssertEqual(await adapter.resolveCalls, 2)
-    XCTAssertEqual(await adapter.createdHandles, 1)
+    let resolveCalls = await adapter.resolveCalls
+    let createdHandles = await adapter.createdHandles
+    XCTAssertEqual(resolveCalls, 2)
+    XCTAssertEqual(createdHandles, 1)
 }
 
 func testReconcileInvalidatesDisappearedWindowHandle() async throws {
@@ -78,7 +84,8 @@ func testReconcileInvalidatesDisappearedWindowHandle() async throws {
     await service.reconcile(windows: [])
     _ = try await service.get(window: window)
 
-    XCTAssertEqual(await adapter.createdHandles, 2)
+    let createdHandles = await adapter.createdHandles
+    XCTAssertEqual(createdHandles, 2)
 }
 }
 

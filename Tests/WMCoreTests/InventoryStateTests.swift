@@ -4,7 +4,7 @@ import Testing
 
 private struct Item: Identifiable, Codable, Equatable, Sendable { let id: String; let value: Int }
 private struct Snapshot: InventorySnapshotProtocol {
-    let windows: [Item]
+    var windows: [Item]
     let displays: [Item]
     let health: InventoryHealth
     let focusedWindowID: String?

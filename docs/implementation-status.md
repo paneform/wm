@@ -20,6 +20,11 @@ Updated: 2026-08-14
 - Retained AX handle continuity across sequential geometry changes
 - Immediate committed observed-frame update after verified mutation
 - Dependency-free executable protocol and fake geometry verification
+- Workspace domain, atomic persistence, default workspace adoption, and verified focus
+- Pure BSP layout with strict transactional frame application for compatible windows
+- Verified off-screen workspace parking and exact-frame reveal with rollback
+- Persisted parked-frame recovery across daemon restarts
+- Workspace lifecycle reconciliation for newly observed and closed windows
 
 ## Live Findings
 
@@ -42,13 +47,25 @@ Updated: 2026-08-14
   - Temporary frame: `(100, 100, 900, 700)` verified in 8 ms
   - Immediate restore without inventory refresh verified in 6 ms
   - Final readback exactly matched original frame
+- Ghostty and Zen strict BSP test produced verified frames `(0,32,752,950)` and
+  `(760,32,752,950)` with an 8-point gap, then restored both original frames.
+- Spotify enforces an 800-point minimum width and currently rejects a half-display
+  tile; minimum-size-aware layout adaptation remains pending.
+- Ghostty/Zen workspace switching verified parking, reveal, frontmost activation,
+  and preservation of exact window frames.
+- Bottom-right parking verified Ghostty fully off-screen at `(1612,1082)` and
+  Zen at macOS's constrained `(1472,950)` corner position.
+- Bottom-left probing clamps Zen symmetrically to `x=-1456`, also leaving 40
+  points visible. AeroSpace documents bottom-corner parking with a typical
+  1-pixel line; Yabai uses native Spaces/private scripting additions rather than
+  virtual off-screen workspace parking. Public AX size-position-size writes did
+  not reduce Zen's clamp below 40 points.
 
-## Environment Limitation
+## Validation
 
-The active Command Line Tools Swift installation exposes neither XCTest nor
-Swift Testing to SwiftPM. Library/executable builds, dependency-free verifier
-targets, and live contract checks are used until a full Xcode toolchain is
-available.
+- Xcode 26.6 / Swift 6.3.3 toolchain active.
+- Full suite passes: 28 XCTest tests and 43 Swift Testing tests.
+- Dependency-free geometry and workspace-layout verifiers pass.
 
 ## Next Slices
 

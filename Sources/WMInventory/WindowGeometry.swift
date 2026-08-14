@@ -26,11 +26,21 @@ public protocol WindowGeometryAdapter: Sendable {
     func validateControllability(of handle: WindowGeometryHandle) async throws
     func readFrame(of handle: WindowGeometryHandle) async throws -> InventoryRect
     func write(_ component: WindowGeometryComponent, frame: InventoryRect, to handle: WindowGeometryHandle) async throws
+    func park(frame: InventoryRect, handle: WindowGeometryHandle) async throws
     func delay() async throws
+    func focus(_ handle: WindowGeometryHandle) async throws
+    func isFocused(_ handle: WindowGeometryHandle) async throws -> Bool
 }
 
 public extension WindowGeometryAdapter {
     func reconcile(windows: [NormalizedWindow]) async {}
+    func focus(_ handle: WindowGeometryHandle) async throws { throw WindowGeometryAdapterError.notControllable }
+    func isFocused(_ handle: WindowGeometryHandle) async throws -> Bool { false }
+    func park(frame: InventoryRect, handle: WindowGeometryHandle) async throws {
+        try await write(.size, frame: frame, to: handle)
+        try await write(.position, frame: frame, to: handle)
+        try await write(.size, frame: frame, to: handle)
+    }
 }
 
 public struct WindowGeometryFailure: Error, Equatable, Sendable {
@@ -87,6 +97,33 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
         throw WindowGeometryFailure(code: .geometryVerificationFailed, message: "window frame did not match the requested frame within tolerance", observedFrame: observed.protocolFrame)
     }
 
+    public func focus(window: NormalizedWindow) async throws {
+        let handle = try await resolve(window)
+        do {
+            try await adapter.focus(handle)
+            if try await adapter.isFocused(handle) { return }
+            try await adapter.delay()
+            guard try await adapter.isFocused(handle) else {
+                throw WindowGeometryFailure(code: .geometryVerificationFailed, message: "window did not become focused")
+            }
+        } catch let failure as WindowGeometryFailure {
+            throw failure
+        } catch {
+            throw mapAdapter(error, defaultCode: .geometryRejected)
+        }
+    }
+
+    public func park(window: NormalizedWindow, frame: InventoryRect) async throws -> InventoryRect {
+        let handle = try await resolve(window)
+        do {
+            try await adapter.park(frame: frame, handle: handle)
+            return try await adapter.readFrame(of: handle)
+        } catch {
+            throw mapAdapter(error, defaultCode: .geometryRejected)
+        }
+    }
+
+
     private func resolve(_ window: NormalizedWindow) async throws -> WindowGeometryHandle {
         do { return try await adapter.resolve(window) }
         catch { throw mapAdapter(error, defaultCode: .inventoryStale) }
@@ -137,5 +174,5 @@ private extension WindowGeometryStrategy {
 
 extension InventoryRect {
     init(_ frame: Rectangle) { self.init(x: frame.x, y: frame.y, width: frame.width, height: frame.height) }
-    var protocolFrame: Rectangle { Rectangle(x: x, y: y, width: width, height: height) }
+    public var protocolFrame: Rectangle { Rectangle(x: x, y: y, width: width, height: height) }
 }
