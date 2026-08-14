@@ -3,6 +3,17 @@ import XCTest
 @testable import WMInventory
 
 final class InventoryTests: XCTestCase {
+    func testFocusedWindowFallsBackToFrontmostMainWindow() {
+        let other = normalizedWindow(id: "other", pid: 1, main: true)
+        let secondary = normalizedWindow(id: "secondary", pid: 2, main: false)
+        let main = normalizedWindow(id: "main", pid: 2, main: true)
+
+        XCTAssertEqual(resolveFocusedWindowID(windows: [other, secondary, main], frontmostPID: 2), "main")
+
+        var explicitlyFocused = other
+        explicitlyFocused.focused = true
+        XCTAssertEqual(resolveFocusedWindowID(windows: [explicitlyFocused, main], frontmostPID: 2), "other")
+    }
     func testDuplicateAndZeroCGIDsAreSafeAndExplained() {
         let frame = InventoryRect(x: 10, y: 20, width: 800, height: 600)
         let ax = [
@@ -75,6 +86,15 @@ final class InventoryTests: XCTestCase {
 
         XCTAssertEqual(snapshot.appScans.only?.status, .timedOut)
     }
+}
+
+private func normalizedWindow(id: String, pid: Int32, main: Bool) -> NormalizedWindow {
+    .init(
+        id: id, pid: pid, appName: "App", role: "AXWindow", subrole: "AXStandardWindow",
+        frame: .init(x: 0, y: 0, width: 100, height: 100), classification: .normal,
+        management: .unmanaged, rejectionReasons: [], joinConfidence: .exact,
+        joinSignals: [], focused: false, main: main, health: .healthy, healthIssues: []
+    )
 }
 
 private struct StubDisplays: DisplayInventorySource {

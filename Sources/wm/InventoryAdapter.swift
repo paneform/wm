@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import WMCore
 import WMInventory
 
@@ -34,7 +35,10 @@ struct SystemInventoryProvider: InventoryProvider {
 
     func inventory() async -> PrototypeSnapshot {
         let inventory = await scanner.scan()
-        let focused = inventory.windows.first(where: { $0.focused == true })?.id
+        let focused = resolveFocusedWindowID(
+            windows: inventory.windows,
+            frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier
+        )
         let issues = inventory.sourceHealth.flatMap(\.issues)
         let status: InventoryHealth.Status
         if inventory.sourceHealth.contains(where: { $0.status == .unhealthy }) { status = .unhealthy }

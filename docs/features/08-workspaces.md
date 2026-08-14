@@ -142,6 +142,8 @@ Behavior:
 - Moving the last window out of a runtime workspace deletes it only when it is
   parked by the destination focus transition.
 - All selected windows mutate in one atomic intent transaction.
+- The resulting destination focus, reveal, tiling, and outgoing parking complete
+  and verify before workspace state is committed.
 
 ### `workspace.move_display`
 
@@ -159,6 +161,7 @@ Behavior:
 - Source display reveals its one remembered previous workspace if valid;
   otherwise it becomes empty.
 - Destination workspace becomes that display's remembered previous workspace.
+- Platform movement, tiling, and focus verify before assignment state commits.
 
 ### `workspace.set_mode`
 
@@ -168,8 +171,8 @@ Params:
 {"workspace":"T","mode":"floating"}
 ```
 
-This slice changes mode only. Geometry adoption/reconstruction happens in a
-later platform reconciliation slice.
+Changing the focused workspace mode reconciles its platform geometry before the
+mode state commits. Parked workspaces update intent without moving windows.
 
 ## Result Envelope
 

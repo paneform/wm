@@ -25,6 +25,21 @@ actor WorkspaceController {
         return try candidate.focusWorkspace(named: name, displayID: displayID)
     }
 
+    func previewMoveWindows(_ ids: [String], to workspace: String) throws -> WMWorkspace.WorkspaceMutationResult {
+        var candidate = state
+        return try candidate.moveWindows(ids, to: workspace)
+    }
+
+    func previewMoveWorkspace(_ name: String, to displayID: String) throws -> WMWorkspace.WorkspaceMutationResult {
+        var candidate = state
+        return try candidate.moveWorkspace(named: name, to: displayID)
+    }
+
+    func previewSetMode(_ name: String, mode: WMWorkspace.WorkspaceMode) throws -> WMWorkspace.WorkspaceMutationResult {
+        var candidate = state
+        return try candidate.setMode(of: name, to: mode)
+    }
+
     func commitFocus(_ result: WMWorkspace.WorkspaceMutationResult) throws {
         guard result.workspaceState != state else { return }
         try store.save(result.workspaceState)

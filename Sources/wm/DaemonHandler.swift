@@ -176,21 +176,29 @@ actor DaemonHandler: WebSocketRequestHandler {
                 guard !ids.isEmpty else { throw WorkspaceRequestError.windowRequired }
                 try validateWindows(ids, inventory: snapshot.inventory)
                 let before = await workspaces.snapshot()
-                let mutation = try await workspaces.moveWindows(ids, to: params.workspace)
+                var mutation = try await workspaces.previewMoveWindows(ids, to: params.workspace)
+                try await reconcileWorkspaceFocus(before: before, after: &mutation.workspaceState, name: params.workspace, inventory: snapshot.inventory)
+                try await workspaces.commitFocus(mutation)
                 await publishWorkspaceMutation(mutation, before: before, reason: .workspaceFocused)
                 result = workspaceMutation(mutation)
             case .workspaceMoveDisplay:
                 let params = try decodeParams(WorkspaceMoveDisplayParams.self, from: .object(request.params))
                 _ = try resolveDisplay(params.displayId, inventory: snapshot.inventory, workspaceState: await workspaces.snapshot())
                 let before = await workspaces.snapshot()
-                let mutation = try await workspaces.moveWorkspace(params.workspace, to: params.displayId)
+                var mutation = try await workspaces.previewMoveWorkspace(params.workspace, to: params.displayId)
+                try await reconcileWorkspaceFocus(before: before, after: &mutation.workspaceState, name: params.workspace, inventory: snapshot.inventory)
+                try await workspaces.commitFocus(mutation)
                 await publishWorkspaceMutation(mutation, before: before, reason: .workspaceDisplayChanged)
                 result = workspaceMutation(mutation)
             case .workspaceSetMode:
                 let params = try decodeParams(WorkspaceSetModeParams.self, from: .object(request.params))
                 let mode: WMWorkspace.WorkspaceMode = params.mode == .bsp ? .bsp : .floating
                 let before = await workspaces.snapshot()
-                let mutation = try await workspaces.setMode(params.workspace, mode: mode)
+                var mutation = try await workspaces.previewSetMode(params.workspace, mode: mode)
+                if mutation.workspaceState.focusedWorkspaceName == params.workspace {
+                    try await reconcileWorkspaceFocus(before: before, after: &mutation.workspaceState, name: params.workspace, inventory: snapshot.inventory)
+                }
+                try await workspaces.commitFocus(mutation)
                 await publishWorkspaceMutation(mutation, before: before, reason: .workspaceModeChanged)
                 result = workspaceMutation(mutation)
             }
@@ -336,8 +344,12 @@ actor DaemonHandler: WebSocketRequestHandler {
                 changed.append((window, current))
                 after.parkedWindowFrames.removeValue(forKey: id)
             }
-            let rightEdge = inventory.displays.map { $0.frame.x + $0.frame.width }.max() ?? 0
-            let bottomEdge = inventory.displays.map { $0.frame.y + $0.frame.height }.max() ?? 0
+            let outgoingDisplayID = before.focusedWorkspaceName.flatMap { before[workspace: $0]?.displayID }
+            let outgoingDisplay = inventory.displays.first { $0.id == outgoingDisplayID }
+                ?? inventory.displays.first(where: \.isPrimary)
+                ?? inventory.displays.first
+            let rightEdge = outgoingDisplay.map { $0.frame.x + $0.frame.width } ?? 0
+            let bottomEdge = outgoingDisplay.map { $0.frame.y + $0.frame.height } ?? 0
             for (index, id) in outgoingIDs.subtracting(incomingIDs).sorted().enumerated() {
                 guard let window = windowsByID[id], let original = window.frame else { continue }
                 let parked = InventoryRect(
