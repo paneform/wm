@@ -147,7 +147,9 @@ public struct CLIParser: Sendable {
     }
 
     private func parseObserve(_ arguments: [String]) throws -> CLICommand {
-        guard arguments.first == "window" else { throw CLIParseError("expected 'observe window'") }
+        guard let target = arguments.first else { throw CLIParseError("expected 'observe window' or 'observe workspace'") }
+        if target == "workspace" { return try parseObserveWorkspace(Array(arguments.dropFirst())) }
+        guard target == "window" else { throw CLIParseError("expected 'observe window' or 'observe workspace'") }
         var params: [String: JSONValue] = [:]
         var url = defaultWMWebSocketURL
         var index = 1
@@ -166,6 +168,15 @@ public struct CLIParser: Sendable {
             index += 1
         }
         return .request(method: "observe.window", params: params, url: url)
+    }
+
+    private func parseObserveWorkspace(_ arguments: [String]) throws -> CLICommand {
+        guard let name = arguments.first, !name.isEmpty else { throw CLIParseError("missing workspace name") }
+        return .request(
+            method: "observe.workspace",
+            params: ["name": .string(name)],
+            url: try parseURLOnly(Array(arguments.dropFirst()))
+        )
     }
 
     private func parseWorkspace(_ arguments: [String]) throws -> CLICommand {

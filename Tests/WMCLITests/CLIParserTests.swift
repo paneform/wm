@@ -13,6 +13,7 @@ import Testing
         (["monitor", "list"], "display.list"),
         (["window", "list"], "window.list"),
         (["observe", "window"], "observe.window"),
+        (["observe", "workspace", "T"], "observe.workspace"),
         (["diagnostics", "inventory"], "diagnostics.inventory"),
         (["inventory", "refresh"], "inventory.refresh"),
     ]
@@ -24,6 +25,18 @@ import Testing
         #expect(method == expected)
         #expect(url == defaultWMWebSocketURL)
     }
+}
+
+@Test func parsesObserveWorkspace() throws {
+    #expect(try CLIParser().parse(["observe", "workspace", "T"]) == .request(
+        method: "observe.workspace", params: ["name": .string("T")], url: defaultWMWebSocketURL
+    ))
+    #expect(try CLIParser().parse([
+        "observe", "workspace", "T", "--url", "wss://example.test/v1",
+    ]) == .request(
+        method: "observe.workspace", params: ["name": .string("T")], url: URL(string: "wss://example.test/v1")!
+    ))
+    #expect(throws: CLIParseError.self) { try CLIParser().parse(["observe", "workspace"]) }
 }
 
 @Test func parsesObserveWindowFilters() throws {

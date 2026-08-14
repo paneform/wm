@@ -161,6 +161,14 @@ public struct WorkspaceListParams: Codable, Equatable, Sendable {
     public init() {}
 }
 
+public struct ObserveWorkspaceParams: Codable, Equatable, Sendable {
+    public var name: String
+
+    public init(name: String) {
+        self.name = name
+    }
+}
+
 public struct WorkspaceFocusParams: Codable, Equatable, Sendable {
     public var name: String
     public var displayId: String?

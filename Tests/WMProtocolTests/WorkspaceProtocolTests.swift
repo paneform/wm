@@ -47,6 +47,7 @@ private let workspace = WorkspaceState(
     #expect(Method.workspaceMoveWindow.rawValue == "workspace.move_window")
     #expect(Method.workspaceMoveDisplay.rawValue == "workspace.move_display")
     #expect(Method.workspaceSetMode.rawValue == "workspace.set_mode")
+    #expect(Method.observeWorkspace.rawValue == "observe.workspace")
     #expect(EventTopic.workspaceDisplayChanged.rawValue == "workspace.display_changed")
     #expect(EventTopic.workspaceModeChanged.rawValue == "workspace.mode_changed")
     #expect(ErrorCode.workspaceNotFound.rawValue == "workspace_not_found")

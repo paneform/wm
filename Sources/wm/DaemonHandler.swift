@@ -165,6 +165,15 @@ actor DaemonHandler: WebSocketRequestHandler {
                 committed = try await state.refresh()
                 retainSessionWindows(committed.snapshot.inventory.windows)
                 result = observeWindows(params: request.params, inventory: committed.snapshot.inventory, workspaceState: await workspaces.snapshot())
+            case .observeWorkspace:
+                let params = try decodeParams(ObserveWorkspaceParams.self, from: .object(request.params))
+                committed = try await state.refresh()
+                retainSessionWindows(committed.snapshot.inventory.windows)
+                result = try observeWorkspace(
+                    named: params.name,
+                    inventory: committed.snapshot.inventory,
+                    workspaceState: await workspaces.snapshot()
+                )
             case .windowFrameGet:
                 let params = try decodeParams(WindowFrameGetParams.self, from: .object(request.params))
                 let window = try resolveWindow(params.windowID, in: snapshot.inventory.windows)
@@ -366,6 +375,29 @@ actor DaemonHandler: WebSocketRequestHandler {
         if case .string(let value)? = params["app"], !window.appName.localizedCaseInsensitiveContains(value) { return false }
         if case .string(let value)? = params["exe"], !(window.executablePath ?? "").localizedCaseInsensitiveContains(value) { return false }
         return true
+    }
+
+    private func observeWorkspace(
+        named name: String,
+        inventory: InventorySnapshot,
+        workspaceState: WMWorkspace.WorkspaceState
+    ) throws -> JSONValue {
+        guard let workspace = workspaceState.workspaces.first(where: { $0.name == name }) else {
+            throw WorkspaceMutationError.workspaceNotFound(name)
+        }
+        let liveByID = Dictionary(uniqueKeysWithValues: inventory.windows.map { ($0.id, $0) })
+        return .object([
+            "workspace": workspaceJSON(workspace),
+            "windows": .array(workspace.windowIDs.map { id in
+                .object([
+                    "window_id": .string(id),
+                    "observed": liveByID[id].map(json) ?? .null,
+                    "expected": sessionWindows[id].map(json) ?? .null,
+                    "restore_frame": workspaceState.parkedWindowFrames[id].map(json) ?? .null,
+                    "session_retained": .bool(sessionWindows[id] != nil),
+                ])
+            }),
+        ])
     }
 
     private func resolveDisplay(
