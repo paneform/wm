@@ -24,7 +24,6 @@ actor DaemonHandler: WebSocketRequestHandler {
     private var workspaceSequence: UInt64 = 0
     private var windowMinimumSizes: [String: WorkspaceMinimumSize] = [:]
     private var sessionWindows: [String: NormalizedWindow] = [:]
-    private var pendingExternalWindowID: String?
     private var lastTransitionTrace: JSONValue = .null
     private var sender: (@Sendable (String, UUID) -> Void)?
 
@@ -41,20 +40,9 @@ actor DaemonHandler: WebSocketRequestHandler {
         let windowID = resolveRetainedFocusedWindowID(
             windows: Array(sessionWindows.values), focusedWindowID: windowID, frontmostPID: frontmostPID
         )
-        guard let windowID else {
-            pendingExternalWindowID = nil
-            return
-        }
+        guard let windowID else { return }
         let before = await workspaces.snapshot()
-        guard let name = before.workspaceName(containing: windowID), name != before.focusedWorkspaceName else {
-            pendingExternalWindowID = nil
-            return
-        }
-        guard pendingExternalWindowID == windowID else {
-            pendingExternalWindowID = windowID
-            return
-        }
-        pendingExternalWindowID = nil
+        guard let name = before.workspaceName(containing: windowID), name != before.focusedWorkspaceName else { return }
         let displayID = before[workspace: name]?.displayID
         var mutation = try await workspaces.previewFocus(name: name, displayID: displayID)
         mutation.workspaceState.setFocusedWindow(windowID, in: name)

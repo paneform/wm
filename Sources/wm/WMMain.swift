@@ -49,8 +49,7 @@ import WMWorkspace
             FileHandle.standardError.write(Data("daemon start failed: \(error)\n".utf8))
             return CLIExitCode.unavailable.rawValue
         }
-        let observation = InventoryObservationLoop(
-            observe: {
+        let observe: @Sendable () async throws -> Void = {
                 let committed = try await state.refresh()
                 let inventory = committed.snapshot.inventory
                 guard let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id else { return }
@@ -61,12 +60,21 @@ import WMWorkspace
                     frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier,
                     inventory: inventory
                 )
-            },
+        }
+        let observation = InventoryObservationLoop(
+            observe: observe,
             report: { error in
                 FileHandle.standardError.write(Data("automatic inventory refresh failed: \(error)\n".utf8))
             }
         )
         let observationTask = Task { await observation.run() }
+        let activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { try? await observe() }
+        }
         let stream = AsyncStream<Void> { continuation in
             signal(SIGINT, SIG_IGN)
             signal(SIGTERM, SIG_IGN)
@@ -81,6 +89,7 @@ import WMWorkspace
         for await _ in stream { break }
         observationTask.cancel()
         await observationTask.value
+        NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
         server.stop()
         return CLIExitCode.success.rawValue
     }
