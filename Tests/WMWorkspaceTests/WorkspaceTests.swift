@@ -163,6 +163,26 @@ import Testing
     #expect(unchanged.modifiedWorkspaces.isEmpty)
 }
 
+@Test func bspLayoutAdaptsToObservedMinimumWidths() {
+    let workspace = Workspace(
+        name: "tile", origin: .runtime, displayID: "d",
+        gap: 8,
+        windowIDs: ["spotify", "ghostty"],
+        bsp: .init(root: .split(
+            axis: .vertical, ratio: 0.5,
+            first: .leaf(windowID: "spotify"), second: .leaf(windowID: "ghostty")
+        ))
+    )
+
+    let layout = workspace.layout(
+        in: .init(x: 0, y: 32, width: 1512, height: 950),
+        minimumSizes: ["spotify": .init(width: 800, height: 0)]
+    )
+
+    #expect(layout["spotify"] == .init(x: 0, y: 32, width: 800, height: 950))
+    #expect(layout["ghostty"] == .init(x: 808, y: 32, width: 704, height: 950))
+}
+
 private func sampleState() -> WorkspaceState {
     WorkspaceState(
         workspaces: [tiled("source", display: "d", windows: ["a", "b", "c"], visible: true, focused: true)],

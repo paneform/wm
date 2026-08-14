@@ -25,6 +25,9 @@ Updated: 2026-08-14
 - Verified off-screen workspace parking and exact-frame reveal with rollback
 - Persisted parked-frame recovery across daemon restarts
 - Workspace lifecycle reconciliation for newly observed and closed windows
+- Stable CG-backed window identities across scans and daemon restarts
+- Two-second automatic inventory observation with coalesced refresh/reconciliation
+- Observed minimum-size feedback and BSP ratio adaptation
 
 ## Live Findings
 
@@ -64,15 +67,12 @@ Updated: 2026-08-14
 ## Validation
 
 - Xcode 26.6 / Swift 6.3.3 toolchain active.
-- Full suite passes: 28 XCTest tests and 43 Swift Testing tests.
+- Full suite passes: 28 XCTest tests and 45 Swift Testing tests.
 - Dependency-free geometry and workspace-layout verifiers pass.
 
 ## Next Slices
 
-1. Stable identity/event updates across window creation, closure, hide/show, and
-   title/frame changes
-2. Pure BSP tree/layout package and invariant/property fixtures
-3. Explicit workspace state with one visible workspace and no parking initially
-4. Transactional BSP tiling of explicitly selected windows
-5. Verified parking/reveal and startup reconciliation
-6. Multi-display topology and workspace migration
+1. Route move-window, move-display, and mode mutations through verified platform
+   reconciliation before committing intent
+2. Native AX/workspace event hints layered over periodic inventory audits
+3. Multi-display topology and workspace migration

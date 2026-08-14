@@ -154,7 +154,7 @@ public enum WindowNormalizer {
     ) -> NormalizedWindow {
         let issues = ax.readErrors + match.reasons
         return NormalizedWindow(
-            id: "window:ax:\(ax.pid):\(index)",
+            id: stableID(index: index, ax: ax, cg: cg),
             pid: ax.pid,
             appName: ax.appName,
             bundleID: ax.bundleID,
@@ -194,6 +194,16 @@ public enum WindowNormalizer {
         guard let value else { return nil }
         let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return normalized.isEmpty ? nil : normalized
+    }
+
+    private static func stableID(index: Int, ax: RawAXWindow, cg: RawCGWindow?) -> String {
+        if let cgWindowID = cg?.cgWindowID ?? ax.cgWindowID, cgWindowID != 0 {
+            return "window:cg:\(cgWindowID)"
+        }
+        let title = (ax.title ?? "").unicodeScalars.reduce(UInt64(14_695_981_039_346_656_037)) {
+            ($0 ^ UInt64($1.value)) &* 1_099_511_628_211
+        }
+        return "window:ax:\(ax.pid):\(ax.role ?? ""):\(ax.subrole ?? ""):\(String(title, radix: 16)):\(index)"
     }
 }
 

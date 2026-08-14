@@ -32,6 +32,13 @@ private typealias WMCoreTestsSnapshot = Snapshot
 
 private let healthy = InventoryHealth(status: .healthy)
 
+private actor ObservationProbe {
+    var observations = 0
+    var sleeps = 0
+    func slept() { sleeps += 1 }
+    func observed() { observations += 1 }
+}
+
 @Test func refreshesCoalesceAndVersionsIncrease() async throws {
     let provider = Provider([.init(windows: [], displays: [], health: healthy, focusedWindowID: nil)])
     let state = InventoryState(provider: provider)
@@ -42,6 +49,23 @@ private let healthy = InventoryHealth(status: .healthy)
     #expect(await provider.calls == 1)
     #expect(a.stateVersion == 1)
     #expect(a.sequence == 4)
+}
+
+@Test func observationLoopRetriesAndStopsOnCancellation() async {
+    let probe = ObservationProbe()
+    let task = Task {
+        await InventoryObservationLoop(
+            interval: .zero,
+            sleep: { _ in
+                await probe.slept()
+                if await probe.sleeps > 2 { throw CancellationError() }
+            },
+            observe: { await probe.observed() },
+            report: { _ in }
+        ).run()
+    }
+    await task.value
+    #expect(await probe.observations == 2)
 }
 
 @Test func diffsAreSortedAndReplayIsStrictlyAfterSequence() async throws {

@@ -17,6 +17,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     private var subscriptions: [UUID: [String: Task<Void, Never>]] = [:]
     private var workspaceSubscriptions: [UUID: [String: Set<EventTopic>]] = [:]
     private var workspaceSequence: UInt64 = 0
+    private var windowMinimumSizes: [String: WorkspaceMinimumSize] = [:]
     private var sender: (@Sendable (String, UUID) -> Void)?
 
     init(state: State, workspaces: WorkspaceController) {
@@ -389,18 +390,35 @@ actor DaemonHandler: WebSocketRequestHandler {
             width: display.visibleFrame.width,
             height: display.visibleFrame.height
         )
-        let targets = workspace.layout(in: bounds)
+        var targets = workspace.layout(in: bounds, minimumSizes: windowMinimumSizes)
         let windows = try workspace.windowIDs.map { try resolveWindow($0, in: inventory.windows) }
         let originals = Dictionary(uniqueKeysWithValues: windows.compactMap { window in window.frame.map { (window.id, $0) } })
         var moved: [NormalizedWindow] = []
         do {
             for window in windows {
                 guard let target = targets[window.id], target.width > 0, target.height > 0 else { continue }
-                _ = try await geometry.set(window: window, params: .init(
-                    windowID: window.id,
-                    frame: .init(x: target.x, y: target.y, width: target.width, height: target.height)
-                ))
-                moved.append(window)
+                do {
+                    _ = try await geometry.set(window: window, params: layoutParams(window.id, target))
+                    moved.append(window)
+                } catch let failure as WindowGeometryFailure {
+                    guard failure.code == .geometryVerificationFailed,
+                          let observed = failure.observedFrame,
+                          observed.width >= target.width,
+                          observed.height >= target.height else { throw failure }
+                    windowMinimumSizes[window.id] = .init(width: observed.width, height: observed.height)
+                    targets = workspace.layout(in: bounds, minimumSizes: windowMinimumSizes)
+                    for changed in moved.reversed() {
+                        guard let original = originals[changed.id] else { continue }
+                        _ = try? await geometry.set(window: changed, params: frameParams(changed.id, original))
+                    }
+                    moved.removeAll()
+                    for retryWindow in windows {
+                        guard let retryTarget = targets[retryWindow.id], retryTarget.width > 0, retryTarget.height > 0 else { continue }
+                        _ = try await geometry.set(window: retryWindow, params: layoutParams(retryWindow.id, retryTarget))
+                        moved.append(retryWindow)
+                    }
+                    break
+                }
             }
         } catch {
             for window in moved.reversed() {
@@ -412,6 +430,10 @@ actor DaemonHandler: WebSocketRequestHandler {
             }
             throw error
         }
+    }
+
+    private func layoutParams(_ id: String, _ frame: WorkspaceLayoutRect) -> WindowFrameSetParams {
+        .init(windowID: id, frame: .init(x: frame.x, y: frame.y, width: frame.width, height: frame.height))
     }
 
 

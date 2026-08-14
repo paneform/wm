@@ -247,6 +247,13 @@ Inventory refresh reconciles workspace membership: newly observed normal windows
 join the focused workspace, or configured workspace `1` when none is focused.
 Vanished windows are removed with BSP sibling promotion, focused-window repair,
 parked-frame cleanup, runtime workspace lifecycle cleanup, and atomic persistence.
+The daemon performs this refresh automatically every two seconds; manual refresh
+uses the same coalescing state path.
+
+When strict BSP frames reveal a plausible application clamp, the daemon caches
+that window's observed width/height lower bounds, recomputes subtree allocations,
+and retries one adapted transaction. Infeasible or unpredictable constraints
+still fail closed and roll back.
 
 ## Tests
 

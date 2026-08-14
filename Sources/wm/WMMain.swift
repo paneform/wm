@@ -48,14 +48,33 @@ import WMWorkspace
             FileHandle.standardError.write(Data("daemon start failed: \(error)\n".utf8))
             return CLIExitCode.unavailable.rawValue
         }
+        let observation = InventoryObservationLoop(
+            observe: {
+                let committed = try await state.refresh()
+                let inventory = committed.snapshot.inventory
+                guard let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id else { return }
+                let ids = inventory.windows.filter { $0.classification == .normal }.map(\.id)
+                _ = try await workspaces.reconcileObservedWindows(ids, displayID: displayID)
+            },
+            report: { error in
+                FileHandle.standardError.write(Data("automatic inventory refresh failed: \(error)\n".utf8))
+            }
+        )
+        let observationTask = Task { await observation.run() }
         let stream = AsyncStream<Void> { continuation in
             signal(SIGINT, SIG_IGN)
-            let source = DispatchSource.makeSignalSource(signal: SIGINT)
-            source.setEventHandler { continuation.yield(); continuation.finish() }
-            source.resume()
-            continuation.onTermination = { _ in source.cancel() }
+            signal(SIGTERM, SIG_IGN)
+            let sources = [SIGINT, SIGTERM].map { signal in
+                let source = DispatchSource.makeSignalSource(signal: signal)
+                source.setEventHandler { continuation.yield(); continuation.finish() }
+                source.resume()
+                return source
+            }
+            continuation.onTermination = { _ in sources.forEach { $0.cancel() } }
         }
         for await _ in stream { break }
+        observationTask.cancel()
+        await observationTask.value
         server.stop()
         return CLIExitCode.success.rawValue
     }
