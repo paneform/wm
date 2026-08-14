@@ -98,6 +98,23 @@ func testReconcileRetainsHandleAcrossTemporaryInventoryOmission() async throws {
     let createdHandles = await adapter.createdHandles
     XCTAssertEqual(createdHandles, 1)
 }
+
+func testLifetimeEvictionDoesNotEvictSameIDReplacement() async throws {
+    let adapter = FakeGeometryAdapter(frame: initialFrame)
+    let service = WindowGeometryService(adapter: adapter)
+    let replacement = NormalizedWindow(
+        id: window.id, pid: 8, appName: window.appName, title: window.title, role: window.role,
+        subrole: window.subrole, frame: window.frame, classification: .normal, management: .managed,
+        rejectionReasons: [], cgWindowID: window.cgWindowID, joinConfidence: .exact, joinSignals: [],
+        health: .healthy, healthIssues: []
+    )
+    _ = try await service.get(window: replacement)
+    await service.evict(lifetimes: [.init(windowID: window.id, pid: 7)])
+    _ = try await service.get(window: replacement)
+
+    let createdHandles = await adapter.createdHandles
+    XCTAssertEqual(createdHandles, 1)
+}
 }
 
 private actor FakeGeometryAdapter: WindowGeometryAdapter {
@@ -109,6 +126,7 @@ private actor FakeGeometryAdapter: WindowGeometryAdapter {
     private(set) var resolveCalls = 0
     private(set) var createdHandles = 0
     private var handles: [String: WindowGeometryHandle] = [:]
+    private var pids: [String: Int32] = [:]
 
     init(frame: InventoryRect, acceptedAttempt: Int = 1, resolveError: WindowGeometryAdapterError? = nil, transform: @escaping @Sendable (InventoryRect, Int) -> InventoryRect = { frame, _ in frame }) {
         self.frame = frame
@@ -124,7 +142,15 @@ private actor FakeGeometryAdapter: WindowGeometryAdapter {
         createdHandles += 1
         let handle = WindowGeometryHandle(rawValue: "\(window.id):\(createdHandles)")
         handles[window.id] = handle
+        pids[window.id] = window.pid
         return handle
+    }
+
+    func evict(lifetimes: Set<WindowLifetime>) {
+        for lifetime in lifetimes where pids[lifetime.windowID] == lifetime.pid {
+            handles.removeValue(forKey: lifetime.windowID)
+            pids.removeValue(forKey: lifetime.windowID)
+        }
     }
 
     func reconcile(windows: [NormalizedWindow]) {

@@ -304,7 +304,7 @@ public enum WindowClassification: String, Codable, Hashable, Sendable {
 }
 
 public enum WindowManagement: String, Codable, Hashable, Sendable {
-    case unmanaged, ineligible, pending
+    case managed, unmanaged, ineligible, pending
 }
 
 public struct NormalizedWindow: Codable, Hashable, Sendable, Identifiable {
@@ -392,6 +392,10 @@ public struct InventorySnapshot: Codable, Hashable, Sendable {
     public var joinDecisions: [JoinDecision]
     public var sourceHealth: [SourceHealth]
     public var appScans: [AppScanResult]
+
+    public var applicationEnumerationSucceeded: Bool {
+        sourceHealth.first { $0.source == .accessibility }?.status == .healthy
+    }
 
     public init(
         timestamp: Date,

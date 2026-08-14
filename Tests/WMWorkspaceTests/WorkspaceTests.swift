@@ -231,6 +231,33 @@ import Testing
     #expect(unchanged.modifiedWorkspaces.isEmpty)
 }
 
+@Test func verifiedCloseCollapsesBSPAndClearsParkingImmediately() throws {
+    var state = WorkspaceState(
+        workspaces: [tiled("1", display: "d", windows: ["a", "closed", "b"])],
+        parkedWindowFrames: ["closed": .init(x: 1, y: 2, width: 3, height: 4)]
+    )
+
+    let result = try state.reconcileObservedWindows(
+        ["a", "b"], removedWindowIDs: ["closed"], defaultDisplayID: "d"
+    )
+
+    #expect(result.modifiedWorkspaces == ["1"])
+    #expect(state[workspace: "1"]?.windowIDs == ["a", "b"])
+    #expect(state[workspace: "1"]?.bsp.root?.windowIDs == ["a", "b"])
+    #expect(state.parkedWindowFrames["closed"] == nil)
+}
+
+@Test func sameIDReplacementIsRemovedThenFreshlyInserted() throws {
+    var state = WorkspaceState(workspaces: [tiled("old", display: "d", windows: ["a", "sibling"])])
+
+    _ = try state.reconcileObservedWindows(["a", "sibling"], removedWindowIDs: ["a"], defaultDisplayID: "d")
+
+    #expect(state[workspace: "old"]?.windowIDs == ["sibling"])
+    #expect(state[workspace: "1"]?.windowIDs == ["a"])
+    #expect(state[workspace: "old"]?.bsp.root == .leaf(windowID: "sibling"))
+    #expect(state[workspace: "1"]?.bsp.root == .leaf(windowID: "a"))
+}
+
 @Test func bspLayoutAdaptsToObservedMinimumWidths() {
     let workspace = Workspace(
         name: "tile", origin: .runtime, displayID: "d",

@@ -24,6 +24,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     private var workspaceSequence: UInt64 = 0
     private var windowMinimumSizes: [String: WorkspaceMinimumSize] = [:]
     private var sessionWindows: [String: NormalizedWindow] = [:]
+    private var lifecycle = ManagedWindowLifecycle()
     private var lastTransitionTrace: JSONValue = .null
     private var sender: (@Sendable (String, UUID) -> Void)?
 
@@ -51,9 +52,27 @@ actor DaemonHandler: WebSocketRequestHandler {
         await publishWorkspaceMutation(mutation, before: before, reason: .workspaceFocused)
     }
 
-    func reconcileObservedWindows(_ ids: [String], displayID: String) async throws {
+    func reconcileObservedWindows(_ inventory: InventorySnapshot, displayID: String) async throws {
+        let update = lifecycle.reconcile(inventory)
+        try await applyLifecycleUpdate(update, displayID: displayID)
+    }
+
+    private func applyLifecycleUpdate(_ update: WindowLifecycleUpdate, displayID: String) async throws {
+        let closedIDs = Set(update.verifiedClosedLifetimes.map(\.windowID))
+        for lifetime in update.verifiedClosedLifetimes {
+            if sessionWindows[lifetime.windowID]?.pid == lifetime.pid {
+                sessionWindows.removeValue(forKey: lifetime.windowID)
+            }
+            windowMinimumSizes.removeValue(forKey: lifetime.windowID)
+        }
+        await geometry.evict(lifetimes: update.verifiedClosedLifetimes)
         let before = await workspaces.snapshot()
-        let mutation = try await workspaces.reconcileObservedWindows(ids, displayID: displayID)
+        let mutation = try await workspaces.reconcileObservedWindows(
+            update.windows.map(\.id),
+            removedIDs: closedIDs.union(update.newlyUnmanagedWindowIDs),
+            displayID: displayID
+        )
+        retainSessionWindows(update.windows)
         await publishWorkspaceMutation(mutation, before: before, reason: .workspaceChanged)
     }
 
@@ -161,6 +180,21 @@ actor DaemonHandler: WebSocketRequestHandler {
             case .healthGet: result = json(protocolHealth(snapshot.health))
             case .displayList: result = json(["displays": snapshot.inventory.displays])
             case .windowList: result = json(["windows": snapshot.inventory.windows])
+            case .windowManage, .windowUnmanage:
+                let params = try decodeParams(WindowManagementParams.self, from: .object(request.params))
+                guard snapshot.inventory.windows.contains(where: { $0.id == params.windowID }) || sessionWindows[params.windowID] != nil else {
+                    throw WorkspaceRequestError.windowNotFound(params.windowID)
+                }
+                let override: WindowManagementOverride = request.method == .windowManage ? .managed : .unmanaged
+                guard let update = lifecycle.setOverride(override, for: params.windowID) else {
+                    throw WorkspaceRequestError.windowNotFound(params.windowID)
+                }
+                let displayID = try resolveDisplay(nil, inventory: snapshot.inventory, workspaceState: await workspaces.snapshot())
+                try await applyLifecycleUpdate(update, displayID: displayID)
+                result = .object([
+                    "window_id": .string(params.windowID),
+                    "management": .string(request.method == .windowManage ? "managed" : "unmanaged"),
+                ])
             case .observeWindow:
                 committed = try await state.refresh()
                 retainSessionWindows(committed.snapshot.inventory.windows)
@@ -194,8 +228,7 @@ actor DaemonHandler: WebSocketRequestHandler {
             case .inventoryRefresh:
                 let inventory = committed.snapshot.inventory
                 if let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id {
-                    let ids = inventory.windows.filter { $0.classification == .normal }.map(\.id)
-                    try await reconcileObservedWindows(ids, displayID: displayID)
+                    try await reconcileObservedWindows(inventory, displayID: displayID)
                 }
                 result = json(userState(committed))
             case .daemonPing: result = .object(["session_id": .string(sessionID), "daemon_version": .string(version), "ready": .bool(true), "current_sequence": .number(Double(committed.sequence)), "state_version": .number(Double(committed.stateVersion))])

@@ -7,6 +7,7 @@ public struct AXWindowGeometryAdapter: WindowGeometryAdapter, @unchecked Sendabl
         let lock = NSLock()
         var elements: [String: AXUIElement] = [:]
         var handlesByWindowID: [String: WindowGeometryHandle] = [:]
+        var lifetimesByWindowID: [String: WindowLifetime] = [:]
     }
 
     private let storage = Storage()
@@ -25,8 +26,19 @@ public struct AXWindowGeometryAdapter: WindowGeometryAdapter, @unchecked Sendabl
             if !isSameLogicalWindow(element, window) || (try? frame(element)) == nil {
                 storage.lock.withLock {
                     storage.handlesByWindowID.removeValue(forKey: windowID)
+                    storage.lifetimesByWindowID.removeValue(forKey: windowID)
                     storage.elements.removeValue(forKey: handle.rawValue)
                 }
+            }
+        }
+    }
+
+    public func evict(lifetimes: Set<WindowLifetime>) async {
+        storage.lock.withLock {
+            for lifetime in lifetimes where storage.lifetimesByWindowID[lifetime.windowID] == lifetime {
+                guard let handle = storage.handlesByWindowID.removeValue(forKey: lifetime.windowID) else { continue }
+                storage.lifetimesByWindowID.removeValue(forKey: lifetime.windowID)
+                storage.elements.removeValue(forKey: handle.rawValue)
             }
         }
     }
@@ -42,6 +54,7 @@ public struct AXWindowGeometryAdapter: WindowGeometryAdapter, @unchecked Sendabl
             } catch {
                 storage.lock.withLock {
                     storage.handlesByWindowID.removeValue(forKey: window.id)
+                    storage.lifetimesByWindowID.removeValue(forKey: window.id)
                     storage.elements.removeValue(forKey: retained.rawValue)
                 }
                 if let adapterError = error as? WindowGeometryAdapterError, adapterError == .stale { throw adapterError }
@@ -57,6 +70,7 @@ public struct AXWindowGeometryAdapter: WindowGeometryAdapter, @unchecked Sendabl
         storage.lock.withLock {
             storage.elements[handle.rawValue] = candidates[0]
             storage.handlesByWindowID[window.id] = handle
+            storage.lifetimesByWindowID[window.id] = .init(windowID: window.id, pid: window.pid)
         }
         return handle
     }

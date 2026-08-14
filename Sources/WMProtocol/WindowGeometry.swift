@@ -1,5 +1,13 @@
 import Foundation
 
+public struct WindowManagementParams: Codable, Equatable, Sendable {
+    public var windowID: String
+
+    public init(windowID: String) { self.windowID = windowID }
+
+    enum CodingKeys: String, CodingKey { case windowID = "window_id" }
+}
+
 public struct WindowFrameGetParams: Codable, Equatable, Sendable {
     public var windowID: String
 

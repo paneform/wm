@@ -114,7 +114,7 @@ public struct RawCGWindow: Codable, Equatable, Sendable {
 }
 
 public enum WindowClassification: String, Codable, Sendable { case normal, transient; case systemUI = "system_ui"; case uncertain }
-public enum WindowManagement: String, Codable, Sendable { case unmanaged, ineligible, pending }
+public enum WindowManagement: String, Codable, Sendable { case managed, unmanaged, ineligible, pending }
 public enum JoinConfidence: String, Codable, Sendable { case exact, strong, weak; case axOnly = "ax_only"; case cgOnly = "cg_only" }
 
 public struct WindowIdentity: Codable, Equatable, Sendable {

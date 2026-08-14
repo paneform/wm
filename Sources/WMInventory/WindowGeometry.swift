@@ -22,6 +22,7 @@ public enum WindowGeometryAdapterError: Error, Equatable, Sendable {
 
 public protocol WindowGeometryAdapter: Sendable {
     func reconcile(windows: [NormalizedWindow]) async
+    func evict(lifetimes: Set<WindowLifetime>) async
     func resolve(_ window: NormalizedWindow) async throws -> WindowGeometryHandle
     func validateControllability(of handle: WindowGeometryHandle) async throws
     func readFrame(of handle: WindowGeometryHandle) async throws -> InventoryRect
@@ -34,6 +35,7 @@ public protocol WindowGeometryAdapter: Sendable {
 
 public extension WindowGeometryAdapter {
     func reconcile(windows: [NormalizedWindow]) async {}
+    func evict(lifetimes: Set<WindowLifetime>) async {}
     func focus(_ handle: WindowGeometryHandle) async throws { throw WindowGeometryAdapterError.notControllable }
     func isFocused(_ handle: WindowGeometryHandle) async throws -> Bool { false }
     func park(frame: InventoryRect, handle: WindowGeometryHandle) async throws {
@@ -66,6 +68,10 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
 
     public func reconcile(windows: [NormalizedWindow]) async {
         await adapter.reconcile(windows: windows)
+    }
+
+    public func evict(lifetimes: Set<WindowLifetime>) async {
+        await adapter.evict(lifetimes: lifetimes)
     }
 
     public func get(window: NormalizedWindow) async throws -> WindowFrameGetResult {

@@ -20,6 +20,12 @@ final class WMProtocolTests: XCTestCase {
         try roundTrip(ClientMessage.request(.init(requestId: "req-1", method: .stateGet)))
         try roundTrip(ClientMessage.subscribe(.init(requestId: "req-2", subscriptionId: "inventory", topics: [.windowInventory, .healthChanged], projection: .delta)))
         try roundTrip(ClientMessage.unsubscribe(.init(requestId: "req-3", subscriptionId: "inventory")))
+        try roundTrip(ClientMessage.request(.init(
+            requestId: "req-4", method: .windowManage,
+            params: ["window_id": .string("window:1")]
+        )))
+        try roundTrip(WindowManagementParams(windowID: "window:1"))
+        try roundTrip(WindowManagement.managed)
     }
 
     func testServerMessagesRoundTrip() throws {

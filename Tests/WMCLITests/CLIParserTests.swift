@@ -12,6 +12,8 @@ import Testing
         (["display", "list"], "display.list"),
         (["monitor", "list"], "display.list"),
         (["window", "list"], "window.list"),
+        (["window", "manage", "window:1"], "window.manage"),
+        (["window", "unmanage", "window:1"], "window.unmanage"),
         (["observe", "window"], "observe.window"),
         (["observe", "workspace", "T"], "observe.workspace"),
         (["diagnostics", "inventory"], "diagnostics.inventory"),
@@ -25,6 +27,16 @@ import Testing
         #expect(method == expected)
         #expect(url == defaultWMWebSocketURL)
     }
+}
+
+@Test func parsesWindowManagementCommands() throws {
+    #expect(try CLIParser().parse(["window", "manage", "window:1"]) == .request(
+        method: "window.manage", params: ["window_id": .string("window:1")], url: defaultWMWebSocketURL
+    ))
+    #expect(try CLIParser().parse(["window", "unmanage", "window:2", "--url", "ws://localhost:9000/v1"]) == .request(
+        method: "window.unmanage", params: ["window_id": .string("window:2")], url: URL(string: "ws://localhost:9000/v1")!
+    ))
+    #expect(throws: CLIParseError.self) { try CLIParser().parse(["window", "manage"]) }
 }
 
 @Test func parsesObserveWorkspace() throws {

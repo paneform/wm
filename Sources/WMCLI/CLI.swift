@@ -138,12 +138,21 @@ public struct CLIParser: Sendable {
     }
 
     private func parseWindow(_ arguments: [String]) throws -> CLICommand {
-        guard let child = arguments.first else { throw CLIParseError("expected 'window list' or 'window frame'") }
+        guard let child = arguments.first else { throw CLIParseError("expected a window command") }
         switch child {
         case "list": return try request("window.list", Array(arguments.dropFirst()))
+        case "manage", "unmanage": return try parseWindowManagement(child, Array(arguments.dropFirst()))
         case "frame": return try parseWindowFrame(Array(arguments.dropFirst()))
-        default: throw CLIParseError("expected 'window list' or 'window frame'")
+        default: throw CLIParseError("unknown window command: \(child)")
         }
+    }
+
+    private func parseWindowManagement(_ operation: String, _ arguments: [String]) throws -> CLICommand {
+        guard let windowID = arguments.first, !windowID.isEmpty else { throw CLIParseError("missing window ID") }
+        return .request(
+            method: "window.\(operation)", params: ["window_id": .string(windowID)],
+            url: try parseURLOnly(Array(arguments.dropFirst()))
+        )
     }
 
     private func parseObserve(_ arguments: [String]) throws -> CLICommand {

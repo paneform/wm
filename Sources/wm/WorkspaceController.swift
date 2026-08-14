@@ -54,8 +54,8 @@ actor WorkspaceController {
         _ = try commit { try $0.adoptUnassignedWindows(ids, displayID: displayID) }
     }
 
-    func reconcileObservedWindows(_ ids: [String], displayID: String) throws -> WMWorkspace.WorkspaceMutationResult {
-        try commit { try $0.reconcileObservedWindows(ids, defaultDisplayID: displayID) }
+    func reconcileObservedWindows(_ ids: [String], removedIDs: Set<String> = [], displayID: String) throws -> WMWorkspace.WorkspaceMutationResult {
+        try commit { try $0.reconcileObservedWindows(ids, removedWindowIDs: removedIDs, defaultDisplayID: displayID) }
     }
 
     func moveWorkspace(_ name: String, to displayID: String) throws -> WMWorkspace.WorkspaceMutationResult {
