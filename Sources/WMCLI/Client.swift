@@ -1,0 +1,261 @@
+import Foundation
+import WMWebSocket
+
+public enum JSONValue: Sendable, Equatable, Codable {
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case null
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() { self = .null }
+        else if let value = try? container.decode(Bool.self) { self = .bool(value) }
+        else if let value = try? container.decode(Double.self) { self = .number(value) }
+        else if let value = try? container.decode(String.self) { self = .string(value) }
+        else if let value = try? container.decode([JSONValue].self) { self = .array(value) }
+        else { self = .object(try container.decode([String: JSONValue].self)) }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .object(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .string(let value): try container.encode(value)
+        case .number(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
+        case .null: try container.encodeNil()
+        }
+    }
+}
+
+public struct CLIRequest: Sendable, Equatable, Codable {
+    public let type: String
+    public let requestID: String
+    public let method: String
+    public let params: [String: JSONValue]
+
+    enum CodingKeys: String, CodingKey {
+        case type, method, params
+        case requestID = "request_id"
+    }
+
+    public init(requestID: String, method: String, params: [String: JSONValue] = [:]) {
+        type = "request"
+        self.requestID = requestID
+        self.method = method
+        self.params = params
+    }
+}
+
+public struct CLISubscribeRequest: Sendable, Equatable, Codable {
+    public let type: String
+    public let requestID: String
+    public let subscriptionID: String
+    public let topics: [String]
+    public let projection: CLIProjection
+    public let afterSequence: UInt64?
+
+    enum CodingKeys: String, CodingKey {
+        case type, topics, projection
+        case requestID = "request_id"
+        case subscriptionID = "subscription_id"
+        case afterSequence = "after_sequence"
+    }
+
+    public init(
+        requestID: String,
+        subscriptionID: String,
+        topics: [String],
+        projection: CLIProjection,
+        afterSequence: UInt64?
+    ) {
+        type = "subscribe"
+        self.requestID = requestID
+        self.subscriptionID = subscriptionID
+        self.topics = topics
+        self.projection = projection
+        self.afterSequence = afterSequence
+    }
+}
+
+extension CLIProjection: Codable {}
+
+public struct CLIResponse: Sendable, Equatable {
+    public let json: Data
+    public let ok: Bool
+
+    public init(json: Data, ok: Bool) {
+        self.json = json
+        self.ok = ok
+    }
+}
+
+public protocol CLIWebSocketClient: Sendable {
+    func request(_ message: Data, at url: URL) async throws -> CLIResponse
+    func subscribe(_ message: Data, at url: URL) -> AsyncThrowingStream<Data, Error>
+}
+
+public struct ConcreteWebSocketClient: CLIWebSocketClient, Sendable {
+    public init() {}
+
+    public func request(_ message: Data, at url: URL) async throws -> CLIResponse {
+        try await Task.detached {
+            let client = WebSocketClient(url: url)
+            try client.connect()
+            defer { client.close() }
+            _ = try client.receive()
+            try client.send(text: try text(message))
+            let response = Data(try client.receive().utf8)
+            return CLIResponse(json: response, ok: try responseIsSuccessful(response))
+        }.value
+    }
+
+    public func subscribe(_ message: Data, at url: URL) -> AsyncThrowingStream<Data, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task.detached {
+                let client = WebSocketClient(url: url)
+                do {
+                    try client.connect()
+                    continuation.yield(Data(try client.receive().utf8))
+                    try client.send(text: try text(message))
+                    while !Task.isCancelled { continuation.yield(Data(try client.receive().utf8)) }
+                    client.close()
+                    continuation.finish()
+                } catch {
+                    client.close()
+                    if !Task.isCancelled { continuation.finish(throwing: error) }
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+}
+
+private func text(_ data: Data) throws -> String {
+    guard let value = String(data: data, encoding: .utf8) else { throw CLIParseError("request is not UTF-8") }
+    return value
+}
+
+private func responseIsSuccessful(_ data: Data) throws -> Bool {
+    let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    return object?["type"] as? String == "response" && object?["ok"] as? Bool == true
+}
+
+public struct CLIOutput: Sendable {
+    public var stdout: @Sendable (Data) -> Void
+    public var stderr: @Sendable (Data) -> Void
+
+    public init(
+        stdout: @escaping @Sendable (Data) -> Void,
+        stderr: @escaping @Sendable (Data) -> Void
+    ) {
+        self.stdout = stdout
+        self.stderr = stderr
+    }
+}
+
+public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
+    private let client: Client
+    private let output: CLIOutput
+    private let id: @Sendable () -> String
+    private let encoder: JSONEncoder
+
+    public init(
+        client: Client,
+        output: CLIOutput,
+        id: @escaping @Sendable () -> String = { UUID().uuidString }
+    ) {
+        self.client = client
+        self.output = output
+        self.id = id
+        encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    }
+
+    public func run(arguments: [String]) async -> CLIExitCode {
+        do {
+            return try await run(CLIParser().parse(arguments))
+        } catch let error as CLIParseError {
+            writeError(code: "usage", message: error.message)
+            return .usage
+        } catch {
+            writeError(code: "connection_failed", message: String(describing: error))
+            return .unavailable
+        }
+    }
+
+    public func run(_ command: CLICommand) async throws -> CLIExitCode {
+        switch command {
+        case .request(let method, let params, let url):
+            let response = try await client.request(try encoder.encode(CLIRequest(requestID: id(), method: method, params: params)), at: url)
+            writeLine(response.json, to: output.stdout)
+            return response.ok ? .success : .commandFailed
+        case .subscribe(let configuration):
+            let request = CLISubscribeRequest(
+                requestID: id(), subscriptionID: id(), topics: configuration.topics,
+                projection: configuration.projection, afterSequence: configuration.afterSequence
+            )
+            for try await message in client.subscribe(try encoder.encode(request), at: configuration.url) {
+                writeLine(message, to: output.stdout)
+            }
+            return .success
+        case .lifecycle(let command, _):
+            writeError(code: "not_implemented", message: "lifecycle command is reserved: \(command.rawValue)")
+            return .commandFailed
+        case .daemon:
+            writeError(code: "wiring_required", message: "daemon command requires executable wiring")
+            return .unavailable
+        case .benchmark(let configuration):
+            return try await benchmark(configuration)
+        case .verify:
+            writeError(code: "wiring_required", message: "verification requires executable wiring")
+            return .unavailable
+        }
+    }
+
+    private func benchmark(_ configuration: BenchmarkConfiguration) async throws -> CLIExitCode {
+        var durations: [Double] = []
+        let clock = ContinuousClock()
+        for _ in 0..<configuration.iterations {
+            let started = clock.now
+            let request = CLIRequest(requestID: id(), method: "daemon.ping")
+            let response = try await client.request(try encoder.encode(request), at: configuration.url)
+            guard response.ok else {
+                writeLine(response.json, to: output.stdout)
+                return .commandFailed
+            }
+            durations.append(Double(started.duration(to: clock.now).components.attoseconds) / 1e15)
+        }
+        let sorted = durations.sorted()
+        let result: JSONValue = .object([
+            "iterations": .number(Double(configuration.iterations)),
+            "method": .string("daemon.ping"),
+            "latency_ms": .object([
+                "min": .number(sorted.first ?? 0),
+                "median": .number(sorted[sorted.count / 2]),
+                "max": .number(sorted.last ?? 0),
+            ]),
+            "ok": .bool(true),
+        ])
+        writeLine(try encoder.encode(result), to: output.stdout)
+        return .success
+    }
+
+    private func writeError(code: String, message: String) {
+        let value: JSONValue = .object([
+            "error": .object(["code": .string(code), "message": .string(message)]),
+            "ok": .bool(false),
+        ])
+        if let data = try? encoder.encode(value) { writeLine(data, to: output.stderr) }
+    }
+
+    private func writeLine(_ data: Data, to sink: @Sendable (Data) -> Void) {
+        var line = data
+        if line.last != 0x0A { line.append(0x0A) }
+        sink(line)
+    }
+}
