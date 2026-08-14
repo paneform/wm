@@ -133,7 +133,9 @@ actor DaemonHandler: WebSocketRequestHandler {
             case .park:
                 try await parkCommittedWindow(step.windowOrWorkspaceID, state: committed, inventory: inventory)
             case .retile:
-                try await tileWorkspace(committed, named: step.windowOrWorkspaceID, inventory: inventory)
+                await tileWorkspaceForObserver(
+                    committed, named: step.windowOrWorkspaceID, inventory: inventory, forceStack: false
+                )
             }
         }
     }

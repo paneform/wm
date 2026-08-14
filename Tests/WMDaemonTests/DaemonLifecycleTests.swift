@@ -148,6 +148,17 @@ import WMWorkspace
     #expect(completed == ["other-window", "focus", "later-focus"])
 }
 
+@Test func recoveryAuditClassifiesRetilingAsBestEffort() {
+    let step = WorkspaceIntentAuditStep(windowOrWorkspaceID: "visible", action: .retile)
+
+    #expect(step.isRequiredForRecovery == false)
+    #expect(WorkspaceIntentAuditStep(windowOrWorkspaceID: "window:1", action: .park).isRequiredForRecovery)
+    #expect(WorkspaceIntentAuditStep(
+        windowOrWorkspaceID: "window:1",
+        action: .restore(.init(x: 0, y: 0, width: 100, height: 100))
+    ).isRequiredForRecovery)
+}
+
 @Test func failedStartupAuditPreservesPersistedState() throws {
     enum AuditFailure: Error { case failed }
     let state = startupState(staleID: "window:cg:155", liveID: "window:cg:200")

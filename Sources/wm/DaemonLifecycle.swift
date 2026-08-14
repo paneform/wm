@@ -114,6 +114,13 @@ struct WorkspaceIntentAuditStep: Equatable {
     enum Action: Equatable { case restore(InventoryRect), park, retile }
     var windowOrWorkspaceID: String
     var action: Action
+
+    var isRequiredForRecovery: Bool {
+        switch action {
+        case .restore, .park: true
+        case .retile: false
+        }
+    }
 }
 
 extension WorkspaceIntentAudit {
