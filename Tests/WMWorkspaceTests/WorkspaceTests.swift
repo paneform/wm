@@ -183,6 +183,23 @@ import Testing
     #expect(state[workspace: "one"]?.focusedWindowID == "zen")
 }
 
+@Test func externalZenTransitionParksVisibleGhosttyWorkspace() {
+    let before = WorkspaceState(
+        workspaces: [
+            tiled("1", display: "d", windows: ["zen"]),
+            tiled("T", display: "d", windows: ["ghostty"], visible: true, focused: true),
+        ],
+        focusedWorkspaceName: "T",
+        displays: ["d": .init(visibleWorkspaceName: "T")]
+    )
+    var after = before
+    let mutation = try? after.focusWorkspace(named: "1")
+    let plan = WorkspaceTransitionPlan(before: before, after: mutation?.workspaceState ?? after, destination: "1")
+
+    #expect(plan.incomingWindowIDs == ["zen"])
+    #expect(plan.outgoingWindowIDs == ["ghostty"])
+}
+
 @Test func observedWindowReconciliationPreservesMissingAssignmentsAndAdoptsIntoOne() throws {
     var state = WorkspaceState(
         workspaces: [

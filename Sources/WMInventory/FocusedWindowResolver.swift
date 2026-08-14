@@ -10,3 +10,14 @@ public func resolveFocusedWindowID(
         ?? candidates.first(where: { $0.main == true })?.id
         ?? candidates.first?.id
 }
+
+public func resolveRetainedFocusedWindowID(
+    windows: [NormalizedWindow],
+    focusedWindowID: String?,
+    frontmostPID: Int32?
+) -> String? {
+    if let focusedWindowID { return focusedWindowID }
+    guard let frontmostPID else { return nil }
+    let candidates = windows.filter { $0.pid == frontmostPID && $0.classification == .normal }
+    return candidates.first(where: { $0.main == true })?.id ?? candidates.first?.id
+}

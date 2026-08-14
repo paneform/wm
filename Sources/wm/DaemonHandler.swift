@@ -8,6 +8,11 @@ import WMWorkspace
 actor DaemonHandler: WebSocketRequestHandler {
     typealias State = InventoryState<SystemInventoryProvider>
 
+    private struct WorkspaceSubscription {
+        let topics: Set<EventTopic>
+        let projection: Projection
+    }
+
     private let state: State
     private let router: RequestRouter<SystemInventoryProvider>
     private let geometry = WindowGeometryService(adapter: AXWindowGeometryAdapter())
@@ -15,10 +20,12 @@ actor DaemonHandler: WebSocketRequestHandler {
     private let sessionID = UUID().uuidString
     private let version = "0.0.1-dev"
     private var subscriptions: [UUID: [String: Task<Void, Never>]] = [:]
-    private var workspaceSubscriptions: [UUID: [String: Set<EventTopic>]] = [:]
+    private var workspaceSubscriptions: [UUID: [String: WorkspaceSubscription]] = [:]
     private var workspaceSequence: UInt64 = 0
     private var windowMinimumSizes: [String: WorkspaceMinimumSize] = [:]
     private var sessionWindows: [String: NormalizedWindow] = [:]
+    private var pendingExternalWindowID: String?
+    private var lastTransitionTrace: JSONValue = .null
     private var sender: (@Sendable (String, UUID) -> Void)?
 
     init(state: State, workspaces: WorkspaceController) {
@@ -29,17 +36,37 @@ actor DaemonHandler: WebSocketRequestHandler {
 
     func installSender(_ sender: @escaping @Sendable (String, UUID) -> Void) { self.sender = sender }
 
-    func reconcileExternalFocus(windowID: String?, inventory: InventorySnapshot) async throws {
+    func reconcileExternalFocus(windowID: String?, frontmostPID: Int32?, inventory: InventorySnapshot) async throws {
         retainSessionWindows(inventory.windows)
-        guard let windowID else { return }
+        let windowID = resolveRetainedFocusedWindowID(
+            windows: Array(sessionWindows.values), focusedWindowID: windowID, frontmostPID: frontmostPID
+        )
+        guard let windowID else {
+            pendingExternalWindowID = nil
+            return
+        }
         let before = await workspaces.snapshot()
-        guard let name = before.workspaceName(containing: windowID), name != before.focusedWorkspaceName else { return }
+        guard let name = before.workspaceName(containing: windowID), name != before.focusedWorkspaceName else {
+            pendingExternalWindowID = nil
+            return
+        }
+        guard pendingExternalWindowID == windowID else {
+            pendingExternalWindowID = windowID
+            return
+        }
+        pendingExternalWindowID = nil
         let displayID = before[workspace: name]?.displayID
         var mutation = try await workspaces.previewFocus(name: name, displayID: displayID)
         mutation.workspaceState.setFocusedWindow(windowID, in: name)
         try await reconcileWorkspaceFocus(before: before, after: &mutation.workspaceState, name: name, inventory: inventory)
         try await workspaces.commitFocus(mutation)
         await publishWorkspaceMutation(mutation, before: before, reason: .workspaceFocused)
+    }
+
+    func reconcileObservedWindows(_ ids: [String], displayID: String) async throws {
+        let before = await workspaces.snapshot()
+        let mutation = try await workspaces.reconcileObservedWindows(ids, displayID: displayID)
+        await publishWorkspaceMutation(mutation, before: before, reason: .workspaceChanged)
     }
 
     func connected(clientID: UUID) async -> [String] {
@@ -77,12 +104,16 @@ actor DaemonHandler: WebSocketRequestHandler {
             guard request.afterSequence == nil else {
                 return [await errorResponse(request.requestId, .replayUnavailable, "workspace event replay is unavailable")]
             }
-            workspaceSubscriptions[clientID, default: [:]][request.subscriptionId] = workspaceTopics
-            return [encode(.response(.init(
+            workspaceSubscriptions[clientID, default: [:]][request.subscriptionId] = .init(
+                topics: workspaceTopics,
+                projection: request.projection
+            )
+            let response = encode(ServerMessage.response(.init(
                 requestId: request.requestId,
                 result: .object(["subscription_id": .string(request.subscriptionId)]),
                 stateVersion: await currentVersion()
-            )))]
+            )))
+            return [response, await workspaceSnapshotEvent(topic: workspaceTopics.sorted(by: { $0.rawValue < $1.rawValue }).first!)]
         }
         do {
             let topics = Set(request.topics.compactMap { InventoryTopic(rawValue: $0.rawValue) })
@@ -167,7 +198,7 @@ actor DaemonHandler: WebSocketRequestHandler {
                 let inventory = committed.snapshot.inventory
                 if let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id {
                     let ids = inventory.windows.filter { $0.classification == .normal }.map(\.id)
-                    _ = try await workspaces.reconcileObservedWindows(ids, displayID: displayID)
+                    try await reconcileObservedWindows(ids, displayID: displayID)
                 }
                 result = json(userState(committed))
             case .daemonPing: result = .object(["session_id": .string(sessionID), "daemon_version": .string(version), "ready": .bool(true), "current_sequence": .number(Double(committed.sequence)), "state_version": .number(Double(committed.stateVersion))])
@@ -335,6 +366,7 @@ actor DaemonHandler: WebSocketRequestHandler {
         return .object([
             "focused_window_id": inventory.windows.first(where: { $0.focused == true }).map { .string($0.id) } ?? .null,
             "focused_workspace_name": workspaceState.focusedWorkspaceName.map(JSONValue.string) ?? .null,
+            "last_transition": lastTransitionTrace,
             "windows": .array(reports),
         ])
     }
@@ -400,30 +432,29 @@ actor DaemonHandler: WebSocketRequestHandler {
         name: String,
         inventory: InventorySnapshot
     ) async throws {
-        let incomingIDs = Set(after[workspace: name]?.windowIDs ?? [])
-        let outgoingIDs = Set(before.focusedWorkspaceName.flatMap { before[workspace: $0]?.windowIDs } ?? [])
+        let transition = WorkspaceTransitionPlan(before: before, after: after, destination: name)
+        let incomingIDs = transition.incomingWindowIDs
+        let outgoingIDs = transition.outgoingWindowIDs
         retainSessionWindows(inventory.windows)
         let windowsByID = sessionWindows
         let previousParkedFrames = after.parkedWindowFrames
         var restoredIDs: Set<String> = []
         var changed: [(NormalizedWindow, InventoryRect)] = []
+        var parkingTrace: [JSONValue] = []
+        lastTransitionTrace = .object([
+            "destination": .string(name), "status": .string("running"),
+            "incoming_window_ids": .array(incomingIDs.sorted().map(JSONValue.string)),
+            "outgoing_window_ids": .array(outgoingIDs.sorted().map(JSONValue.string)),
+        ])
         do {
             let displayFrames = axDisplayFrames(inventory.displays)
             let incomingDisplayID = after[workspace: name]?.displayID
             let incomingDisplay = incomingDisplayID.flatMap { displayFrames[$0] }
-            for id in incomingIDs {
-                guard let window = windowsByID[id], let restore = after.parkedWindowFrames[id], let current = window.frame else { continue }
-                let saved = restore.inventoryRect
-                let target = isCenteredOnDisplay(saved, displays: Array(displayFrames.values)) ? saved : incomingDisplay ?? saved
-                _ = try await geometry.set(window: window, params: frameParams(id, target))
-                changed.append((window, current))
-                restoredIDs.insert(id)
-            }
             let outgoingDisplayID = before.focusedWorkspaceName.flatMap { before[workspace: $0]?.displayID }
             let outgoingDisplay = inventory.displays.first { $0.id == outgoingDisplayID }
                 ?? inventory.displays.first(where: \.isPrimary)
                 ?? inventory.displays.first
-            for id in outgoingIDs.subtracting(incomingIDs).sorted() {
+            for id in outgoingIDs.sorted() {
                 guard let window = windowsByID[id], let original = window.frame else { continue }
                 guard let outgoingDisplay,
                       let outgoingFrame = displayFrames[outgoingDisplay.id],
@@ -436,6 +467,10 @@ actor DaemonHandler: WebSocketRequestHandler {
                 }
                 changed.append((window, original))
                 let observed = try await geometry.park(window: window, frame: parking.targetFrame)
+                parkingTrace.append(.object([
+                    "window_id": .string(id), "target": json(parking.targetFrame.protocolFrame),
+                    "observed": json(observed.protocolFrame), "accepted": .bool(parking.accepts(observed)),
+                ]))
                 guard parking.accepts(observed) else {
                     throw WindowGeometryFailure(
                         code: .geometryVerificationFailed,
@@ -445,14 +480,43 @@ actor DaemonHandler: WebSocketRequestHandler {
                 }
                 after.parkedWindowFrames[id] = .init(original)
             }
-            try await tileWorkspace(after, named: name, inventory: inventory)
+            let incomingIsBSP = after[workspace: name]?.mode == .bsp
+            for id in incomingIDs where !incomingIsBSP {
+                guard let window = windowsByID[id], let restore = after.parkedWindowFrames[id], let current = window.frame else { continue }
+                let saved = restore.inventoryRect
+                let target = isCenteredOnDisplay(saved, displays: Array(displayFrames.values)) ? saved : incomingDisplay ?? saved
+                do {
+                    _ = try await geometry.set(window: window, params: frameParams(id, target))
+                } catch let failure as WindowGeometryFailure {
+                    guard failure.code == .geometryVerificationFailed,
+                          let incomingDisplay,
+                          target != incomingDisplay else { throw failure }
+                    _ = try await geometry.set(window: window, params: frameParams(id, incomingDisplay))
+                }
+                changed.append((window, current))
+                restoredIDs.insert(id)
+            }
+            try await tileWorkspace(after, named: name, inventory: inventory, forceStack: incomingIsBSP && !incomingIDs.isDisjoint(with: after.parkedWindowFrames.keys))
             try await focusWorkspaceWindow(after, named: name, inventory: inventory)
+            if incomingIsBSP { restoredIDs.formUnion(incomingIDs) }
             for id in restoredIDs { after.parkedWindowFrames.removeValue(forKey: id) }
+            lastTransitionTrace = .object([
+                "destination": .string(name), "status": .string("succeeded"),
+                "incoming_window_ids": .array(incomingIDs.sorted().map(JSONValue.string)),
+                "outgoing_window_ids": .array(outgoingIDs.sorted().map(JSONValue.string)),
+                "parking": .array(parkingTrace),
+            ])
         } catch {
             for (window, previousFrame) in changed.reversed() {
                 _ = try? await geometry.set(window: window, params: frameParams(window.id, previousFrame))
             }
             after.parkedWindowFrames = previousParkedFrames
+            lastTransitionTrace = .object([
+                "destination": .string(name), "status": .string("rolled_back"),
+                "incoming_window_ids": .array(incomingIDs.sorted().map(JSONValue.string)),
+                "outgoing_window_ids": .array(outgoingIDs.sorted().map(JSONValue.string)),
+                "parking": .array(parkingTrace), "error": .string(String(describing: error)),
+            ])
             throw error
         }
     }
@@ -464,7 +528,8 @@ actor DaemonHandler: WebSocketRequestHandler {
     private func tileWorkspace(
         _ state: WMWorkspace.WorkspaceState,
         named name: String,
-        inventory: InventorySnapshot
+        inventory: InventorySnapshot,
+        forceStack: Bool = false
     ) async throws {
         guard let workspace = state.workspaces.first(where: { $0.name == name }),
               workspace.mode == .bsp,
@@ -478,7 +543,7 @@ actor DaemonHandler: WebSocketRequestHandler {
         )
         var targets = workspace.layout(in: bounds, minimumSizes: windowMinimumSizes)
         let windows = try workspace.windowIDs.map { try resolveWindow($0, in: inventory.windows) }
-        if !workspace.canFit(in: bounds, minimumSizes: windowMinimumSizes) {
+        if forceStack || !workspace.canFit(in: bounds, minimumSizes: windowMinimumSizes) {
             let fallback = WorkspaceLayoutRect(
                 x: bounds.x + workspace.margin.left,
                 y: bounds.y + workspace.margin.top,
@@ -569,18 +634,31 @@ actor DaemonHandler: WebSocketRequestHandler {
         let eventData = workspaceMutation(result)
         let version = await currentVersion()
         for (clientID, clientSubscriptions) in workspaceSubscriptions {
-            for subscribedTopics in clientSubscriptions.values {
-                for topic in topics.intersection(subscribedTopics) {
+            for subscription in clientSubscriptions.values {
+                for topic in topics.intersection(subscription.topics) {
                     sender?(encode(.event(.init(
                         sequence: workspaceSequence,
                         stateVersion: version,
                         timestamp: Date(),
                         topic: topic,
-                        data: eventData
+                        data: subscription.projection == .invalidation
+                            ? .object(["topic": .string(topic.rawValue), "state_version": .number(Double(version))])
+                            : eventData
                     ))), clientID)
                 }
             }
         }
+    }
+
+    private func workspaceSnapshotEvent(topic: EventTopic) async -> String {
+        let version = await currentVersion()
+        return encode(.event(.init(
+            sequence: workspaceSequence,
+            stateVersion: version,
+            timestamp: Date(),
+            topic: topic,
+            data: workspaceList(await workspaces.snapshot())
+        )))
     }
 
     private func workspaceError(_ error: WorkspaceMutationError) -> ProtocolError {

@@ -18,6 +18,18 @@ final class InventoryTests: XCTestCase {
         explicitlyFocused.focused = true
         XCTAssertEqual(resolveFocusedWindowID(windows: [main, explicitlyFocused], frontmostPID: 2), "secondary")
     }
+
+    func testRetainedFocusUsesFrontmostPIDWhenParkedWindowHasNoFocusedFlag() {
+        let messages = normalizedWindow(id: "messages", pid: 1, main: true)
+        let zen = normalizedWindow(id: "zen", pid: 2, main: true)
+
+        XCTAssertEqual(resolveRetainedFocusedWindowID(
+            windows: [messages, zen], focusedWindowID: nil, frontmostPID: 2
+        ), "zen")
+        XCTAssertEqual(resolveRetainedFocusedWindowID(
+            windows: [messages, zen], focusedWindowID: "messages", frontmostPID: 2
+        ), "messages")
+    }
     func testDuplicateAndZeroCGIDsAreSafeAndExplained() {
         let frame = InventoryRect(x: 10, y: 20, width: 800, height: 600)
         let ax = [

@@ -1,5 +1,6 @@
 import Dispatch
 import Foundation
+import AppKit
 import WMCLI
 import WMCore
 import WMInventory
@@ -54,8 +55,12 @@ import WMWorkspace
                 let inventory = committed.snapshot.inventory
                 guard let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id else { return }
                 let ids = inventory.windows.filter { $0.classification == .normal }.map(\.id)
-                _ = try await workspaces.reconcileObservedWindows(ids, displayID: displayID)
-                try await handler.reconcileExternalFocus(windowID: committed.snapshot.focusedWindowID, inventory: inventory)
+                try await handler.reconcileObservedWindows(ids, displayID: displayID)
+                try await handler.reconcileExternalFocus(
+                    windowID: committed.snapshot.focusedWindowID,
+                    frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier,
+                    inventory: inventory
+                )
             },
             report: { error in
                 FileHandle.standardError.write(Data("automatic inventory refresh failed: \(error)\n".utf8))
