@@ -62,5 +62,6 @@ let package = Package(
         .testTarget(name: "WMCoreTests", dependencies: ["WMCore", "WMInventory", "WMProtocol"]),
         .testTarget(name: "WMWebSocketTests", dependencies: ["WMWebSocket", "WMCore", "WMProtocol"]),
         .testTarget(name: "WMCLITests", dependencies: ["WMCLI", "WMProtocol"]),
+        .testTarget(name: "WMDaemonTests", dependencies: ["wm", "WMInventory", "WMPersistence", "WMWorkspace"]),
     ]
 )

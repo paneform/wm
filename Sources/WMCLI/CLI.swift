@@ -93,6 +93,8 @@ public struct CLIParser: Sendable {
         switch command {
         case "daemon": return .daemon(try parseDaemon(rest))
         case "ping": return try request("daemon.ping", rest)
+        case "pause": return try request("daemon.pause", rest)
+        case "resume": return try request("daemon.resume", rest)
         case "state": return try parseState(rest)
         case "health": return try request("health.get", rest)
         case "display": return try nestedRequest("display", child: "list", method: "display.list", rest)
@@ -126,6 +128,16 @@ public struct CLIParser: Sendable {
             default: throw CLIParseError("unknown daemon argument: \(arguments[index])")
             }
             index += 1
+        }
+        guard ["127.0.0.1", "localhost", "::1"].contains(result.host) else {
+            throw CLIParseError("daemon host must be loopback because the API is unauthenticated")
+        }
+        for origin in result.allowedOrigins {
+            guard let url = URL(string: origin), ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+                  url.host != nil, url.user == nil, url.password == nil, url.fragment == nil,
+                  url.path.isEmpty || url.path == "/" else {
+                throw CLIParseError("invalid allowed origin: \(origin)")
+            }
         }
         return result
     }

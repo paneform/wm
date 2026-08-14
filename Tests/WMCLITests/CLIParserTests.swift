@@ -6,6 +6,8 @@ import Testing
     let parser = CLIParser()
     let mappings: [([String], String)] = [
         (["ping"], "daemon.ping"),
+        (["pause"], "daemon.pause"),
+        (["resume"], "daemon.resume"),
         (["state"], "state.get"),
         (["state", "observed"], "state.observed"),
         (["health"], "health.get"),
@@ -62,8 +64,14 @@ import Testing
 
 @Test func parsesDaemonAndClientOptions() throws {
     let parser = CLIParser()
-    #expect(try parser.parse(["daemon", "--host", "localhost", "--port", "9000", "--allow-origin", "a", "--allow-origin", "b"]) == .daemon(.init(host: "localhost", port: 9000, allowedOrigins: ["a", "b"])))
+    #expect(try parser.parse(["daemon", "--host", "localhost", "--port", "9000", "--allow-origin", "https://a.test", "--allow-origin", "http://b.test"]) == .daemon(.init(host: "localhost", port: 9000, allowedOrigins: ["https://a.test", "http://b.test"])))
     #expect(try parser.parse(["health", "--url", "wss://example.test/v1"]) == .request(method: "health.get", params: [:], url: URL(string: "wss://example.test/v1")!))
+}
+
+@Test func rejectsUnsafeDaemonBindAndOrigins() {
+    #expect(throws: CLIParseError.self) { try CLIParser().parse(["daemon", "--host", "0.0.0.0"]) }
+    #expect(throws: CLIParseError.self) { try CLIParser().parse(["daemon", "--allow-origin", "file:///tmp/x"]) }
+    #expect(throws: CLIParseError.self) { try CLIParser().parse(["daemon", "--allow-origin", "https://user@example.test"]) }
 }
 
 @Test func parsesWindowFrameCommandsWithCanonicalParams() throws {

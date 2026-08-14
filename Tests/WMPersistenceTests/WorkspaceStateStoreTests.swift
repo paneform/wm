@@ -3,6 +3,44 @@ import XCTest
 @testable import WMPersistence
 
 final class WorkspaceStateStoreTests: XCTestCase {
+    func testDaemonLockIsExclusiveAndReacquirableAfterRelease() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let url = directory.appendingPathComponent("daemon.lock")
+        var first: DaemonProcessLock? = try DaemonProcessLock(url: url)
+        XCTAssertNotNil(first)
+        XCTAssertTrue(first?.isCloseOnExec == true)
+        XCTAssertThrowsError(try DaemonProcessLock(url: url)) { error in
+            XCTAssertEqual(error as? DaemonProcessLockError, .alreadyRunning)
+        }
+        first = nil
+        XCTAssertNoThrow(try DaemonProcessLock(url: url))
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    func testDaemonLockRejectsSymlinkAndUnsafeDirectoryMode() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let target = directory.appendingPathComponent("target")
+        FileManager.default.createFile(atPath: target.path, contents: Data())
+        let lock = directory.appendingPathComponent("daemon.lock")
+        try FileManager.default.createSymbolicLink(at: lock, withDestinationURL: target)
+        XCTAssertThrowsError(try DaemonProcessLock(url: lock))
+        try FileManager.default.removeItem(at: lock)
+        try FileManager.default.setAttributes([.posixPermissions: 0o777], ofItemAtPath: directory.path)
+        XCTAssertThrowsError(try DaemonProcessLock(url: lock)) { error in
+            XCTAssertEqual(error as? DaemonProcessLockError, .unsafePath)
+        }
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    func testRelativeXDGStateHomeFallsBackToUserStateDirectory() {
+        let result = WorkspaceStatePath.resolve(
+            environment: ["XDG_STATE_HOME": "relative"],
+            homeDirectory: URL(fileURLWithPath: "/home/test")
+        )
+        XCTAssertEqual(result.path, "/home/test/.local/state/wm/state.json")
+    }
+
     func testPathUsesXDGStateHome() {
         let url = WorkspaceStatePath.resolve(
             environment: ["XDG_STATE_HOME": "/state"],

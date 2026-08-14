@@ -5,6 +5,7 @@ import WMCLI
 import WMCore
 import WMInventory
 import WMProtocol
+import WMPersistence
 import WMWebSocket
 import WMWorkspace
 
@@ -27,16 +28,35 @@ import WMWorkspace
     }
 
     @MainActor private static func runDaemon(_ configuration: DaemonConfiguration) async -> Int32 {
+        guard configuration.isSafe else {
+            FileHandle.standardError.write(Data("invalid daemon configuration\n".utf8))
+            return CLIExitCode.usage.rawValue
+        }
+        let processLock: DaemonProcessLock
+        do { processLock = try DaemonProcessLock() } catch {
+            FileHandle.standardError.write(Data("daemon lock failed: \(error)\n".utf8))
+            return CLIExitCode.unavailable.rawValue
+        }
+        _ = processLock
         let scanner = InventoryScanner()
         let state = InventoryState(provider: SystemInventoryProvider(scanner: scanner))
-        let workspaces = WorkspaceController(buildVersion: "0.0.1-dev")
+        let workspaces: WorkspaceController
+        do { workspaces = try WorkspaceController(buildVersion: "0.0.1-dev") } catch {
+            FileHandle.standardError.write(Data("workspace state validation failed: \(error)\n".utf8))
+            return CLIExitCode.unavailable.rawValue
+        }
         let handler = DaemonHandler(state: state, workspaces: workspaces)
         do {
             let committed = try await state.refresh()
             let inventory = committed.snapshot.inventory
+            guard committed.snapshot.health.capabilities["accessibility"] as? Bool == true,
+                  committed.snapshot.health.capabilities["core_graphics"] as? Bool == true else {
+                throw StartupError.permissionDenied
+            }
             guard let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id else {
                 throw StartupError.noDisplay
             }
+            try await handler.auditCommittedIntent(inventory)
             try await handler.reconcileObservedWindows(inventory, displayID: displayID)
         } catch {
             FileHandle.standardError.write(Data("inventory initialization failed: \(error)\n".utf8))
@@ -51,6 +71,17 @@ import WMWorkspace
         let observe: @Sendable () async throws -> Void = {
                 let committed = try await state.refresh()
                 let inventory = committed.snapshot.inventory
+                guard committed.snapshot.health.capabilities["accessibility"] as? Bool == true,
+                      committed.snapshot.health.capabilities["core_graphics"] as? Bool == true else {
+                    await handler.beginTermination()
+                    let failures = await handler.shutdown(inventory)
+                    if !failures.isEmpty {
+                        FileHandle.standardError.write(Data("permission revocation restore failed: \(failures.joined(separator: "; "))\n".utf8))
+                    }
+                    kill(getpid(), SIGTERM)
+                    return
+                }
+                guard await !handler.isPaused() else { return }
                 guard let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id else { return }
                 try await handler.reconcileObservedWindows(inventory, displayID: displayID)
                 try await handler.reconcileExternalFocus(
@@ -88,8 +119,16 @@ import WMWorkspace
         observationTask.cancel()
         await observationTask.value
         NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
+        await handler.beginTermination()
+        var shutdownFailures = ["inventory refresh failed"]
+        if let refreshed = try? await state.refresh() {
+            shutdownFailures = await handler.shutdown(refreshed.snapshot.inventory)
+        }
+        if !shutdownFailures.isEmpty {
+            FileHandle.standardError.write(Data("graceful shutdown restore failed: \(shutdownFailures.joined(separator: "; "))\n".utf8))
+        }
         server.stop()
-        return CLIExitCode.success.rawValue
+        return shutdownFailures.isEmpty ? CLIExitCode.success.rawValue : CLIExitCode.commandFailed.rawValue
     }
 
     private static func verify(url: URL) async -> Int32 {
@@ -131,5 +170,14 @@ import WMWorkspace
 }
 
 private enum VerifyError: Error { case expectedWelcome, expectedResponse, expectedSubscribeResponse, expectedEvent, expectedUnsubscribeResponse }
-private enum StartupError: Error { case noDisplay }
+private enum StartupError: Error { case noDisplay, permissionDenied }
+private extension DaemonConfiguration {
+    var isSafe: Bool {
+        ["127.0.0.1", "localhost", "::1"].contains(host) && port > 0 && allowedOrigins.allSatisfy { origin in
+            guard let url = URL(string: origin) else { return false }
+            return ["http", "https"].contains(url.scheme?.lowercased() ?? "") && url.host != nil
+                && url.user == nil && url.password == nil && url.fragment == nil && (url.path.isEmpty || url.path == "/")
+        }
+    }
+}
 private func escaped(_ value: String) -> String { value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") }

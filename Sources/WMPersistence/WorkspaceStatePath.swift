@@ -6,7 +6,7 @@ public enum WorkspaceStatePath {
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> URL {
         let stateRoot: URL
-        if let xdgStateHome = environment["XDG_STATE_HOME"], !xdgStateHome.isEmpty {
+        if let xdgStateHome = environment["XDG_STATE_HOME"], xdgStateHome.hasPrefix("/") {
             stateRoot = URL(fileURLWithPath: xdgStateHome, isDirectory: true)
         } else {
             stateRoot = homeDirectory

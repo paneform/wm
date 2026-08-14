@@ -6,12 +6,18 @@ actor WorkspaceController {
     private let store: WorkspaceStateStore<WMWorkspace.WorkspaceState>
     private(set) var state: WMWorkspace.WorkspaceState
 
-    init(buildVersion: String) {
-        store = WorkspaceStateStore(buildVersion: buildVersion) { try $0.validate() }
-        switch try? store.load() {
+    init(buildVersion: String, stateURL: URL = WorkspaceStatePath.resolve()) throws {
+        store = WorkspaceStateStore(stateURL: stateURL, buildVersion: buildVersion) { try $0.validate() }
+        switch try store.load() {
         case .loaded(let loaded): state = loaded
-        default: state = .init()
+        case .absent: state = .init()
+        case .quarantined(let url): throw WorkspaceControllerError.invalidPersistedState(url)
         }
+    }
+
+    init(store: WorkspaceStateStore<WMWorkspace.WorkspaceState>, state: WMWorkspace.WorkspaceState) {
+        self.store = store
+        self.state = state
     }
 
     func snapshot() -> WMWorkspace.WorkspaceState { state }
@@ -77,4 +83,8 @@ actor WorkspaceController {
         }
         return result
     }
+}
+
+enum WorkspaceControllerError: Error, Equatable {
+    case invalidPersistedState(URL)
 }
