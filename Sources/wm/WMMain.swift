@@ -123,6 +123,23 @@ import WMWorkspace
                 }
             }
         }
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
+        let sessionObservers: [NSObjectProtocol] = [
+            workspaceCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { _ in
+                Task { await handler.beginSessionTransition(.sleep) }
+            },
+            workspaceCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
+                Task { try? await handler.resynchronizeSession(.wake) }
+            },
+            workspaceCenter.addObserver(forName: NSWorkspace.sessionDidBecomeActiveNotification, object: nil, queue: .main) { _ in
+                Task { try? await handler.resynchronizeActivatedSession() }
+            },
+        ]
+        let screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
+        ) { _ in
+            Task { try? await handler.resynchronizeSession(.clamshell) }
+        }
         let stream = AsyncStream<Void> { continuation in
             signal(SIGINT, SIG_IGN)
             signal(SIGTERM, SIG_IGN)
@@ -138,6 +155,8 @@ import WMWorkspace
         observationTask.cancel()
         await observationTask.value
         NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
+        sessionObservers.forEach { workspaceCenter.removeObserver($0) }
+        NotificationCenter.default.removeObserver(screenObserver)
         await handler.beginTermination()
         var shutdownFailures = ["inventory refresh failed"]
         if let refreshed = try? await state.refresh() {

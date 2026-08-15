@@ -29,6 +29,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     private var lifecycle = ManagedWindowLifecycle()
     private var daemonLifecycle = DaemonLifecycle()
     private let transactions = TransactionCoordinator<JSONValue>()
+    private let sessionTransitions = SessionTransitionEpochs<[DisplayObservation], InventorySnapshot>()
     private var lastTransitionTrace: JSONValue = .null
     private var sender: (@Sendable (String, UUID) -> Void)?
     private var internalErrorReporter: (@Sendable (String) -> Void)?
@@ -169,6 +170,97 @@ actor DaemonHandler: WebSocketRequestHandler {
 
     func isPaused() -> Bool { daemonLifecycle.isPaused }
 
+    func beginSessionTransition(_ cause: SessionTransitionCause) async {
+        await sessionTransitions.begin(cause) { [weak self] in await self?.pauseForSessionTransition(cause) }
+    }
+
+    func resynchronizeActivatedSession() async throws {
+        try await resynchronizeSession(await sessionTransitions.activationCause())
+    }
+
+    func resynchronizeSession(_ cause: SessionTransitionCause) async throws {
+        let result = try await sessionTransitions.resynchronize(
+            cause: cause,
+            pause: { [weak self] in await self?.pauseForSessionTransition(cause) },
+            displays: { [state] in try await state.refresh().snapshot.inventory.displays },
+            permissions: { [state] in
+                let snapshot = try await state.refresh().snapshot
+                guard snapshot.health.capabilities["accessibility"] as? Bool == true,
+                      snapshot.health.capabilities["core_graphics"] as? Bool == true else {
+                    throw DaemonLifecycleRequestError.permissionDenied
+                }
+            },
+            recreateObservers: { [weak self] _ in await self?.discardStaleSessionHandles() },
+            rebuildInventory: { [state] in try await state.refresh().snapshot.inventory },
+            reconstructAndReconcile: { [weak self] inventory in
+                guard let self else { throw CancellationError() }
+                try await self.reconstructObservedState(inventory)
+            },
+            resume: { [weak self] in await self?.resumeAfterSessionTransition() }
+        )
+        await publishSessionEvent(.sessionResynchronized, data: .object([
+            "epoch": .number(Double(result.epoch)),
+            "cause": .string(result.cause.rawValue),
+            "observer_generation": .number(Double(result.observerGeneration)),
+            "display_stabilized": .bool(result.displayStabilized),
+            "stabilization_attempts": .number(Double(result.stabilizationAttempts)),
+        ]))
+        if let health = try? await state.health() {
+            await publishSessionEvent(.healthChanged, data: json(protocolHealth(health)))
+        }
+    }
+
+    private func pauseForSessionTransition(_ cause: SessionTransitionCause) async {
+        _ = daemonLifecycle.pause()
+        await transactions.beginRecovery(reason: "session transition: \(cause.rawValue)")
+        await publishSessionEvent(.daemonPaused, data: .object(["cause": .string(cause.rawValue)]))
+    }
+
+    private func discardStaleSessionHandles() async {
+        sessionWindows.removeAll(keepingCapacity: true)
+        windowMinimumSizes.removeAll(keepingCapacity: true)
+        observerGeometryReliability = .init()
+        lifecycle = .init()
+        await geometry.reconcile(windows: [])
+    }
+
+    private func reconstructObservedState(_ inventory: InventorySnapshot) async throws {
+        guard let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id else {
+            throw WorkspaceRequestError.displayRequired
+        }
+        let committed = await workspaces.snapshot()
+        let candidate = StartupIntentAudit.candidate(state: committed, inventory: inventory)
+        try await auditCommittedIntent(inventory, state: candidate)
+        try await workspaces.commit(candidate)
+        let update = lifecycle.reconcile(inventory)
+        try await applyLifecycleUpdate(update, displayID: displayID)
+    }
+
+    private func resumeAfterSessionTransition() async {
+        _ = daemonLifecycle.resume()
+        await transactions.endRecovery(success: true)
+        await publishSessionEvent(.daemonResumed, data: .object(["resynchronized": .bool(true)]))
+    }
+
+    private func publishSessionEvent(_ topic: EventTopic, data: JSONValue) async {
+        workspaceSequence &+= 1
+        let version = await currentVersion()
+        for (clientID, subscriptions) in workspaceSubscriptions {
+            for subscription in subscriptions.values where subscription.topics.contains(topic) {
+                let projected = subscription.projection == .invalidation
+                    ? JSONValue.object(["topic": .string(topic.rawValue), "state_version": .number(Double(version))])
+                    : data
+                sender?(encode(.event(.init(
+                    sequence: workspaceSequence,
+                    stateVersion: version,
+                    timestamp: Date(),
+                    topic: topic,
+                    data: projected
+                ))), clientID)
+            }
+        }
+    }
+
     private func applyLifecycleUpdate(_ update: WindowLifecycleUpdate, displayID: String) async throws {
         let closedIDs = Set(update.verifiedClosedLifetimes.map(\.windowID))
         for lifetime in update.verifiedClosedLifetimes {
@@ -232,7 +324,7 @@ actor DaemonHandler: WebSocketRequestHandler {
             )))
             return [response, await stateSnapshotEvent(detail: request.detail)]
         }
-        let workspaceTopics = Set(request.topics.filter(\.isWorkspace))
+        let workspaceTopics = Set(request.topics.filter(\.isDaemonEvent))
         if !workspaceTopics.isEmpty {
             guard request.afterSequence == nil else {
                 return [await errorResponse(request.requestId, .replayUnavailable, "workspace event replay is unavailable")]
@@ -1263,10 +1355,11 @@ private extension ParkedWindowFrame {
 }
 
 private extension EventTopic {
-    var isWorkspace: Bool {
+    var isDaemonEvent: Bool {
         switch self {
         case .workspaceChanged, .workspaceFocused, .workspaceCreated, .workspaceDeleted,
-             .workspaceDisplayChanged, .workspaceModeChanged: true
+             .workspaceDisplayChanged, .workspaceModeChanged, .daemonPaused, .daemonResumed,
+             .sessionResynchronized: true
         default: false
         }
     }

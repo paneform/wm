@@ -29,6 +29,93 @@ struct DaemonLifecycle {
     }
 }
 
+enum SessionTransitionCause: String, Codable, CaseIterable, Sendable {
+    case sleep, wake, unlock
+    case activeSession = "active_session"
+    case clamshell
+}
+
+struct SessionTransitionResult: Equatable, Sendable {
+    var epoch: UInt64
+    var cause: SessionTransitionCause
+    var observerGeneration: UInt64
+    var displayStabilized: Bool
+    var stabilizationAttempts: Int
+}
+
+actor SessionTransitionEpochs<Display: Equatable & Sendable, Inventory: Sendable> {
+    typealias Sleep = @Sendable (Duration) async throws -> Void
+
+    private let maximumDisplayAttempts: Int
+    private let stabilizationDelay: Duration
+    private let sleep: Sleep
+    private var epoch: UInt64 = 0
+    private var observerGeneration: UInt64 = 0
+    private var pendingCause: SessionTransitionCause?
+
+    init(
+        maximumDisplayAttempts: Int = 8,
+        stabilizationDelay: Duration = .milliseconds(250),
+        sleep: @escaping Sleep = { try await Task.sleep(for: $0) }
+    ) {
+        self.maximumDisplayAttempts = max(2, maximumDisplayAttempts)
+        self.stabilizationDelay = stabilizationDelay
+        self.sleep = sleep
+    }
+
+    func begin(_ cause: SessionTransitionCause, pause: @Sendable () async -> Void) async {
+        pendingCause = cause
+        await pause()
+    }
+
+    func activationCause() -> SessionTransitionCause {
+        pendingCause == .sleep || pendingCause == .wake ? .unlock : .activeSession
+    }
+
+    func resynchronize(
+        cause: SessionTransitionCause,
+        pause: @Sendable () async -> Void,
+        displays: @Sendable () async throws -> Display,
+        permissions: @Sendable () async throws -> Void,
+        recreateObservers: @Sendable (_ generation: UInt64) async throws -> Void,
+        rebuildInventory: @Sendable () async throws -> Inventory,
+        reconstructAndReconcile: @Sendable (Inventory) async throws -> Void,
+        resume: @Sendable () async -> Void
+    ) async throws -> SessionTransitionResult {
+        await pause()
+        pendingCause = cause
+        epoch &+= 1
+        let stabilization = try await stableDisplays(displays)
+        try await permissions()
+        observerGeneration &+= 1
+        try await recreateObservers(observerGeneration)
+        let inventory = try await rebuildInventory()
+        try await reconstructAndReconcile(inventory)
+        pendingCause = nil
+        await resume()
+        return .init(
+            epoch: epoch,
+            cause: cause,
+            observerGeneration: observerGeneration,
+            displayStabilized: stabilization.stable,
+            stabilizationAttempts: stabilization.attempts
+        )
+    }
+
+    private func stableDisplays(
+        _ snapshot: @Sendable () async throws -> Display
+    ) async throws -> (stable: Bool, attempts: Int) {
+        var previous = try await snapshot()
+        for attempt in 2...maximumDisplayAttempts {
+            try await sleep(stabilizationDelay)
+            let current = try await snapshot()
+            if current == previous { return (true, attempt) }
+            previous = current
+        }
+        return (false, maximumDisplayAttempts)
+    }
+}
+
 enum DaemonLifecycleError: Error, Equatable {
     case paused, terminating
 }

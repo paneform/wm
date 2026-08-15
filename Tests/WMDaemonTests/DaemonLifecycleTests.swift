@@ -25,6 +25,82 @@ import WMWorkspace
     #expect(throws: DaemonLifecycleError.terminating) { try lifecycle.requireMutationAllowed() }
 }
 
+@Test func transitionEpochOrdersFullRebuildAndRollsObserverGeneration() async throws {
+    actor Probe {
+        var steps: [String] = []
+        var displays = [["old"], ["new"], ["new"]]
+        func append(_ step: String) { steps.append(step) }
+        func nextDisplays() -> [String] { displays.removeFirst() }
+    }
+    let probe = Probe()
+    let epochs = SessionTransitionEpochs<[String], String>(sleep: { _ in })
+    let result = try await epochs.resynchronize(
+        cause: .wake,
+        pause: { await probe.append("pause") },
+        displays: { await probe.nextDisplays() },
+        permissions: { await probe.append("permissions") },
+        recreateObservers: { await probe.append("observers:\($0)") },
+        rebuildInventory: { await probe.append("inventory"); return "rebuilt" },
+        reconstructAndReconcile: { await probe.append("reconcile:\($0)") },
+        resume: { await probe.append("resume") }
+    )
+
+    #expect(result == .init(epoch: 1, cause: .wake, observerGeneration: 1, displayStabilized: true, stabilizationAttempts: 3))
+    #expect(await probe.steps == ["pause", "permissions", "observers:1", "inventory", "reconcile:rebuilt", "resume"])
+}
+
+@Test func failedTransitionRemainsPausedAndDoesNotRebuildOrResume() async {
+    actor Probe {
+        var steps: [String] = []
+        func append(_ step: String) { steps.append(step) }
+    }
+    enum PermissionFailure: Error { case denied }
+    let probe = Probe()
+    let epochs = SessionTransitionEpochs<[String], String>(sleep: { _ in })
+
+    await #expect(throws: PermissionFailure.denied) {
+        try await epochs.resynchronize(
+            cause: .unlock,
+            pause: { await probe.append("pause") },
+            displays: { ["stable"] },
+            permissions: { await probe.append("permissions"); throw PermissionFailure.denied },
+            recreateObservers: { _ in await probe.append("observers") },
+            rebuildInventory: { await probe.append("inventory"); return "rebuilt" },
+            reconstructAndReconcile: { _ in await probe.append("reconcile") },
+            resume: { await probe.append("resume") }
+        )
+    }
+    #expect(await probe.steps == ["pause", "permissions"])
+}
+
+@Test func unstableDisplaysUseBoundedDegradedFallback() async throws {
+    actor Displays {
+        var value = 0
+        func next() -> Int { defer { value += 1 }; return value }
+    }
+    let displays = Displays()
+    let epochs = SessionTransitionEpochs<Int, Void>(maximumDisplayAttempts: 3, sleep: { _ in })
+    let result = try await epochs.resynchronize(
+        cause: .clamshell,
+        pause: {},
+        displays: { await displays.next() },
+        permissions: {},
+        recreateObservers: { _ in },
+        rebuildInventory: {},
+        reconstructAndReconcile: { _ in },
+        resume: {}
+    )
+
+    #expect(!result.displayStabilized)
+    #expect(result.stabilizationAttempts == 3)
+}
+
+@Test func sessionActivationAfterSleepIsClassifiedAsUnlock() async {
+    let epochs = SessionTransitionEpochs<Int, Void>(sleep: { _ in })
+    await epochs.begin(.sleep, pause: {})
+    #expect(await epochs.activationCause() == .unlock)
+}
+
 @Test func invalidPersistedStateFailsControllerInitialization() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
