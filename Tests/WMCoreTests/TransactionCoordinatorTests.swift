@@ -115,6 +115,12 @@ private actor Probe {
     let status = try await queue.status(accepted.transaction.transactionId)
     #expect(status.transaction.phase == .failed)
     #expect(status.transaction.failure?.code == .permissionDenied)
+    #expect(!(await queue.metadata().recovery.active))
+
+    let next = try await queue.submit(.init(name: "next", operate: {
+        .init(result: "released", committedStateVersion: 1)
+    }))
+    #expect(next.result == "released")
 }
 
 @Test func sequentialBatchStopsAfterFailedReceipt() async throws {

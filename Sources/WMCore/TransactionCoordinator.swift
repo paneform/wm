@@ -208,7 +208,7 @@ public actor TransactionCoordinator<Result: Codable & Equatable & Sendable> {
     }
 
     private func failQueued(_ failure: TransactionFailure) {
-        recoveryReason = recoveryReason ?? "recovery failed"
+        recoveryReason = nil
         while queueHead < queue.count {
             let work = queue[queueHead]; queueHead += 1
             guard pending.contains(work.id) else { continue }

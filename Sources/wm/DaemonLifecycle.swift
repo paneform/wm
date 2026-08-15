@@ -45,6 +45,7 @@ struct SessionTransitionResult: Equatable, Sendable {
 
 actor SessionTransitionEpochs<Display: Equatable & Sendable, Inventory: Sendable> {
     typealias Sleep = @Sendable (Duration) async throws -> Void
+    typealias Run = @Sendable (SessionTransitionCause) async throws -> SessionTransitionResult
 
     private let maximumDisplayAttempts: Int
     private let stabilizationDelay: Duration
@@ -52,6 +53,9 @@ actor SessionTransitionEpochs<Display: Equatable & Sendable, Inventory: Sendable
     private var epoch: UInt64 = 0
     private var observerGeneration: UInt64 = 0
     private var pendingCause: SessionTransitionCause?
+    private var inFlight: Task<SessionTransitionResult, Error>?
+    private var queuedCause: SessionTransitionCause?
+    private var waiters: [CheckedContinuation<SessionTransitionResult, Error>] = []
 
     init(
         maximumDisplayAttempts: Int = 8,
@@ -70,6 +74,55 @@ actor SessionTransitionEpochs<Display: Equatable & Sendable, Inventory: Sendable
 
     func activationCause() -> SessionTransitionCause {
         pendingCause == .sleep || pendingCause == .wake ? .unlock : .activeSession
+    }
+
+    func queuedTransitionCause() -> SessionTransitionCause? { queuedCause }
+
+    func submit(
+        cause: SessionTransitionCause,
+        begin: @escaping @Sendable (SessionTransitionCause) async -> Void = { _ in },
+        run: @escaping Run,
+        complete: @escaping @Sendable () async -> Void = {},
+        fail: @escaping @Sendable (Error) async -> Void = { _ in }
+    ) async throws -> SessionTransitionResult {
+        if inFlight != nil {
+            queuedCause = cause
+            return try await withCheckedThrowingContinuation { waiters.append($0) }
+        }
+        let task = Task {
+            await begin(cause)
+            do {
+                let result = try await runPending(cause, run: run)
+                await complete()
+                return result
+            } catch {
+                await fail(error)
+                throw error
+            }
+        }
+        inFlight = task
+        do {
+            let result = try await task.value
+            inFlight = nil
+            waiters.forEach { $0.resume(returning: result) }
+            waiters.removeAll(keepingCapacity: true)
+            return result
+        } catch {
+            queuedCause = nil
+            inFlight = nil
+            waiters.forEach { $0.resume(throwing: error) }
+            waiters.removeAll(keepingCapacity: true)
+            throw error
+        }
+    }
+
+    private func runPending(_ cause: SessionTransitionCause, run: Run) async throws -> SessionTransitionResult {
+        var result = try await run(cause)
+        while let cause = queuedCause {
+            queuedCause = nil
+            result = try await run(cause)
+        }
+        return result
     }
 
     func resynchronize(

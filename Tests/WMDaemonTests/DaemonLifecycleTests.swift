@@ -1,9 +1,135 @@
 import Foundation
 import Testing
+import WMCore
 import WMInventory
 import WMPersistence
+import WMProtocol
 import WMWorkspace
 @testable import wm
+
+private func daemonHandler() throws -> (DaemonHandler, DaemonHandler.State) {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let scanner = InventoryScanner(sources: .init(
+        displays: StubDisplays(), accessibility: StubAX(), coreGraphics: StubCG()
+    ))
+    let state = DaemonHandler.State(provider: SystemInventoryProvider(scanner: scanner))
+    return (DaemonHandler(
+        state: state,
+        workspaces: try WorkspaceController(buildVersion: "test", stateURL: directory.appendingPathComponent("state.json"))
+    ), state)
+}
+
+private struct StubDisplays: DisplayInventorySource {
+    func displays() async -> SourceResult<[DisplayObservation]> {
+        .init(value: [.init(id: "display:1", name: "Display", isBuiltin: true, isPrimary: true, frame: .init(x: 0, y: 0, width: 1000, height: 800), visibleFrame: .init(x: 0, y: 0, width: 1000, height: 800), backingScale: 1, identifiers: .init())], health: .init(source: .displays, status: .healthy, permissionGranted: nil))
+    }
+}
+
+private struct StubCG: CoreGraphicsInventorySource {
+    func windows() async -> SourceResult<[WMInventory.RawCGWindow]> {
+        .init(value: [], health: .init(source: .coreGraphics, status: .healthy, permissionGranted: true))
+    }
+}
+
+private struct StubAX: AccessibilityInventorySource {
+    func applications() async -> SourceResult<[ApplicationObservation]> {
+        .init(value: [], health: .init(source: .accessibility, status: .healthy, permissionGranted: true))
+    }
+    func windows(for application: ApplicationObservation) async throws -> [WMInventory.RawAXWindow] { [] }
+}
+
+private actor EventProbe {
+    private var topics: [EventTopic] = []
+    func record(_ topic: EventTopic) { topics.append(topic) }
+    func contains(_ topic: EventTopic) -> Bool { topics.contains(topic) }
+}
+
+private func clientMessage(_ message: ClientMessage) throws -> String {
+    String(data: try ProtocolCodec.encode(message), encoding: .utf8)!
+}
+
+private func response(_ text: String) throws -> Response {
+    guard case .response(let response) = try ProtocolCodec.decode(ServerMessage.self, from: Data(text.utf8)) else {
+        throw CancellationError()
+    }
+    return response
+}
+
+@Test func daemonSubscriptionsUnsubscribeExactlyByID() async throws {
+    let (handler, _) = try daemonHandler()
+    let client = UUID()
+    await handler.installSender { _, _ in }
+    _ = await handler.handle(text: try clientMessage(.subscribe(.init(
+        requestId: "one", subscriptionId: "one", topics: [.configurationChanged]
+    ))), clientID: client)
+    _ = await handler.handle(text: try clientMessage(.subscribe(.init(
+        requestId: "two", subscriptionId: "two", topics: [.configurationChanged]
+    ))), clientID: client)
+    let unsubscribe = await handler.handle(text: try clientMessage(.unsubscribe(.init(
+        requestId: "remove", subscriptionId: "one"
+    ))), clientID: client)
+
+    #expect(try response(unsubscribe[0]).error == nil)
+    let secondUnsubscribe = await handler.handle(text: try clientMessage(.unsubscribe(.init(
+        requestId: "missing", subscriptionId: "one"
+    ))), clientID: client)
+    #expect(try response(secondUnsubscribe[0]).error?.code == .subscriptionNotFound)
+}
+
+@Test func mixedRoutingFamiliesAreRejectedWithoutRegistration() async throws {
+    let (handler, _) = try daemonHandler()
+    let client = UUID()
+    let replies = await handler.handle(text: try clientMessage(.subscribe(.init(
+        requestId: "mixed", subscriptionId: "mixed", topics: [.configurationChanged, .windowInventory]
+    ))), clientID: client)
+
+    #expect(try response(replies[0]).error?.code == .invalidParams)
+    let unsubscribe = await handler.handle(text: try clientMessage(.unsubscribe(.init(
+        requestId: "remove", subscriptionId: "mixed"
+    ))), clientID: client)
+    #expect(try response(unsubscribe[0]).error?.code == .subscriptionNotFound)
+}
+
+@Test func sessionHealthUsesTheSameHealthSubscriptionRoute() async throws {
+    let (handler, _) = try daemonHandler()
+    let client = UUID()
+    let events = EventProbe()
+    await handler.installSender { text, _ in
+        guard case .event(let event) = try? ProtocolCodec.decode(ServerMessage.self, from: Data(text.utf8)) else { return }
+        Task { await events.record(event.topic) }
+    }
+    _ = await handler.handle(text: try clientMessage(.subscribe(.init(
+        requestId: "health", subscriptionId: "health", topics: [.healthChanged]
+    ))), clientID: client)
+
+    try await handler.resynchronizeSession(.wake)
+    await Task.yield()
+    #expect(await events.contains(.healthChanged))
+}
+
+@Test func configurationHealthUsesTheSameHealthSubscriptionRoute() async throws {
+    let (handler, state) = try daemonHandler()
+    let client = UUID()
+    let events = EventProbe()
+    await handler.installSender { text, _ in
+        guard case .event(let event) = try? ProtocolCodec.decode(ServerMessage.self, from: Data(text.utf8)) else { return }
+        Task { await events.record(event.topic) }
+    }
+    _ = await handler.handle(text: try clientMessage(.subscribe(.init(
+        requestId: "health", subscriptionId: "health", topics: [.healthChanged]
+    ))), clientID: client)
+    _ = try await state.refresh()
+    let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try Data(#"{"workspaces":[]}"#.utf8).write(to: path)
+    defer { try? FileManager.default.removeItem(at: path) }
+
+    _ = await handler.handle(text: try clientMessage(.request(.init(
+        requestId: "reload", method: .configurationReload, params: ["path": .string(path.path)]
+    ))), clientID: client)
+    for _ in 0..<100 where !(await events.contains(.healthChanged)) { await Task.yield() }
+    #expect(await events.contains(.healthChanged))
+}
 
 @Test func pauseBlocksMutationsUntilResume() throws {
     var lifecycle = DaemonLifecycle()
@@ -71,6 +197,67 @@ import WMWorkspace
         )
     }
     #expect(await probe.steps == ["pause", "permissions"])
+}
+
+@Test func overlappingTransitionsCoalesceIntoOneFollowUpEpoch() async throws {
+    actor Probe {
+        var causes: [SessionTransitionCause] = []
+        var gate: CheckedContinuation<Void, Never>?
+        func run(_ cause: SessionTransitionCause) async -> SessionTransitionResult {
+            causes.append(cause)
+            if causes.count == 1 { await withCheckedContinuation { gate = $0 } }
+            return .init(epoch: UInt64(causes.count), cause: cause, observerGeneration: UInt64(causes.count), displayStabilized: true, stabilizationAttempts: 2)
+        }
+        func waiting() -> Bool { gate != nil }
+        func release() { gate?.resume(); gate = nil }
+    }
+    let probe = Probe()
+    let epochs = SessionTransitionEpochs<Int, Void>(sleep: { _ in })
+    let wake = Task { try await epochs.submit(cause: .wake) { await probe.run($0) } }
+    while !(await probe.waiting()) { await Task.yield() }
+    let active = Task { try await epochs.submit(cause: .activeSession) { await probe.run($0) } }
+    while await epochs.queuedTransitionCause() != .activeSession { await Task.yield() }
+    let screen = Task { try await epochs.submit(cause: .clamshell) { await probe.run($0) } }
+    while await epochs.queuedTransitionCause() != .clamshell { await Task.yield() }
+    await probe.release()
+
+    _ = try await wake.value
+    _ = try await active.value
+    _ = try await screen.value
+    #expect(await probe.causes == [.wake, .clamshell])
+}
+
+@Test func failedTransitionBurstRunsFailureCleanupAndReleasesWaiters() async {
+    actor Probe {
+        var failureCount = 0
+        var gate: CheckedContinuation<Void, Never>?
+        func fail() async throws -> SessionTransitionResult {
+            await withCheckedContinuation { gate = $0 }
+            throw Failure.expected
+        }
+        func waiting() -> Bool { gate != nil }
+        func release() { gate?.resume(); gate = nil }
+        func recordFailure() { failureCount += 1 }
+    }
+    enum Failure: Error { case expected }
+    let probe = Probe()
+    let epochs = SessionTransitionEpochs<Int, Void>(sleep: { _ in })
+    let wake = Task {
+        try await epochs.submit(cause: .wake, run: { _ in try await probe.fail() }, fail: { _ in
+            await probe.recordFailure()
+        })
+    }
+    while !(await probe.waiting()) { await Task.yield() }
+    let screen = Task { try await epochs.submit(cause: .clamshell) { _ in
+        Issue.record("coalesced caller must not start an overlapping transition")
+        return .init(epoch: 0, cause: .clamshell, observerGeneration: 0, displayStabilized: false, stabilizationAttempts: 0)
+    } }
+    while await epochs.queuedTransitionCause() != .clamshell { await Task.yield() }
+    await probe.release()
+
+    await #expect(throws: Failure.expected) { try await wake.value }
+    await #expect(throws: Failure.expected) { try await screen.value }
+    #expect(await probe.failureCount == 1)
 }
 
 @Test func unstableDisplaysUseBoundedDegradedFallback() async throws {
@@ -262,8 +449,8 @@ import WMWorkspace
     ) == "replacement")
 }
 
-private func startupState(staleID: String, liveID: String) -> WorkspaceState {
-    WorkspaceState(
+private func startupState(staleID: String, liveID: String) -> WMWorkspace.WorkspaceState {
+    WMWorkspace.WorkspaceState(
         workspaces: [.init(
             name: "visible", origin: .configured, displayID: "display:1", visible: true, focused: true,
             windowIDs: [staleID, liveID], focusedWindowID: staleID,

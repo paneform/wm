@@ -23,7 +23,6 @@ actor DaemonHandler: WebSocketRequestHandler {
     private var subscriptions: [UUID: [String: Task<Void, Never>]] = [:]
     private var workspaceSubscriptions: [UUID: [String: WorkspaceSubscription]] = [:]
     private var stateSnapshotSubscriptions: [UUID: [String: SnapshotDetail]] = [:]
-    private var configurationSubscriptions: [UUID: Set<EventTopic>] = [:]
     private var workspaceSequence: UInt64 = 0
     private var windowMinimumSizes: [String: WorkspaceMinimumSize] = [:]
     private var observerGeometryReliability = ObserverGeometryReliability()
@@ -182,9 +181,32 @@ actor DaemonHandler: WebSocketRequestHandler {
     }
 
     func resynchronizeSession(_ cause: SessionTransitionCause) async throws {
-        let result = try await sessionTransitions.resynchronize(
+        let result = try await sessionTransitions.submit(
             cause: cause,
-            pause: { [weak self] in await self?.pauseForSessionTransition(cause) },
+            begin: { [weak self] cause in await self?.pauseForSessionTransition(cause) },
+            run: { [weak self] cause in
+                guard let self else { throw CancellationError() }
+                return try await self.performSessionResynchronizationEpoch(cause)
+            },
+            complete: { [weak self] in await self?.resumeAfterSessionTransition() },
+            fail: { [weak self] _ in await self?.failSessionTransition() }
+        )
+        await publishSessionEvent(.sessionResynchronized, data: .object([
+            "epoch": .number(Double(result.epoch)),
+            "cause": .string(result.cause.rawValue),
+            "observer_generation": .number(Double(result.observerGeneration)),
+            "display_stabilized": .bool(result.displayStabilized),
+            "stabilization_attempts": .number(Double(result.stabilizationAttempts)),
+        ]))
+        if let health = try? await state.health() {
+            await publishSessionEvent(.healthChanged, data: json(protocolHealth(health)))
+        }
+    }
+
+    private func performSessionResynchronizationEpoch(_ cause: SessionTransitionCause) async throws -> SessionTransitionResult {
+        try await sessionTransitions.resynchronize(
+            cause: cause,
+            pause: {},
             displays: { [state] in try await state.refresh().snapshot.inventory.displays },
             permissions: { [state] in
                 let snapshot = try await state.refresh().snapshot
@@ -199,18 +221,14 @@ actor DaemonHandler: WebSocketRequestHandler {
                 guard let self else { throw CancellationError() }
                 try await self.reconstructObservedState(inventory)
             },
-            resume: { [weak self] in await self?.resumeAfterSessionTransition() }
+            resume: {}
         )
-        await publishSessionEvent(.sessionResynchronized, data: .object([
-            "epoch": .number(Double(result.epoch)),
-            "cause": .string(result.cause.rawValue),
-            "observer_generation": .number(Double(result.observerGeneration)),
-            "display_stabilized": .bool(result.displayStabilized),
-            "stabilization_attempts": .number(Double(result.stabilizationAttempts)),
-        ]))
-        if let health = try? await state.health() {
-            await publishSessionEvent(.healthChanged, data: json(protocolHealth(health)))
-        }
+    }
+
+    private func failSessionTransition() async {
+        await transactions.endRecovery(success: false, failure: .init(
+            code: .notReady, message: "session resynchronization failed", retryable: true
+        ))
     }
 
     private func pauseForSessionTransition(_ cause: SessionTransitionCause) async {
@@ -312,17 +330,13 @@ actor DaemonHandler: WebSocketRequestHandler {
         }
         workspaceSubscriptions.removeValue(forKey: clientID)
         stateSnapshotSubscriptions.removeValue(forKey: clientID)
-        configurationSubscriptions.removeValue(forKey: clientID)
     }
 
     private func subscribe(_ request: Subscribe, clientID: UUID) async -> [String] {
-        let configurationTopics = Set(request.topics.filter { $0 == .configurationChanged || $0 == .healthChanged })
-        if !configurationTopics.isEmpty {
-            guard request.afterSequence == nil else { return [await errorResponse(request.requestId, .replayUnavailable, "configuration event replay is unavailable")] }
-            configurationSubscriptions[clientID, default: []].formUnion(configurationTopics)
-            return [encode(.response(.init(requestId: request.requestId, result: .object(["subscription_id": .string(request.subscriptionId)]), stateVersion: await currentVersion())))]
-        }
         if request.topics.contains(.stateSnapshot) {
+            guard request.topics.allSatisfy({ $0 == .stateSnapshot }) else {
+                return [await errorResponse(request.requestId, .invalidParams, "state snapshot cannot be combined with other topics")]
+            }
             guard request.afterSequence == nil else {
                 return [await errorResponse(request.requestId, .replayUnavailable, "state snapshot replay is unavailable")]
             }
@@ -334,13 +348,16 @@ actor DaemonHandler: WebSocketRequestHandler {
             )))
             return [response, await stateSnapshotEvent(detail: request.detail)]
         }
-        let workspaceTopics = Set(request.topics.filter(\.isDaemonEvent))
-        if !workspaceTopics.isEmpty {
+        let daemonTopics = Set(request.topics.filter(\.isDaemonEvent))
+        if !daemonTopics.isEmpty {
+            guard daemonTopics.count == Set(request.topics).count else {
+                return [await errorResponse(request.requestId, .invalidParams, "daemon and inventory topics cannot be combined")]
+            }
             guard request.afterSequence == nil else {
-                return [await errorResponse(request.requestId, .replayUnavailable, "workspace event replay is unavailable")]
+                return [await errorResponse(request.requestId, .replayUnavailable, "daemon event replay is unavailable")]
             }
             workspaceSubscriptions[clientID, default: [:]][request.subscriptionId] = .init(
-                topics: workspaceTopics,
+                topics: daemonTopics,
                 projection: request.projection
             )
             let response = encode(ServerMessage.response(.init(
@@ -348,7 +365,10 @@ actor DaemonHandler: WebSocketRequestHandler {
                 result: .object(["subscription_id": .string(request.subscriptionId)]),
                 stateVersion: await currentVersion()
             )))
-            return [response, await workspaceSnapshotEvent(topic: workspaceTopics.sorted(by: { $0.rawValue < $1.rawValue }).first!)]
+            if daemonTopics.allSatisfy(\.hasWorkspaceSnapshot) {
+                return [response, await workspaceSnapshotEvent(topic: daemonTopics.sorted(by: { $0.rawValue < $1.rawValue }).first!)]
+            }
+            return [response]
         }
         do {
             let topics = Set(request.topics.compactMap { InventoryTopic(rawValue: $0.rawValue) })
@@ -830,9 +850,12 @@ actor DaemonHandler: WebSocketRequestHandler {
     private func publishConfigurationEvent(_ event: ConfigurationEvent, degraded: Bool) async {
         workspaceSequence += 1
         let payload: JSONValue = .object(["status": .string(event.kind == .applied ? "applied" : "rejected"), "trigger": .string(event.trigger.rawValue), "mode": .string(event.mode.rawValue), "message": event.message.map(JSONValue.string) ?? .null, "degraded": .bool(degraded)])
-        for (clientID, topics) in configurationSubscriptions {
-            if topics.contains(.configurationChanged) { sender?(encode(.event(.init(sequence: workspaceSequence, stateVersion: await currentVersion(), timestamp: Date(), topic: .configurationChanged, data: payload))), clientID) }
-            if topics.contains(.healthChanged) { sender?(encode(.event(.init(sequence: workspaceSequence, stateVersion: await currentVersion(), timestamp: Date(), topic: .healthChanged, data: .object(["configuration_degraded": .bool(degraded)])))), clientID) }
+        let version = await currentVersion()
+        for (clientID, subscriptions) in workspaceSubscriptions {
+            for subscription in subscriptions.values {
+                if subscription.topics.contains(.configurationChanged) { sender?(encode(.event(.init(sequence: workspaceSequence, stateVersion: version, timestamp: Date(), topic: .configurationChanged, data: payload))), clientID) }
+                if subscription.topics.contains(.healthChanged) { sender?(encode(.event(.init(sequence: workspaceSequence, stateVersion: version, timestamp: Date(), topic: .healthChanged, data: .object(["configuration_degraded": .bool(degraded)])))), clientID) }
+            }
         }
     }
     private func key(_ client: UUID, _ id: String) -> String { "\(client.uuidString):\(id)" }
@@ -1413,7 +1436,15 @@ private extension EventTopic {
         switch self {
         case .workspaceChanged, .workspaceFocused, .workspaceCreated, .workspaceDeleted,
              .workspaceDisplayChanged, .workspaceModeChanged, .daemonPaused, .daemonResumed,
-             .sessionResynchronized: true
+             .sessionResynchronized, .configurationChanged, .healthChanged: true
+        default: false
+        }
+    }
+
+    var hasWorkspaceSnapshot: Bool {
+        switch self {
+        case .workspaceChanged, .workspaceFocused, .workspaceCreated, .workspaceDeleted,
+             .workspaceDisplayChanged, .workspaceModeChanged: true
         default: false
         }
     }
