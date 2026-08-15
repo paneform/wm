@@ -38,6 +38,7 @@ import Testing
         (["observe", "workspace", "T"], "observe.workspace"),
         (["diagnostics", "inventory"], "diagnostics.inventory"),
         (["inventory", "refresh"], "inventory.refresh"),
+        (["config", "validate", "/tmp/wm.jsonc"], "configuration.validate"),
         (["transaction", "get", "transaction:1"], "transaction.get"),
         (["batch", #"[{"method":"workspace.focus","params":{"name":"T"}}]"#], "command.batch"),
         (["workspace", "move-window-bulk", "T", "window:1"], "workspace.move_window_bulk"),
@@ -50,6 +51,16 @@ import Testing
         #expect(method == expected)
         #expect(url == defaultWMWebSocketURL)
     }
+}
+
+@Test func parsesConfigurationCommandsWithWebSocketParity() throws {
+    #expect(try CLIParser().parse(["config", "validate", "/tmp/wm.jsonc"]) == .request(
+        method: "configuration.validate", params: ["path": .string("/tmp/wm.jsonc")], url: defaultWMWebSocketURL
+    ))
+    #expect(try CLIParser().parse(["configuration", "reload", "/tmp/wm.jsonc", "--mode", "delta", "--trigger", "hotload"]) == .request(
+        method: "configuration.reload", params: ["path": .string("/tmp/wm.jsonc"), "mode": .string("delta"), "trigger": .string("hotload")], url: defaultWMWebSocketURL
+    ))
+    #expect(throws: CLIParseError.self) { try CLIParser().parse(["config", "reload", "/tmp/wm.jsonc", "--mode", "bad"]) }
 }
 
 @Test func parsesWindowManagementCommands() throws {

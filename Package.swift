@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "WMWorkspace", targets: ["WMWorkspace"]),
         .library(name: "WMPersistence", targets: ["WMPersistence"]),
         .library(name: "WMCore", targets: ["WMCore"]),
+        .library(name: "WMConfiguration", targets: ["WMConfiguration"]),
         .library(name: "WMWebSocket", targets: ["WMWebSocket"]),
         .library(name: "WMCLI", targets: ["WMCLI"]),
         .executable(name: "wm-geometry-fake-verify", targets: ["WMGeometryFakeVerify"]),
@@ -35,6 +36,7 @@ let package = Package(
             name: "WMCore",
             dependencies: ["WMProtocol", "WMInventory"]
         ),
+        .target(name: "WMConfiguration"),
         .target(
             name: "WMWebSocket",
             dependencies: ["WMProtocol", "WMCore"]
@@ -45,7 +47,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "wm",
-            dependencies: ["WMCLI", "WMCore", "WMInventory", "WMPersistence", "WMProtocol", "WMWebSocket", "WMWorkspace"]
+            dependencies: ["WMCLI", "WMConfiguration", "WMCore", "WMInventory", "WMPersistence", "WMProtocol", "WMWebSocket", "WMWorkspace"]
         ),
         .executableTarget(
             name: "WMGeometryFakeVerify",
@@ -60,6 +62,7 @@ let package = Package(
         .testTarget(name: "WMWorkspaceTests", dependencies: ["WMWorkspace", "WMProtocol"]),
         .testTarget(name: "WMPersistenceTests", dependencies: ["WMPersistence", "WMWorkspace", "WMProtocol"]),
         .testTarget(name: "WMCoreTests", dependencies: ["WMCore", "WMInventory", "WMProtocol"]),
+        .testTarget(name: "WMConfigurationTests", dependencies: ["WMConfiguration"]),
         .testTarget(name: "WMWebSocketTests", dependencies: ["WMWebSocket", "WMCore", "WMProtocol"]),
         .testTarget(name: "WMCLITests", dependencies: ["WMCLI", "WMProtocol"]),
         .testTarget(name: "WMDaemonTests", dependencies: ["wm", "WMInventory", "WMPersistence", "WMWorkspace"]),

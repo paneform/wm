@@ -1,4 +1,5 @@
 import Foundation
+import WMConfiguration
 import WMCore
 import WMInventory
 import WMProtocol
@@ -22,6 +23,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     private var subscriptions: [UUID: [String: Task<Void, Never>]] = [:]
     private var workspaceSubscriptions: [UUID: [String: WorkspaceSubscription]] = [:]
     private var stateSnapshotSubscriptions: [UUID: [String: SnapshotDetail]] = [:]
+    private var configurationSubscriptions: [UUID: Set<EventTopic>] = [:]
     private var workspaceSequence: UInt64 = 0
     private var windowMinimumSizes: [String: WorkspaceMinimumSize] = [:]
     private var observerGeometryReliability = ObserverGeometryReliability()
@@ -30,6 +32,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     private var daemonLifecycle = DaemonLifecycle()
     private let transactions = TransactionCoordinator<JSONValue>()
     private let sessionTransitions = SessionTransitionEpochs<[DisplayObservation], InventorySnapshot>()
+    private let configuration = ConfigurationStore()
     private var lastTransitionTrace: JSONValue = .null
     private var sender: (@Sendable (String, UUID) -> Void)?
     private var internalErrorReporter: (@Sendable (String) -> Void)?
@@ -309,9 +312,16 @@ actor DaemonHandler: WebSocketRequestHandler {
         }
         workspaceSubscriptions.removeValue(forKey: clientID)
         stateSnapshotSubscriptions.removeValue(forKey: clientID)
+        configurationSubscriptions.removeValue(forKey: clientID)
     }
 
     private func subscribe(_ request: Subscribe, clientID: UUID) async -> [String] {
+        let configurationTopics = Set(request.topics.filter { $0 == .configurationChanged || $0 == .healthChanged })
+        if !configurationTopics.isEmpty {
+            guard request.afterSequence == nil else { return [await errorResponse(request.requestId, .replayUnavailable, "configuration event replay is unavailable")] }
+            configurationSubscriptions[clientID, default: []].formUnion(configurationTopics)
+            return [encode(.response(.init(requestId: request.requestId, result: .object(["subscription_id": .string(request.subscriptionId)]), stateVersion: await currentVersion())))]
+        }
         if request.topics.contains(.stateSnapshot) {
             guard request.afterSequence == nil else {
                 return [await errorResponse(request.requestId, .replayUnavailable, "state snapshot replay is unavailable")]
@@ -489,6 +499,23 @@ actor DaemonHandler: WebSocketRequestHandler {
                     try await reconcileObservedWindows(inventory, displayID: displayID)
                 }
                 result = json(userState(committed))
+            case .configurationValidate:
+                let path = try configurationPath(request.params)
+                _ = try ConfigurationParser.parse(String(contentsOfFile: path, encoding: .utf8))
+                result = .object(["valid": .bool(true), "path": .string(path)])
+            case .configurationReload:
+                let path = try configurationPath(request.params)
+                let mode = try configurationMode(request.params["mode"])
+                let trigger = try configurationTrigger(request.params["trigger"])
+                do {
+                    let loaded = try await configuration.reload(source: String(contentsOfFile: path, encoding: .utf8), trigger: trigger, mode: mode)
+                    await publishConfigurationEvent(loaded.events.last!, degraded: loaded.degraded)
+                    result = configurationResult(loaded)
+                } catch {
+                    let loaded = await configuration.snapshot()
+                    if let event = loaded.events.last { await publishConfigurationEvent(event, degraded: loaded.degraded) }
+                    throw error
+                }
             case .daemonPing: result = .object(["session_id": .string(sessionID), "daemon_version": .string(version), "ready": .bool(true), "paused": .bool(daemonLifecycle.isPaused), "current_sequence": .number(Double(committed.sequence)), "state_version": .number(Double(committed.stateVersion))])
             case .daemonPause:
                 _ = daemonLifecycle.pause()
@@ -783,6 +810,31 @@ actor DaemonHandler: WebSocketRequestHandler {
     }
 
     private func currentVersion() async -> UInt64 { (try? await state.state().stateVersion) ?? 0 }
+    private func configurationPath(_ params: [String: JSONValue]) throws -> String {
+        guard case .string(let path)? = params["path"], !path.isEmpty else { throw WorkspaceRequestError.invalidConfigurationRequest }
+        return path
+    }
+    private func configurationMode(_ value: JSONValue?) throws -> ReloadMode? {
+        guard let value else { return nil }
+        guard case .string(let raw) = value, let mode = ReloadMode(rawValue: raw) else { throw WorkspaceRequestError.invalidConfigurationRequest }
+        return mode
+    }
+    private func configurationTrigger(_ value: JSONValue?) throws -> ReloadTrigger {
+        guard let value else { return .explicit }
+        guard case .string(let raw) = value, let trigger = ReloadTrigger(rawValue: raw) else { throw WorkspaceRequestError.invalidConfigurationRequest }
+        return trigger
+    }
+    private func configurationResult(_ value: ConfigurationSnapshot) -> JSONValue {
+        .object(["applied": .bool(true), "revision": .number(Double(value.revision)), "degraded": .bool(value.degraded)])
+    }
+    private func publishConfigurationEvent(_ event: ConfigurationEvent, degraded: Bool) async {
+        workspaceSequence += 1
+        let payload: JSONValue = .object(["status": .string(event.kind == .applied ? "applied" : "rejected"), "trigger": .string(event.trigger.rawValue), "mode": .string(event.mode.rawValue), "message": event.message.map(JSONValue.string) ?? .null, "degraded": .bool(degraded)])
+        for (clientID, topics) in configurationSubscriptions {
+            if topics.contains(.configurationChanged) { sender?(encode(.event(.init(sequence: workspaceSequence, stateVersion: await currentVersion(), timestamp: Date(), topic: .configurationChanged, data: payload))), clientID) }
+            if topics.contains(.healthChanged) { sender?(encode(.event(.init(sequence: workspaceSequence, stateVersion: await currentVersion(), timestamp: Date(), topic: .healthChanged, data: .object(["configuration_degraded": .bool(degraded)])))), clientID) }
+        }
+    }
     private func key(_ client: UUID, _ id: String) -> String { "\(client.uuidString):\(id)" }
     private func errorResponse(_ id: String, _ code: ErrorCode, _ message: String) async -> String { encode(.response(.init(requestId: id, error: .init(code: code, message: message, retryable: false), stateVersion: await currentVersion()))) }
     private func encode(_ message: ServerMessage) -> String { String(data: (try? ProtocolCodec.encode(message)) ?? Data(), encoding: .utf8) ?? "{}" }
@@ -1291,6 +1343,7 @@ private enum WorkspaceRequestError: Error {
     case windowNotFound(String)
     case transactionRequired
     case invalidReturnMode
+    case invalidConfigurationRequest
     case invalidBatch
     case invalidBulk
 
@@ -1301,7 +1354,7 @@ private enum WorkspaceRequestError: Error {
         case .windowRequired: .windowNotFound
         case .windowNotFound: .windowNotFound
         case .transactionRequired: .invalidParams
-        case .invalidReturnMode: .invalidParams
+        case .invalidReturnMode, .invalidConfigurationRequest: .invalidParams
         case .invalidBatch, .invalidBulk: .invalidParams
         }
     }
@@ -1314,6 +1367,7 @@ private enum WorkspaceRequestError: Error {
         case .windowNotFound(let id): "unknown window: \(id)"
         case .transactionRequired: "transaction_id is required"
         case .invalidReturnMode: "return_mode must be completion or instant"
+        case .invalidConfigurationRequest: "configuration path, mode, or trigger is invalid"
         case .invalidBatch: "batch requires 1...64 mutation commands"
         case .invalidBulk: "bulk requires 1...128 valid window IDs"
         }
@@ -1327,7 +1381,7 @@ private extension WMProtocol.Method {
         switch self {
         case .windowManage, .windowUnmanage, .windowFrameSet, .workspaceFocus, .workspaceMoveWindow,
              .workspaceMoveWindowBulk, .workspaceMoveDisplay, .workspaceSetMode, .inventoryRefresh,
-             .commandBatch, .daemonPause, .daemonResume: true
+             .configurationReload, .commandBatch, .daemonPause, .daemonResume: true
         default: false
         }
     }
@@ -1335,7 +1389,7 @@ private extension WMProtocol.Method {
     var isIdempotent: Bool {
         switch self {
         case .windowManage, .windowUnmanage, .windowFrameSet, .workspaceFocus, .workspaceMoveDisplay,
-             .workspaceSetMode, .inventoryRefresh: true
+             .workspaceSetMode, .inventoryRefresh, .configurationReload: true
         default: false
         }
     }

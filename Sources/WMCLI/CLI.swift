@@ -133,6 +133,7 @@ public struct CLIParser: Sendable {
         case "workspace": return try parseWorkspace(rest)
         case "diagnostics": return try nestedRequest("diagnostics", child: "inventory", method: "diagnostics.inventory", rest)
         case "inventory": return try nestedRequest("inventory", child: "refresh", method: "inventory.refresh", rest)
+        case "config", "configuration": return try parseConfiguration(rest)
         case "transaction": return try parseTransaction(rest)
         case "batch": return try parseBatch(rest)
         case "subscribe": return .subscribe(try parseSubscription(rest))
@@ -149,6 +150,31 @@ public struct CLIParser: Sendable {
         guard arguments.first == "get", arguments.count >= 2 else { throw CLIParseError("expected 'transaction get ID'") }
         return .request(method: "transaction.get", params: ["transaction_id": .string(arguments[1])],
                         url: try parseURLOnly(Array(arguments.dropFirst(2))))
+    }
+
+    private func parseConfiguration(_ arguments: [String]) throws -> CLICommand {
+        guard let operation = arguments.first, ["validate", "reload"].contains(operation) else {
+            throw CLIParseError("expected 'config validate PATH' or 'config reload PATH'")
+        }
+        guard arguments.count >= 2 else { throw CLIParseError("missing configuration path") }
+        var params: [String: JSONValue] = ["path": .string(arguments[1])]
+        var url = defaultWMWebSocketURL, index = 2
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--mode":
+                let mode = try value(after: &index, in: arguments)
+                guard operation == "reload", ["delta", "full"].contains(mode) else { throw CLIParseError("invalid reload mode: \(mode)") }
+                params["mode"] = .string(mode)
+            case "--trigger":
+                let trigger = try value(after: &index, in: arguments)
+                guard operation == "reload", ["hotload", "explicit"].contains(trigger) else { throw CLIParseError("invalid reload trigger: \(trigger)") }
+                params["trigger"] = .string(trigger)
+            case "--url": url = try webSocketURL(try value(after: &index, in: arguments))
+            default: throw CLIParseError("unknown configuration argument: \(arguments[index])")
+            }
+            index += 1
+        }
+        return .request(method: "configuration.\(operation)", params: params, url: url)
     }
 
     private func parseBatch(_ arguments: [String]) throws -> CLICommand {
