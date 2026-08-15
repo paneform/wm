@@ -2,6 +2,7 @@ import Dispatch
 import Foundation
 import AppKit
 import WMCLI
+import WMConfiguration
 import WMCore
 import WMInventory
 import WMProtocol
@@ -52,6 +53,7 @@ import WMWorkspace
             return CLIExitCode.unavailable.rawValue
         }
         let handler = DaemonHandler(state: state, workspaces: workspaces)
+        let configPath = ConfigurationFile.path()
         do {
             let committed = try await state.refresh()
             let inventory = committed.snapshot.inventory
@@ -61,6 +63,11 @@ import WMWorkspace
             }
             guard let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id else {
                 throw StartupError.noDisplay
+            }
+            if FileManager.default.fileExists(atPath: configPath.path) {
+                _ = try await handler.loadConfiguration(
+                    source: String(contentsOf: configPath, encoding: .utf8), inventory: inventory
+                )
             }
             try await handler.auditStartupIntent(inventory)
             try await handler.reconcileObservedWindows(inventory, displayID: displayID)
@@ -105,6 +112,22 @@ import WMWorkspace
             }
         )
         let observationTask = Task { await observation.run() }
+        let configWatcher = ConfigurationWatcher()
+        let configTask = Task {
+            while !Task.isCancelled {
+                do {
+                    if FileManager.default.fileExists(atPath: configPath.path) {
+                        try await configWatcher.poll(path: configPath) { _, source in
+                            let inventory = try await state.refresh().snapshot.inventory
+                            _ = try await handler.hotloadConfiguration(source: source, inventory: inventory)
+                        }
+                    }
+                } catch {
+                    FileHandle.standardError.write(Data("configuration watch failed: \(error)\n".utf8))
+                }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
         let activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
@@ -153,7 +176,9 @@ import WMWorkspace
         }
         for await _ in stream { break }
         observationTask.cancel()
+        configTask.cancel()
         await observationTask.value
+        await configTask.value
         NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
         sessionObservers.forEach { workspaceCenter.removeObserver($0) }
         NotificationCenter.default.removeObserver(screenObserver)

@@ -4,14 +4,34 @@ public enum WorkspaceMode: String, Codable, Sendable { case bsp, floating }
 public enum WindowBehavior: String, Codable, Sendable { case tiled, floating }
 public enum ResistantWindowPolicy: String, Codable, Sendable { case float, ignore }
 
+public struct WorkspaceMargins: Codable, Equatable, Sendable {
+    public var top: Double?; public var right: Double?; public var bottom: Double?; public var left: Double?
+    public init(top: Double? = nil, right: Double? = nil, bottom: Double? = nil, left: Double? = nil) {
+        self.top = top; self.right = right; self.bottom = bottom; self.left = left
+    }
+    enum CodingKeys: String, CodingKey, CaseIterable { case top, right, bottom, left }
+    public init(from decoder: Decoder) throws {
+        try rejectUnknown(decoder, allowed: CodingKeys.allCases.map(\.rawValue))
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        top = try values.decodeIfPresent(Double.self, forKey: .top)
+        right = try values.decodeIfPresent(Double.self, forKey: .right)
+        bottom = try values.decodeIfPresent(Double.self, forKey: .bottom)
+        left = try values.decodeIfPresent(Double.self, forKey: .left)
+    }
+    func inheriting(_ defaults: Self) -> Self {
+        Self(top: top ?? defaults.top, right: right ?? defaults.right,
+             bottom: bottom ?? defaults.bottom, left: left ?? defaults.left)
+    }
+}
+
 public struct WorkspaceSettings: Codable, Equatable, Sendable {
     public var preferredDisplay: String?
     public var mode: WorkspaceMode?
-    public var margin: Double?
+    public var margin: WorkspaceMargins?
     public var gap: Double?
     public var resizeIncrement: Double?
 
-    public init(preferredDisplay: String? = nil, mode: WorkspaceMode? = nil, margin: Double? = nil, gap: Double? = nil, resizeIncrement: Double? = nil) {
+    public init(preferredDisplay: String? = nil, mode: WorkspaceMode? = nil, margin: WorkspaceMargins? = nil, gap: Double? = nil, resizeIncrement: Double? = nil) {
         self.preferredDisplay = preferredDisplay; self.mode = mode; self.margin = margin; self.gap = gap
         self.resizeIncrement = resizeIncrement
     }
@@ -26,14 +46,14 @@ public struct WorkspaceSettings: Codable, Equatable, Sendable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         preferredDisplay = try values.decodeIfPresent(String.self, forKey: .preferredDisplay)
         mode = try values.decodeIfPresent(WorkspaceMode.self, forKey: .mode)
-        margin = try values.decodeIfPresent(Double.self, forKey: .margin)
+        margin = try values.decodeIfPresent(WorkspaceMargins.self, forKey: .margin)
         gap = try values.decodeIfPresent(Double.self, forKey: .gap)
         resizeIncrement = try values.decodeIfPresent(Double.self, forKey: .resizeIncrement)
     }
 
     func inheriting(_ defaults: Self) -> Self {
         Self(preferredDisplay: preferredDisplay ?? defaults.preferredDisplay, mode: mode ?? defaults.mode,
-             margin: margin ?? defaults.margin, gap: gap ?? defaults.gap,
+             margin: margin.map { $0.inheriting(defaults.margin ?? .init()) } ?? defaults.margin, gap: gap ?? defaults.gap,
              resizeIncrement: resizeIncrement ?? defaults.resizeIncrement)
     }
 }
@@ -56,7 +76,7 @@ public struct WorkspaceConfiguration: Codable, Equatable, Sendable {
         settings = WorkspaceSettings(
             preferredDisplay: try values.decodeIfPresent(String.self, forKey: .preferredDisplay),
             mode: try values.decodeIfPresent(WorkspaceMode.self, forKey: .mode),
-            margin: try values.decodeIfPresent(Double.self, forKey: .margin),
+            margin: try values.decodeIfPresent(WorkspaceMargins.self, forKey: .margin),
             gap: try values.decodeIfPresent(Double.self, forKey: .gap),
             resizeIncrement: try values.decodeIfPresent(Double.self, forKey: .resizeIncrement)
         )
@@ -106,7 +126,19 @@ public indirect enum RuleMatch: Codable, Equatable, Sendable {
         if operation == .regex { _ = try NSRegularExpression(pattern: value) }
         self = .value(property: property, operator: operation, value: value, caseSensitive: sensitive)
     }
-    public func encode(to encoder: Encoder) throws { fatalError("configuration encoding is not supported") }
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: Keys.self)
+        switch self {
+        case .value(let property, let operation, let value, let caseSensitive):
+            try values.encode(property, forKey: .property)
+            try values.encode(operation, forKey: .operator)
+            try values.encode(value, forKey: .value)
+            if caseSensitive { try values.encode(true, forKey: .caseSensitive) }
+        case .all(let matches): try values.encode(matches, forKey: .all)
+        case .any(let matches): try values.encode(matches, forKey: .any)
+        case .not(let match): try values.encode(match, forKey: .not)
+        }
+    }
 
     public func matches(_ window: WindowDescriptor) -> Bool {
         switch self {
@@ -159,10 +191,10 @@ public struct Configuration: Codable, Equatable, Sendable {
     public var defaults: WorkspaceSettings; public var workspaces: [WorkspaceConfiguration]; public var rules: [WindowRule]
     public var hotload: Bool; public var port: UInt16
     enum CodingKeys: String, CodingKey, CaseIterable { case defaults, workspaces, rules, hotload, port }
-    public init(defaults: WorkspaceSettings = .init(mode: .bsp, margin: 0, gap: 0, resizeIncrement: 10), workspaces: [WorkspaceConfiguration] = [], rules: [WindowRule] = [], hotload: Bool = true, port: UInt16 = 17_832) { self.defaults = defaults; self.workspaces = workspaces; self.rules = rules; self.hotload = hotload; self.port = port }
+    public init(defaults: WorkspaceSettings = .init(mode: .bsp, margin: .init(top: 0, right: 0, bottom: 0, left: 0), gap: 0, resizeIncrement: 10), workspaces: [WorkspaceConfiguration] = [], rules: [WindowRule] = [], hotload: Bool = true, port: UInt16 = 17_832) { self.defaults = defaults; self.workspaces = workspaces; self.rules = rules; self.hotload = hotload; self.port = port }
     public init(from decoder: Decoder) throws {
         try rejectUnknown(decoder, allowed: CodingKeys.allCases.map(\.rawValue)); let c = try decoder.container(keyedBy: CodingKeys.self)
-        defaults = try c.decodeIfPresent(WorkspaceSettings.self, forKey: .defaults) ?? .init(mode: .bsp, margin: 0, gap: 0, resizeIncrement: 10)
+        defaults = try c.decodeIfPresent(WorkspaceSettings.self, forKey: .defaults) ?? .init(mode: .bsp, margin: .init(top: 0, right: 0, bottom: 0, left: 0), gap: 0, resizeIncrement: 10)
         workspaces = try c.decodeIfPresent([WorkspaceConfiguration].self, forKey: .workspaces) ?? []
         rules = try c.decodeIfPresent([WindowRule].self, forKey: .rules) ?? []
         hotload = try c.decodeIfPresent(Bool.self, forKey: .hotload) ?? true; port = try c.decodeIfPresent(UInt16.self, forKey: .port) ?? 17_832
@@ -173,7 +205,8 @@ public struct Configuration: Codable, Equatable, Sendable {
     private func validate() throws {
         guard port > 0 else { throw ConfigurationError.invalid("port must be greater than zero") }
         guard Set(workspaces.map(\.name)).count == workspaces.count, workspaces.allSatisfy({ !$0.name.isEmpty }) else { throw ConfigurationError.invalid("workspace names must be non-empty and unique") }
-        for value in [defaults.margin, defaults.gap, defaults.resizeIncrement].compactMap({ $0 }) where !value.isFinite || value < 0 { throw ConfigurationError.invalid("workspace measurements must be finite and non-negative") }
+        let margins = defaults.margin.map { [$0.top, $0.right, $0.bottom, $0.left] } ?? []
+        for value in (margins + [defaults.gap, defaults.resizeIncrement]).compactMap({ $0 }) where !value.isFinite || value < 0 { throw ConfigurationError.invalid("workspace measurements must be finite and non-negative") }
     }
 }
 
@@ -188,6 +221,116 @@ public enum ConfigurationParser {
     }
 
     public static let schema = ##"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"properties":{"defaults":{"$ref":"#/$defs/settings"},"workspaces":{"type":"array"},"rules":{"type":"array"},"hotload":{"type":"boolean","default":true},"port":{"type":"integer","minimum":1,"maximum":65535,"default":17832}},"$defs":{"settings":{"type":"object","additionalProperties":false}}}"##
+}
+
+public struct AdoptedWindow: Equatable, Sendable {
+    public var executableName: String
+    public var workspace: String
+    public init(executableName: String, workspace: String) {
+        self.executableName = executableName; self.workspace = workspace
+    }
+}
+
+public enum ConfigurationFile {
+    public static func path(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+        let base: URL
+        if let configured = environment["XDG_CONFIG_HOME"], configured.hasPrefix("/") {
+            base = URL(fileURLWithPath: configured, isDirectory: true)
+        } else {
+            let home = environment["HOME"] ?? NSHomeDirectory()
+            base = URL(fileURLWithPath: home, isDirectory: true).appendingPathComponent(".config", isDirectory: true)
+        }
+        return base.appendingPathComponent("wm", isDirectory: true).appendingPathComponent("config.jsonc")
+    }
+
+    public static func example() throws -> String {
+        """
+        {
+          // Default layout settings inherited by every workspace.
+          "defaults": {
+            // Layout algorithm used unless a workspace overrides it.
+            "mode": "bsp",
+            // Space between the display work area and tiled windows, in points.
+            "margin": {
+              // Space along the top edge.
+              "top": 0,
+              // Space along the right edge.
+              "right": 0,
+              // Space along the bottom edge.
+              "bottom": 0,
+              // Space along the left edge.
+              "left": 0
+            },
+            // Space between adjacent tiled windows, in points.
+            "gap": 0,
+            // Keyboard resize step, in points.
+            "resize_increment": 10
+          },
+          // Explicit workspace definitions and per-workspace overrides.
+          "workspaces": [],
+          // First-match window rules for assignment and behavior.
+          "rules": [],
+          // Reload this file automatically when it changes.
+          "hotload": true,
+          // Local WebSocket API port used by the daemon.
+          "port": 17832
+        }
+
+        """
+    }
+
+    public static func encode(_ configuration: Configuration) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        return String(decoding: try encoder.encode(configuration), as: UTF8.self) + "\n"
+    }
+
+    public static func load(at path: URL) throws -> Configuration {
+        try ConfigurationParser.parse(String(contentsOf: path, encoding: .utf8))
+    }
+
+    public static func initialize(at path: URL, fileManager: FileManager = .default) throws {
+        guard !fileManager.fileExists(atPath: path.path) else {
+            throw ConfigurationError.invalid("config file already exists")
+        }
+        try fileManager.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(example().utf8).write(to: path, options: .withoutOverwriting)
+    }
+
+    public static func adopt(
+        _ configuration: Configuration,
+        workspaceDisplays: [String: String],
+        windows: [AdoptedWindow]
+    ) -> Configuration {
+        var result = configuration
+        let existing = Dictionary(uniqueKeysWithValues: result.workspaces.map { ($0.name, $0) })
+        result.workspaces = Set(existing.keys).union(workspaceDisplays.keys).sorted().map { name in
+            var workspace = existing[name] ?? WorkspaceConfiguration(name: name)
+            if let display = workspaceDisplays[name] { workspace.settings.preferredDisplay = display }
+            return workspace
+        }
+
+        let assignments = Dictionary(grouping: windows, by: { $0.executableName.lowercased() }).compactMap { _, values -> AdoptedWindow? in
+            guard let first = values.sorted(by: { ($0.executableName, $0.workspace) < ($1.executableName, $1.workspace) }).first else { return nil }
+            return first
+        }.sorted { ($0.executableName.lowercased(), $0.workspace) < ($1.executableName.lowercased(), $1.workspace) }
+        let adoptedRules = assignments.map {
+            WindowRule(
+                match: .value(property: .executableName, operator: .exact, value: $0.executableName, caseSensitive: false),
+                actions: .init(workspace: $0.workspace)
+            )
+        }
+        let adoptedNames = Set(assignments.map { $0.executableName.lowercased() })
+        result.rules.removeAll { rule in
+            guard rule.actions.workspace != nil,
+                  case let .value(property, .exact, value, _) = rule.match,
+                  property == .executableName || property == .executablePath else { return false }
+            let executable = property == .executablePath ? URL(fileURLWithPath: value).lastPathComponent : value
+            return adoptedNames.contains(executable.lowercased())
+        }
+        result.rules.insert(contentsOf: adoptedRules, at: 0)
+        return result
+    }
 }
 
 public struct RuntimeOverlay: Equatable, Sendable { public var workspaceSettings: [String: WorkspaceSettings]; public init(workspaceSettings: [String: WorkspaceSettings] = [:]) { self.workspaceSettings = workspaceSettings } }
@@ -213,6 +356,24 @@ public actor ConfigurationStore {
             value.events.append(.init(kind: .rejected, trigger: trigger, mode: selected, message: String(describing: error)))
             throw error
         }
+    }
+}
+
+public actor ConfigurationWatcher {
+    private var lastContents: String?
+    public init() {}
+
+    public func poll(
+        path: URL,
+        read: @Sendable (URL) throws -> String = { try String(contentsOf: $0, encoding: .utf8) },
+        apply: @Sendable (Configuration, String) async throws -> Void
+    ) async throws {
+        let source = try read(path)
+        guard source != lastContents else { return }
+        let candidate = try ConfigurationParser.parse(source)
+        guard candidate.hotload else { lastContents = source; return }
+        try await apply(candidate, source)
+        lastContents = source
     }
 }
 

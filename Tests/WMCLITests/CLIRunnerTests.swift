@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import WMConfiguration
 @testable import WMCLI
 
 private actor Capture {
@@ -145,6 +146,65 @@ private final class MockClient: CLIWebSocketClient, @unchecked Sendable {
     #expect(await capture.stdout.isEmpty)
     let line = try #require(await capture.stderr.first)
     #expect((try JSONSerialization.jsonObject(with: line) as? [String: Any]) != nil)
+}
+
+@Test func configExampleIsPrettyAndValidateReportsExpectedMissingPath() async throws {
+    let capture = Capture()
+    let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("config.jsonc")
+    let runner = CLIRunner(client: MockClient(), output: .init(
+        stdout: { data in Task { await capture.out(data) } },
+        stderr: { data in Task { await capture.err(data) } }
+    ), configPath: path)
+    #expect(await runner.run(arguments: ["config", "example"]) == .success)
+    #expect(await runner.run(arguments: ["config", "validate"]) == .commandFailed)
+    try await Task.sleep(for: .milliseconds(10))
+    #expect(String(decoding: try #require(await capture.stdout.first), as: UTF8.self).contains("\n  \"defaults\""))
+    #expect(String(decoding: try #require(await capture.stderr.first), as: UTF8.self).contains(path.path))
+}
+
+@Test func configInitCreatesOnceWithoutOverwriting() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let path = directory.appendingPathComponent("wm/config.jsonc")
+    let capture = Capture()
+    let runner = CLIRunner(client: MockClient(), output: .init(
+        stdout: { data in Task { await capture.out(data) } },
+        stderr: { data in Task { await capture.err(data) } }
+    ), configPath: path)
+    #expect(await runner.run(arguments: ["config", "init"]) == .success)
+    #expect(await runner.run(arguments: ["config", "init"]) == .commandFailed)
+    #expect(try ConfigurationFile.load(at: path) == Configuration())
+    try await Task.sleep(for: .milliseconds(10))
+    #expect(String(decoding: try #require(await capture.stderr.first), as: UTF8.self).contains("config file already exists"))
+}
+
+@Test func configAdoptStateWritesCurrentAffinities() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let path = directory.appendingPathComponent("wm/config.jsonc")
+    let response = Data(#"{"type":"response","ok":true,"result":{"workspace_state":{"workspaces":[{"name":"T","display_id":"display:2","window_ids":["window:1"]}]},"windows":[{"id":"window:1","executable_path":"/Applications/Ghostty.app/Contents/MacOS/ghostty"}]}}"#.utf8)
+    let client = MockClient(response: .init(json: response, ok: true))
+    let runner = CLIRunner(client: client, output: .init(stdout: { _ in }, stderr: { _ in }), configPath: path)
+    #expect(try await runner.run(.configAdoptState(defaultWMWebSocketURL)) == .success)
+    let config = try ConfigurationFile.load(at: path)
+    #expect(config.workspaces.first?.settings.preferredDisplay == "display:2")
+    #expect(config.actions(for: .init(executablePath: "/bin/ghostty", processID: 1))?.workspace == "T")
+    let request = try #require(client.capturedRequests().first)
+    #expect(String(decoding: request.0, as: UTF8.self).contains("state.get"))
+}
+
+@Test func configAdoptStateRejectsMalformedAssignedWindowWithoutChangingFile() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let path = directory.appendingPathComponent("wm/config.jsonc")
+    try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let original = try ConfigurationFile.example()
+    try Data(original.utf8).write(to: path)
+    let response = Data(#"{"type":"response","ok":true,"result":{"workspace_state":{"workspaces":[{"name":"T","display_id":"display:2","window_ids":["window:1"]}]},"windows":[{"id":"window:1"}]}}"#.utf8)
+    let client = MockClient(response: .init(json: response, ok: true))
+    let runner = CLIRunner(client: client, output: .init(stdout: { _ in }, stderr: { _ in }), configPath: path)
+    #expect(try await runner.run(.configAdoptState(defaultWMWebSocketURL)) == .commandFailed)
+    #expect(try String(contentsOf: path, encoding: .utf8) == original)
 }
 
 @Test func subscribeRequestUsesCanonicalFieldsAndWritesNDJSON() async throws {

@@ -8,7 +8,7 @@ private let basic = #"{"workspaces":[{"name":"main"}]}"#
     let value = try ConfigurationParser.parse(#"""
     {
       // global layout
-      "defaults": { "mode": "floating", "margin": 12, "gap": 7, "resize_increment": 4 },
+      "defaults": { "mode": "floating", "margin": {"top":12,"right":12,"bottom":12,"left":12}, "gap": 7, "resize_increment": 4 },
       "workspaces": [
         { "name": "code", "gap": 2 }, /* local override */
         { "name": "web", "preferred_display": "external" }
@@ -17,8 +17,9 @@ private let basic = #"{"workspaces":[{"name":"main"}]}"#
     """#)
     #expect(value.hotload)
     #expect(value.port == 17_832)
-    #expect(value.resolvedWorkspaces[0].settings == .init(mode: .floating, margin: 12, gap: 2, resizeIncrement: 4))
-    #expect(value.resolvedWorkspaces[1].settings == .init(preferredDisplay: "external", mode: .floating, margin: 12, gap: 7, resizeIncrement: 4))
+    let margin = WorkspaceMargins(top: 12, right: 12, bottom: 12, left: 12)
+    #expect(value.resolvedWorkspaces[0].settings == .init(mode: .floating, margin: margin, gap: 2, resizeIncrement: 4))
+    #expect(value.resolvedWorkspaces[1].settings == .init(preferredDisplay: "external", mode: .floating, margin: margin, gap: 7, resizeIncrement: 4))
 }
 
 @Test func commentsInsideStringsArePreserved() throws {
@@ -40,6 +41,7 @@ func rejectsUnknownFieldsAtEverySchemaLevel(source: String) {
 @Test(arguments: [
     #"{"port":0}"#,
     #"{"defaults":{"gap":-1}}"#,
+    #"{"defaults":{"margin":{"left":-1}}}"#,
     #"{"workspaces":[{"name":"x"},{"name":"x"}]}"#,
     #"{"rules":[{"match":{"property":"title","operator":"regex","value":"["},"actions":{}}]}"#,
 ])
@@ -126,4 +128,117 @@ func rejectsSemanticErrors(source: String) {
     let second = try await store.reload(source: basic)
     #expect(first.revision == second.revision)
     #expect(second.events.last == .init(kind: .applied, trigger: .explicit, mode: .full, message: nil))
+}
+
+@Test func configPathUsesXDGAndFallsBackToHomeConfig() {
+    #expect(ConfigurationFile.path(environment: ["XDG_CONFIG_HOME": "/tmp/xdg"]).path == "/tmp/xdg/wm/config.jsonc")
+    #expect(ConfigurationFile.path(environment: ["HOME": "/tmp/home"]).path == "/tmp/home/.config/wm/config.jsonc")
+    #expect(ConfigurationFile.path(environment: ["XDG_CONFIG_HOME": "relative", "HOME": "/tmp/home"]).path == "/tmp/home/.config/wm/config.jsonc")
+}
+
+@Test func exampleRoundTripsWithExplicitDefaults() throws {
+    let source = try ConfigurationFile.example()
+    let value = try ConfigurationParser.parse(source)
+    #expect(value == Configuration())
+    #expect(source.contains(#""resize_increment": 10"#))
+    #expect(source.contains(#""top": 0"#))
+    #expect(source.contains(#""right": 0"#))
+    #expect(source.contains(#""bottom": 0"#))
+    #expect(source.contains(#""left": 0"#))
+    #expect(source.contains("// Default layout settings inherited by every workspace."))
+    #expect(source.contains("// Layout algorithm used unless a workspace overrides it."))
+    #expect(source.contains("// Space between the display work area and tiled windows, in points."))
+    #expect(source.contains("// Space along the top edge."))
+    #expect(source.contains("// Space along the right edge."))
+    #expect(source.contains("// Space along the bottom edge."))
+    #expect(source.contains("// Space along the left edge."))
+    #expect(source.contains("// Space between adjacent tiled windows, in points."))
+    #expect(source.contains("// Keyboard resize step, in points."))
+    #expect(source.contains("// Explicit workspace definitions and per-workspace overrides."))
+    #expect(source.contains("// First-match window rules for assignment and behavior."))
+    #expect(source.contains("// Reload this file automatically when it changes."))
+    #expect(source.contains("// Local WebSocket API port used by the daemon."))
+    #expect(source.hasSuffix("\n"))
+}
+
+@Test func initializationCreatesParentsAndNeverOverwrites() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let path = directory.appendingPathComponent("wm/config.jsonc")
+    try ConfigurationFile.initialize(at: path)
+    let initial = try String(contentsOf: path, encoding: .utf8)
+    #expect(throws: ConfigurationError.self) { try ConfigurationFile.initialize(at: path) }
+    #expect(try String(contentsOf: path, encoding: .utf8) == initial)
+}
+
+@Test func adoptionPreservesSettingsAndReplacesConflictingExecutableRules() throws {
+    let original = try ConfigurationParser.parse(#"""
+    {
+      "defaults": {"gap": 8},
+      "workspaces": [
+        {"name":"T","mode":"floating","preferred_display":"old"},
+        {"name":"Other","gap":3}
+      ],
+      "rules": [
+        {"match":{"property":"executable_name","operator":"exact","value":"Ghostty"},"actions":{"workspace":"GhosttyOnly","behavior":"floating"}},
+        {"match":{"property":"title","operator":"contains","value":"docs"},"actions":{"workspace":"Docs"}},
+        {"match":{"any":[{"property":"executable_name","operator":"exact","value":"Ghostty"},{"property":"title","operator":"contains","value":"term"}]},"actions":{"workspace":"Compound"}}
+      ]
+    }
+    """#)
+    let adopted = ConfigurationFile.adopt(
+        original,
+        workspaceDisplays: ["T": "display:2", "New": "display:1"],
+        windows: [.init(executableName: "Ghostty", workspace: "T")]
+    )
+    #expect(adopted.defaults.gap == 8)
+    #expect(adopted.workspaces.first(where: { $0.name == "T" })?.settings == .init(preferredDisplay: "display:2", mode: .floating))
+    #expect(adopted.workspaces.first(where: { $0.name == "Other" })?.settings.gap == 3)
+    #expect(adopted.workspaces.first(where: { $0.name == "New" })?.settings.preferredDisplay == "display:1")
+    #expect(adopted.rules.count == 3)
+    #expect(adopted.actions(for: .init(executablePath: "/bin/Ghostty", processID: 1))?.workspace == "T")
+    #expect(adopted.actions(for: .init(processID: 2, title: "docs"))?.workspace == "Docs")
+    #expect(adopted.rules.contains { $0.actions.workspace == "Compound" })
+    #expect(try ConfigurationParser.parse(ConfigurationFile.encode(adopted)) == adopted)
+}
+
+@Test func watcherKeepsObservingWhenHotloadIsDisabledAndReenablesLater() async throws {
+    let watcher = ConfigurationWatcher()
+    let applied = AppliedConfigurations()
+    let disabled = #"{"hotload":false,"defaults":{"gap":4}}"#
+    try await watcher.poll(path: URL(fileURLWithPath: "/ignored"), read: { _ in disabled }) { value, _ in
+        await applied.record(value)
+    }
+    #expect(await applied.values.isEmpty)
+    let enabled = #"{"hotload":true,"defaults":{"gap":9}}"#
+    try await watcher.poll(path: URL(fileURLWithPath: "/ignored"), read: { _ in enabled }) { value, _ in
+        await applied.record(value)
+    }
+    #expect(await applied.values.map(\.defaults.gap) == [9])
+}
+
+@Test func watcherRetriesSameContentsAfterApplyFailure() async throws {
+    let watcher = ConfigurationWatcher()
+    let attempts = ApplyAttempts()
+    let source = #"{"hotload":true,"defaults":{"gap":9}}"#
+    do {
+        try await watcher.poll(path: URL(fileURLWithPath: "/ignored"), read: { _ in source }) { _, _ in
+            await attempts.record()
+            throw ConfigurationError.invalid("transient")
+        }
+    } catch {}
+    try await watcher.poll(path: URL(fileURLWithPath: "/ignored"), read: { _ in source }) { _, _ in
+        await attempts.record()
+    }
+    #expect(await attempts.count == 2)
+}
+
+private actor AppliedConfigurations {
+    private(set) var values: [Configuration] = []
+    func record(_ value: Configuration) { values.append(value) }
+}
+
+private actor ApplyAttempts {
+    private(set) var count = 0
+    func record() { count += 1 }
 }

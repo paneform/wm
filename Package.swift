@@ -43,7 +43,7 @@ let package = Package(
         ),
         .target(
             name: "WMCLI",
-            dependencies: ["WMProtocol", "WMWebSocket"]
+            dependencies: ["WMConfiguration", "WMProtocol", "WMWebSocket"]
         ),
         .executableTarget(
             name: "wm",
@@ -64,7 +64,7 @@ let package = Package(
         .testTarget(name: "WMCoreTests", dependencies: ["WMCore", "WMInventory", "WMProtocol"]),
         .testTarget(name: "WMConfigurationTests", dependencies: ["WMConfiguration"]),
         .testTarget(name: "WMWebSocketTests", dependencies: ["WMWebSocket", "WMCore", "WMProtocol"]),
-        .testTarget(name: "WMCLITests", dependencies: ["WMCLI", "WMProtocol"]),
+        .testTarget(name: "WMCLITests", dependencies: ["WMCLI", "WMConfiguration", "WMProtocol"]),
         .testTarget(name: "WMDaemonTests", dependencies: ["wm", "WMInventory", "WMPersistence", "WMWorkspace"]),
     ]
 )

@@ -151,6 +151,40 @@ actor DaemonHandler: WebSocketRequestHandler {
         try await workspaces.commit(candidate)
     }
 
+    func loadConfiguration(source: String, inventory: InventorySnapshot) async throws -> ConfigurationSnapshot {
+        let candidate = try ConfigurationParser.parse(source)
+        try await applyConfiguration(candidate, inventory: inventory)
+        return try await configuration.reload(source: source, trigger: .explicit, mode: .full)
+    }
+
+    func hotloadConfiguration(source: String, inventory: InventorySnapshot) async throws -> ConfigurationSnapshot {
+        let candidate = try ConfigurationParser.parse(source)
+        guard candidate.hotload else { return await configuration.snapshot() }
+        try await applyConfiguration(candidate, inventory: inventory)
+        return try await configuration.reload(source: source, trigger: .hotload, mode: .delta)
+    }
+
+    private func applyConfiguration(_ candidate: Configuration, inventory: InventorySnapshot) async throws {
+        guard let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id else {
+            throw WorkspaceRequestError.displayRequired
+        }
+        let before = await workspaces.snapshot()
+        var after = await workspaces.configuredState(
+            candidate, defaultDisplayID: displayID, availableDisplayIDs: Set(inventory.displays.map(\.id))
+        )
+        guard after != before else { return }
+        let modified = after.workspaces.filter { workspace in before[workspace: workspace.name] != workspace }.map(\.name)
+        for name in modified where after[workspace: name]?.visible == true {
+            try await reconcileWorkspaceFocus(
+                before: before, after: &after, name: name, inventory: inventory,
+                tolerateGeometryClamp: true
+            )
+        }
+        try await workspaces.commit(after)
+        let result = WMWorkspace.WorkspaceMutationResult(workspaceState: after, modifiedWorkspaces: modified)
+        await publishWorkspaceMutation(result, before: before, reason: .workspaceChanged)
+    }
+
     func beginTermination() { daemonLifecycle.beginTermination() }
 
     func shutdown(_ inventory: InventorySnapshot) async -> [String] {
@@ -462,7 +496,11 @@ actor DaemonHandler: WebSocketRequestHandler {
             switch request.method {
             case .stateGet:
                 var value = userState(committed)
-                if case .object(var object) = value { object["transactions"] = json(await transactions.metadata()); value = .object(object) }
+                if case .object(var object) = value {
+                    object["transactions"] = json(await transactions.metadata())
+                    object["workspace_state"] = workspaceList(await workspaces.snapshot())
+                    value = .object(object)
+                }
                 result = value
             case .stateObserved: result = json(snapshot.inventory)
             case .healthGet: result = json(protocolHealth(snapshot.health))
@@ -528,7 +566,14 @@ actor DaemonHandler: WebSocketRequestHandler {
                 let mode = try configurationMode(request.params["mode"])
                 let trigger = try configurationTrigger(request.params["trigger"])
                 do {
-                    let loaded = try await configuration.reload(source: String(contentsOfFile: path, encoding: .utf8), trigger: trigger, mode: mode)
+                    let source = try String(contentsOfFile: path, encoding: .utf8)
+                    let candidate = try ConfigurationParser.parse(source)
+                    if trigger == .hotload, !candidate.hotload {
+                        result = configurationResult(await configuration.snapshot())
+                        break
+                    }
+                    try await applyConfiguration(candidate, inventory: snapshot.inventory)
+                    let loaded = try await configuration.reload(source: source, trigger: trigger, mode: mode)
                     await publishConfigurationEvent(loaded.events.last!, degraded: loaded.degraded)
                     result = configurationResult(loaded)
                 } catch {

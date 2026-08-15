@@ -1,4 +1,5 @@
 import Foundation
+import WMConfiguration
 import WMPersistence
 import WMWorkspace
 
@@ -76,6 +77,38 @@ actor WorkspaceController {
 
     func setMode(_ name: String, mode: WMWorkspace.WorkspaceMode) throws -> WMWorkspace.WorkspaceMutationResult {
         try commit { try $0.setMode(of: name, to: mode) }
+    }
+
+    func configuredState(
+        _ configuration: Configuration, defaultDisplayID: String, availableDisplayIDs: Set<String>
+    ) -> WMWorkspace.WorkspaceState {
+        var candidate = state
+        let configured = Dictionary(uniqueKeysWithValues: configuration.resolvedWorkspaces.map { ($0.name, $0.settings) })
+        for name in configured.keys.sorted() where candidate[workspace: name] == nil {
+            let settings = configured[name]!
+            candidate.workspaces.append(.init(
+                name: name, origin: .configured,
+                displayID: settings.preferredDisplay.flatMap { availableDisplayIDs.contains($0) ? $0 : nil } ?? defaultDisplayID
+            ))
+        }
+        for index in candidate.workspaces.indices {
+            let settings = configured[candidate.workspaces[index].name] ?? configuration.defaults
+            candidate.workspaces[index].preferredDisplayID = settings.preferredDisplay
+            if candidate.runtimeDisplayAssignments[candidate.workspaces[index].name] == nil {
+                candidate.workspaces[index].displayID = settings.preferredDisplay.flatMap {
+                    availableDisplayIDs.contains($0) ? $0 : nil
+                } ?? candidate.workspaces[index].displayID
+            }
+            candidate.workspaces[index].mode = settings.mode == .floating ? .floating : .bsp
+            let margin = settings.margin ?? .init()
+            candidate.workspaces[index].margin = .init(
+                top: margin.top ?? 0, right: margin.right ?? 0,
+                bottom: margin.bottom ?? 0, left: margin.left ?? 0
+            )
+            candidate.workspaces[index].gap = settings.gap ?? 0
+            candidate.workspaces[index].resizeIncrement = settings.resizeIncrement ?? 10
+        }
+        return candidate
     }
 
     private func commit(

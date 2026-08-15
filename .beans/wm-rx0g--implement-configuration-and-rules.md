@@ -5,7 +5,7 @@ status: in-progress
 type: feature
 priority: high
 created_at: 2026-08-14T18:58:47Z
-updated_at: 2026-08-15T00:11:43Z
+updated_at: 2026-08-15T02:01:44Z
 ---
 
 Scope: `docs/spec.md` Configuration and Window Rules.
@@ -64,3 +64,56 @@ The bean remains in progress because the broader unmet acceptance criteria above
 - `swift build`: passed.
 - `git diff --check`: passed.
 - Bean remains `in-progress` pending the documented runtime rule application, workspace/drift reconciliation, and generated-schema work.
+
+
+## Config Command Plan
+
+- [x] Add XDG config path resolution, canonical example encoding, safe initialization, and validation diagnostics.
+- [x] Add `wm config help`, `example`, `init`, and pathless `validate` local commands.
+- [x] Add state adoption merge preserving unrelated config while replacing display and executable affinities.
+- [x] Add focused unit and CLI runner tests for paths, file safety, merge conflicts, output, and errors.
+- [x] Run focused and full validation and update this bean summary.
+
+
+## Config Command Summary
+
+- Added `wm config help`, `validate`, `example`, `init`, `adopt-state`, and pathless `reload` using `$XDG_CONFIG_HOME/wm/config.jsonc` with `$HOME/.config` fallback.
+- Added canonical pretty encoding and safe no-overwrite initialization with parent directory creation.
+- Added state adoption that preserves defaults, unrelated workspace settings, and unrelated rules while updating current display affinities and replacing direct executable workspace affinities.
+- Added strict state payload validation and atomic adopt writes so malformed state does not alter existing config.
+- Extended `state.get` with workspace membership required for adoption.
+- Added focused configuration, parser, runner, filesystem, conflict, and malformed-state tests.
+- Validation: `swift test` passed 165 tests (46 XCTest and 119 Swift Testing), `swift build` passed, and `git diff --check` passed.
+
+The bean remains in progress for the previously documented runtime rule application, reload reconciliation, and generated-schema work.
+
+
+## Documented Margin Defaults
+
+- Replaced scalar configuration margin with per-side `top`, `right`, `bottom`, and `left` values matching the workspace box model.
+- Added field-by-field margin inheritance for workspace overrides and non-negative validation for each side.
+- Changed `wm config example` and `wm config init` to emit a documented JSONC template with comments describing every default field.
+- Validation: `swift test` passed 165 tests, `swift build` passed, and `git diff --check` passed.
+
+
+## Runtime Config Plumbing Plan
+
+- [x] Add atomic workspace settings reduction for configured margins, gaps, modes, resize increments, and preferred displays.
+- [x] Load and apply configuration during daemon startup before inventory reconciliation.
+- [x] Add an always-running file watcher that reparses every change and applies only candidates with `hotload: true`.
+- [x] Route explicit reload through the same workspace application path.
+- [x] Add deterministic startup, watcher gating/re-enable, reducer, and reload tests.
+- [x] Run focused and full validation and update the bean summary.
+
+
+## Runtime Config Plumbing Summary
+
+- Startup now loads the XDG config before inventory/workspace reconciliation and applies configured mode, four-sided margins, gap, resize increment, workspace creation, and preferred display affinity.
+- Added a persistent 500ms config watcher that keeps observing while `hotload` is false and resumes application when a later candidate sets it true.
+- Watcher watermarks advance only after a successful apply, so transient parse/application failures retry unchanged contents.
+- Explicit reload and watcher updates share staged workspace reduction and visible-workspace reconciliation; state is persisted only after reconciliation succeeds.
+- Removed settings reset to the new defaults, and unavailable preferred displays retain the preference while using a live display fallback.
+- Added deterministic runtime settings, stale-display/reset, watcher gating/re-enable, and retry-after-failure tests.
+- Validation: `swift test` passed 169 tests (46 XCTest and 123 Swift Testing), `swift build` passed, and `git diff --check` passed.
+
+Remaining bean scope is window-rule lifecycle application and build-generated schema support.

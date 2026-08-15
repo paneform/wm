@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import WMConfiguration
 @testable import WMCLI
 
 @Test func parsesHelpCommands() throws {
@@ -38,7 +39,7 @@ import Testing
         (["observe", "workspace", "T"], "observe.workspace"),
         (["diagnostics", "inventory"], "diagnostics.inventory"),
         (["inventory", "refresh"], "inventory.refresh"),
-        (["config", "validate", "/tmp/wm.jsonc"], "configuration.validate"),
+        (["config", "reload"], "configuration.reload"),
         (["transaction", "get", "transaction:1"], "transaction.get"),
         (["batch", #"[{"method":"workspace.focus","params":{"name":"T"}}]"#], "command.batch"),
         (["workspace", "move-window-bulk", "T", "window:1"], "workspace.move_window_bulk"),
@@ -54,13 +55,17 @@ import Testing
 }
 
 @Test func parsesConfigurationCommandsWithWebSocketParity() throws {
-    #expect(try CLIParser().parse(["config", "validate", "/tmp/wm.jsonc"]) == .request(
-        method: "configuration.validate", params: ["path": .string("/tmp/wm.jsonc")], url: defaultWMWebSocketURL
+    #expect(try CLIParser().parse(["config"]) == .configHelp)
+    #expect(try CLIParser().parse(["config", "help"]) == .configHelp)
+    #expect(try CLIParser().parse(["config", "--help"]) == .configHelp)
+    #expect(try CLIParser().parse(["config", "validate"]) == .configValidate)
+    #expect(try CLIParser().parse(["config", "example"]) == .configExample)
+    #expect(try CLIParser().parse(["config", "init"]) == .configInit)
+    #expect(try CLIParser().parse(["config", "adopt-state"]) == .configAdoptState(defaultWMWebSocketURL))
+    #expect(try CLIParser().parse(["configuration", "reload", "--mode", "delta", "--trigger", "hotload"]) == .request(
+        method: "configuration.reload", params: ["path": .string(ConfigurationFile.path().path), "mode": .string("delta"), "trigger": .string("hotload")], url: defaultWMWebSocketURL
     ))
-    #expect(try CLIParser().parse(["configuration", "reload", "/tmp/wm.jsonc", "--mode", "delta", "--trigger", "hotload"]) == .request(
-        method: "configuration.reload", params: ["path": .string("/tmp/wm.jsonc"), "mode": .string("delta"), "trigger": .string("hotload")], url: defaultWMWebSocketURL
-    ))
-    #expect(throws: CLIParseError.self) { try CLIParser().parse(["config", "reload", "/tmp/wm.jsonc", "--mode", "bad"]) }
+    #expect(throws: CLIParseError.self) { try CLIParser().parse(["config", "reload", "--mode", "bad"]) }
 }
 
 @Test func parsesWindowManagementCommands() throws {

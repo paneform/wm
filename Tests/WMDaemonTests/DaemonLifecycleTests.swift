@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import WMCore
+import WMConfiguration
 import WMInventory
 import WMPersistence
 import WMProtocol
@@ -54,6 +55,52 @@ private func response(_ text: String) throws -> Response {
         throw CancellationError()
     }
     return response
+}
+
+@Test func configurationAppliesWorkspaceLayoutSettingsAtRuntime() async throws {
+    let (handler, state) = try daemonHandler()
+    let inventory = try await state.refresh().snapshot.inventory
+    _ = try await handler.loadConfiguration(source: #"""
+    {
+      "defaults":{"mode":"floating","margin":{"top":1,"right":2,"bottom":3,"left":4},"gap":6,"resize_increment":7},
+      "workspaces":[{"name":"T","preferred_display":"display:1","gap":8}]
+    }
+    """#, inventory: inventory)
+    let client = UUID()
+    let replies = await handler.handle(text: try clientMessage(.request(.init(
+        requestId: "list", method: .workspaceList
+    ))), clientID: client)
+    let result = try #require(try response(replies[0]).result)
+    let data = try ProtocolCodec.encode(result)
+    let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let workspaces = try #require(object["workspaces"] as? [[String: Any]])
+    let workspace = try #require(workspaces.first { $0["name"] as? String == "T" })
+    #expect(workspace["mode"] as? String == "floating")
+    #expect(workspace["gap"] as? Double == 8)
+    #expect(workspace["resize_increment"] as? Double == 7)
+    #expect(workspace["preferred_display_id"] as? String == "display:1")
+    #expect(workspace["margin"] as? [String: Double] == ["top": 1, "right": 2, "bottom": 3, "left": 4])
+}
+
+@Test func configurationFallsBackFromUnknownDisplayAndResetsRemovedSettings() async throws {
+    let (handler, state) = try daemonHandler()
+    let inventory = try await state.refresh().snapshot.inventory
+    _ = try await handler.loadConfiguration(source: #"""
+    {"defaults":{"gap":9,"margin":{"left":4}},"workspaces":[{"name":"T","preferred_display":"missing"}]}
+    """#, inventory: inventory)
+    _ = try await handler.loadConfiguration(source: #"""
+    {"workspaces":[{"name":"T"}]}
+    """#, inventory: inventory)
+    let replies = await handler.handle(text: try clientMessage(.request(.init(
+        requestId: "list", method: .workspaceList
+    ))), clientID: UUID())
+    let result = try #require(try response(replies[0]).result)
+    let object = try #require(JSONSerialization.jsonObject(with: ProtocolCodec.encode(result)) as? [String: Any])
+    let workspace = try #require((object["workspaces"] as? [[String: Any]])?.first)
+    #expect(workspace["display_id"] as? String == "display:1")
+    #expect(workspace["preferred_display_id"] == nil)
+    #expect(workspace["gap"] as? Double == 0)
+    #expect(workspace["margin"] as? [String: Double] == ["top": 0, "right": 0, "bottom": 0, "left": 0])
 }
 
 @Test func daemonSubscriptionsUnsubscribeExactlyByID() async throws {

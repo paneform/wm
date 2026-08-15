@@ -1,4 +1,5 @@
 import Foundation
+import WMConfiguration
 import WMProtocol
 
 public let defaultWMWebSocketURL = URL(string: "ws://127.0.0.1:17832/v1")!
@@ -71,6 +72,11 @@ public enum LifecycleCommand: String, Sendable, Equatable {
 
 public enum CLICommand: Sendable, Equatable {
     case help
+    case configHelp
+    case configExample
+    case configInit
+    case configValidate
+    case configAdoptState(URL)
     case daemon(DaemonConfiguration)
     case request(method: String, params: [String: JSONValue] = [:], url: URL)
     case subscribe(SubscriptionConfiguration)
@@ -117,7 +123,7 @@ public struct CLIParser: Sendable {
         guard let command = arguments.first else { throw CLIParseError("missing command") }
         let rest = Array(arguments.dropFirst())
         switch command {
-        case "help":
+        case "help", "--help":
             guard rest.isEmpty else { throw CLIParseError("unexpected argument for help") }
             return .help
         case "daemon": return .daemon(try parseDaemon(rest))
@@ -153,21 +159,36 @@ public struct CLIParser: Sendable {
     }
 
     private func parseConfiguration(_ arguments: [String]) throws -> CLICommand {
-        guard let operation = arguments.first, ["validate", "reload"].contains(operation) else {
-            throw CLIParseError("expected 'config validate PATH' or 'config reload PATH'")
+        guard let operation = arguments.first else { return .configHelp }
+        switch operation {
+        case "help", "--help":
+            guard arguments.count == 1 else { throw CLIParseError("unexpected argument for config help") }
+            return .configHelp
+        case "example":
+            guard arguments.count == 1 else { throw CLIParseError("unexpected argument for config example") }
+            return .configExample
+        case "init":
+            guard arguments.count == 1 else { throw CLIParseError("unexpected argument for config init") }
+            return .configInit
+        case "validate":
+            guard arguments.count == 1 else { throw CLIParseError("unexpected argument for config validate") }
+            return .configValidate
+        case "adopt-state": return .configAdoptState(try parseURLOnly(Array(arguments.dropFirst())))
+        case "reload": break
+        default: throw CLIParseError("unknown config command: \(operation)")
         }
-        guard arguments.count >= 2 else { throw CLIParseError("missing configuration path") }
-        var params: [String: JSONValue] = ["path": .string(arguments[1])]
-        var url = defaultWMWebSocketURL, index = 2
+        let path = ConfigurationFile.path().path
+        var params: [String: JSONValue] = ["path": .string(path)]
+        var url = defaultWMWebSocketURL, index = 1
         while index < arguments.count {
             switch arguments[index] {
             case "--mode":
                 let mode = try value(after: &index, in: arguments)
-                guard operation == "reload", ["delta", "full"].contains(mode) else { throw CLIParseError("invalid reload mode: \(mode)") }
+                guard ["delta", "full"].contains(mode) else { throw CLIParseError("invalid reload mode: \(mode)") }
                 params["mode"] = .string(mode)
             case "--trigger":
                 let trigger = try value(after: &index, in: arguments)
-                guard operation == "reload", ["hotload", "explicit"].contains(trigger) else { throw CLIParseError("invalid reload trigger: \(trigger)") }
+                guard ["hotload", "explicit"].contains(trigger) else { throw CLIParseError("invalid reload trigger: \(trigger)") }
                 params["trigger"] = .string(trigger)
             case "--url": url = try webSocketURL(try value(after: &index, in: arguments))
             default: throw CLIParseError("unknown configuration argument: \(arguments[index])")

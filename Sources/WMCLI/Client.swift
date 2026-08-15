@@ -1,4 +1,5 @@
 import Foundation
+import WMConfiguration
 import WMProtocol
 import WMWebSocket
 
@@ -180,15 +181,18 @@ public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
     private let output: CLIOutput
     private let id: @Sendable () -> String
     private let encoder: JSONEncoder
+    private let configPath: URL
 
     public init(
         client: Client,
         output: CLIOutput,
-        id: @escaping @Sendable () -> String = { UUID().uuidString }
+        id: @escaping @Sendable () -> String = { UUID().uuidString },
+        configPath: URL = ConfigurationFile.path()
     ) {
         self.client = client
         self.output = output
         self.id = id
+        self.configPath = configPath
         encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
     }
@@ -196,7 +200,9 @@ public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
     public func run(arguments: [String]) async -> CLIExitCode {
         do {
             let invocation = try CLIParser().parseInvocation(arguments)
-            return try await CLIRunner(client: client, output: output.processing(pretty: invocation.pretty), id: id)
+            return try await CLIRunner(
+                client: client, output: output.processing(pretty: invocation.pretty), id: id, configPath: configPath
+            )
                 .run(invocation.command)
         } catch let error as CLIParseError {
             writeError(code: "usage", message: error.message)
@@ -212,6 +218,18 @@ public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
         case .help:
             writeLine(Data(CLIHelp.utf8), to: output.stdout)
             return .success
+        case .configHelp:
+            writeLine(Data(CLIConfigHelp.utf8), to: output.stdout)
+            return .success
+        case .configExample:
+            writeLine(Data(try ConfigurationFile.example().utf8), to: output.stdout)
+            return .success
+        case .configInit:
+            return runConfigInit()
+        case .configValidate:
+            return runConfigValidate()
+        case .configAdoptState(let url):
+            return try await runConfigAdoptState(url: url)
         case .request(let method, let params, let url):
             let response = try await client.request(try encoder.encode(CLIRequest(requestID: id(), method: method, params: params)), at: url)
             writeLine(response.json, to: output.stdout)
@@ -239,6 +257,103 @@ public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
             return .unavailable
         }
     }
+
+    private func runConfigInit() -> CLIExitCode {
+        let path = configPath
+        do {
+            try ConfigurationFile.initialize(at: path)
+            writeLine(Data("created \(path.path)".utf8), to: output.stdout)
+            return .success
+        } catch {
+            writeError(code: "config_init_failed", message: String(describing: error))
+            return .commandFailed
+        }
+    }
+
+    private func runConfigValidate() -> CLIExitCode {
+        let path = configPath
+        guard FileManager.default.fileExists(atPath: path.path) else {
+            writeError(code: "config_not_found", message: ConfigCommandError.missing(path).description)
+            return .commandFailed
+        }
+        do {
+            _ = try ConfigurationFile.load(at: path)
+            writeLine(Data("valid: \(path.path)".utf8), to: output.stdout)
+            return .success
+        } catch {
+            writeError(code: "config_invalid", message: String(describing: error))
+            return .commandFailed
+        }
+    }
+
+    private func runConfigAdoptState(url: URL) async throws -> CLIExitCode {
+        let response = try await client.request(
+            try encoder.encode(CLIRequest(requestID: id(), method: "state.get")), at: url
+        )
+        guard response.ok else {
+            writeLine(response.json, to: output.stdout)
+            return .commandFailed
+        }
+        do {
+            let state = try adoptedState(response.json)
+            let path = configPath
+            let existing = FileManager.default.fileExists(atPath: path.path)
+                ? try ConfigurationFile.load(at: path)
+                : Configuration()
+            let adopted = ConfigurationFile.adopt(
+                existing, workspaceDisplays: state.workspaceDisplays, windows: state.windows
+            )
+            try FileManager.default.createDirectory(
+                at: path.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            try Data(ConfigurationFile.encode(adopted).utf8).write(to: path, options: .atomic)
+            writeLine(Data("updated \(path.path)".utf8), to: output.stdout)
+            return .success
+        } catch {
+            writeError(code: "config_adopt_failed", message: String(describing: error))
+            return .commandFailed
+        }
+    }
+
+    private func adoptedState(_ data: Data) throws -> (workspaceDisplays: [String: String], windows: [AdoptedWindow]) {
+        guard case .object(let envelope) = try decoder().decode(JSONValue.self, from: data),
+              case .object(let result)? = envelope["result"],
+              case .object(let workspaceState)? = result["workspace_state"],
+              case .array(let workspaces)? = workspaceState["workspaces"],
+              case .array(let observedWindows)? = result["windows"] else {
+            throw ConfigCommandError.invalidState
+        }
+        var workspaceDisplays: [String: String] = [:]
+        var workspaceByWindow: [String: String] = [:]
+        for value in workspaces {
+            guard case .object(let workspace) = value,
+                  case .string(let name)? = workspace["name"],
+                  !name.isEmpty,
+                  case .string(let display)? = workspace["display_id"],
+                  !display.isEmpty,
+                  case .array(let ids)? = workspace["window_ids"] else {
+                throw ConfigCommandError.invalidState
+            }
+            workspaceDisplays[name] = display
+            for id in ids {
+                guard case .string(let id) = id, !id.isEmpty else { throw ConfigCommandError.invalidState }
+                workspaceByWindow[id] = name
+            }
+        }
+        let windows = try observedWindows.compactMap { value -> AdoptedWindow? in
+            guard case .object(let window) = value,
+                  case .string(let id)? = window["id"],
+                  !id.isEmpty else { throw ConfigCommandError.invalidState }
+            guard let workspace = workspaceByWindow[id] else { return nil }
+            guard case .string(let path)? = window["executable_path"], !path.isEmpty else {
+                throw ConfigCommandError.invalidState
+            }
+            return AdoptedWindow(executableName: URL(fileURLWithPath: path).lastPathComponent, workspace: workspace)
+        }
+        return (workspaceDisplays, windows)
+    }
+
+    private func decoder() -> JSONDecoder { JSONDecoder() }
 
     private func benchmark(_ configuration: BenchmarkConfiguration) async throws -> CLIExitCode {
         var durations: [Double] = []

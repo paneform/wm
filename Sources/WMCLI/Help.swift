@@ -91,6 +91,19 @@ COMMANDS
     refresh                    Refresh the inventory now.
       --url URL                Connect to a WebSocket URL.
 
+  config                       Manage $XDG_CONFIG_HOME/wm/config.jsonc.
+                               Falls back to $HOME/.config/wm/config.jsonc.
+    help                       Show config command help.
+    validate                   Validate the config file.
+    example                    Print a minimal example with defaults.
+    init                       Create the config file without overwriting.
+    adopt-state                Adopt current display and workspace affinities.
+      --url URL                Connect to a WebSocket URL.
+    reload                     Reload the config in the daemon.
+      --mode delta|full        Select reload mode.
+      --trigger hotload|explicit
+      --url URL                Connect to a WebSocket URL.
+
   transaction                  Inspect command transactions.
     get ID                     Get a transaction by ID.
       --url URL                Connect to a WebSocket URL.
