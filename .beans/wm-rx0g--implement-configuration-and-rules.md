@@ -5,7 +5,7 @@ status: in-progress
 type: feature
 priority: high
 created_at: 2026-08-14T18:58:47Z
-updated_at: 2026-08-15T02:01:44Z
+updated_at: 2026-08-15T05:05:29Z
 ---
 
 Scope: `docs/spec.md` Configuration and Window Rules.
@@ -117,3 +117,42 @@ The bean remains in progress for the previously documented runtime rule applicat
 - Validation: `swift test` passed 169 tests (46 XCTest and 123 Swift Testing), `swift build` passed, and `git diff --check` passed.
 
 Remaining bean scope is window-rule lifecycle application and build-generated schema support.
+
+## Example Display Override Plan
+
+- [x] Add commented margin and gap overrides that target all connected displays.
+- [x] Verify the shared example remains valid JSONC and both config commands use it.
+- [x] Run focused and full validation.
+
+## Example Display Override Summary
+
+- Added a ready-to-uncomment wildcard display block with four-sided margin and gap values to the shared template used by `wm config example` and `wm config init`.
+- Added runtime support for `display: "*"`, applying overrides to workspaces on every connected display while retaining ordered specific override support.
+- Added template and two-display runtime coverage.
+- Focused configuration and daemon suites passed; `swift build` and `git diff --check` passed. Full `swift test` passed all 137 Swift Testing tests but an unrelated pre-existing XCTest, `WindowGeometryTests/testFitUsesFifthConvergedAttemptWhenCrossDisplayResizeSettlesLate`, failed consistently in isolation.
+
+## Live Display Example Plan
+
+- [x] Generate config examples from connected display names and stable UUID-backed IDs.
+- [x] Preserve deterministic injectable generation for CLI tests.
+- [x] Rebuild the CLI and relaunch the running daemon.
+- [x] Validate focused suites and inspect live output.
+
+## Live Display Example Summary
+
+- `wm config example` and `wm config init` now enumerate currently connected displays and emit a commented margin/gap override for each monitor.
+- Each block labels the live display name and selects it with the stable canonical ID derived from its UUID.
+- Added injectable display generation and deterministic template coverage.
+- Rebuilt `.build/debug/wm`, passed WMConfigurationTests and WMCLITests plus `git diff --check`, and relaunched the daemon as PID 58565.
+- Live verification found Built-in Retina Display (`display:37d8832a-2d66-02ca-b9f7-8f30a301b230`) and DELL C3422WE (`display:d5c2e106-7238-4cb0-a9bf-16a4b2b6de7f`); daemon display listing succeeded after restart.
+
+## Default-Valued Display Examples
+
+- [x] Change generated per-display margin and gap examples to zero.
+- [x] Run focused tests, rebuild, and relaunch the daemon.
+
+## Default-Valued Display Example Summary
+
+- Changed every generated monitor override to margin 0 on all sides and gap 0, matching global defaults.
+- WMConfigurationTests, `swift build`, and `git diff --check` passed.
+- Relaunched the rebuilt daemon as PID 77165 and verified display listing and live example output.

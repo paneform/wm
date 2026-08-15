@@ -43,7 +43,7 @@ let package = Package(
         ),
         .target(
             name: "WMCLI",
-            dependencies: ["WMConfiguration", "WMProtocol", "WMWebSocket"]
+            dependencies: ["WMConfiguration", "WMInventory", "WMProtocol", "WMWebSocket"]
         ),
         .executableTarget(
             name: "wm",

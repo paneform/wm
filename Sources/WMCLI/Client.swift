@@ -1,5 +1,6 @@
 import Foundation
 import WMConfiguration
+import WMInventory
 import WMProtocol
 import WMWebSocket
 
@@ -182,17 +183,23 @@ public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
     private let id: @Sendable () -> String
     private let encoder: JSONEncoder
     private let configPath: URL
+    private let displays: @Sendable () async -> [ConfigurationFile.ExampleDisplay]
 
     public init(
         client: Client,
         output: CLIOutput,
         id: @escaping @Sendable () -> String = { UUID().uuidString },
-        configPath: URL = ConfigurationFile.path()
+        configPath: URL = ConfigurationFile.path(),
+        displays: @escaping @Sendable () async -> [ConfigurationFile.ExampleDisplay] = {
+            let result = await AppKitDisplayInventorySource().displays()
+            return result.value.map { .init(id: $0.id, name: $0.name) }
+        }
     ) {
         self.client = client
         self.output = output
         self.id = id
         self.configPath = configPath
+        self.displays = displays
         encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
     }
@@ -222,10 +229,10 @@ public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
             writeLine(Data(CLIConfigHelp.utf8), to: output.stdout)
             return .success
         case .configExample:
-            writeLine(Data(try ConfigurationFile.example().utf8), to: output.stdout)
+            writeLine(Data(try await ConfigurationFile.example(displays: displays()).utf8), to: output.stdout)
             return .success
         case .configInit:
-            return runConfigInit()
+            return await runConfigInit()
         case .configValidate:
             return runConfigValidate()
         case .configAdoptState(let url):
@@ -258,10 +265,10 @@ public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
         }
     }
 
-    private func runConfigInit() -> CLIExitCode {
+    private func runConfigInit() async -> CLIExitCode {
         let path = configPath
         do {
-            try ConfigurationFile.initialize(at: path)
+            try await ConfigurationFile.initialize(at: path, displays: displays())
             writeLine(Data("created \(path.path)".utf8), to: output.stdout)
             return .success
         } catch {

@@ -1,5 +1,6 @@
 import Foundation
 import WMConfiguration
+import WMInventory
 import WMPersistence
 import WMWorkspace
 
@@ -80,7 +81,7 @@ actor WorkspaceController {
     }
 
     func configuredState(
-        _ configuration: Configuration, defaultDisplayID: String, availableDisplayIDs: Set<String>
+        _ configuration: Configuration, defaultDisplayID: String, displays: [DisplayObservation]
     ) -> WMWorkspace.WorkspaceState {
         var candidate = state
         let configured = Dictionary(uniqueKeysWithValues: configuration.resolvedWorkspaces.map { ($0.name, $0.settings) })
@@ -88,16 +89,22 @@ actor WorkspaceController {
             let settings = configured[name]!
             candidate.workspaces.append(.init(
                 name: name, origin: .configured,
-                displayID: settings.preferredDisplay.flatMap { availableDisplayIDs.contains($0) ? $0 : nil } ?? defaultDisplayID
+                displayID: settings.preferredDisplay.flatMap { resolve($0, displays: displays) } ?? defaultDisplayID
             ))
         }
         for index in candidate.workspaces.indices {
-            let settings = configured[candidate.workspaces[index].name] ?? configuration.defaults
-            candidate.workspaces[index].preferredDisplayID = settings.preferredDisplay
+            var settings = configured[candidate.workspaces[index].name] ?? configuration.defaults
+            candidate.workspaces[index].preferredDisplayID = settings.preferredDisplay.flatMap { resolve($0, displays: displays) }
             if candidate.runtimeDisplayAssignments[candidate.workspaces[index].name] == nil {
-                candidate.workspaces[index].displayID = settings.preferredDisplay.flatMap {
-                    availableDisplayIDs.contains($0) ? $0 : nil
-                } ?? candidate.workspaces[index].displayID
+                candidate.workspaces[index].displayID = settings.preferredDisplay.flatMap { resolve($0, displays: displays) }
+                    ?? candidate.workspaces[index].displayID
+            }
+            for displaySettings in configuration.displays where
+                displaySettings.display.id == "*"
+                || resolve(displaySettings.display, displays: displays) == candidate.workspaces[index].displayID
+            {
+                settings.margin = displaySettings.margin.map { $0.inheriting(settings.margin ?? .init()) } ?? settings.margin
+                settings.gap = displaySettings.gap ?? settings.gap
             }
             candidate.workspaces[index].mode = settings.mode == .floating ? .floating : .bsp
             let margin = settings.margin ?? .init()
@@ -109,6 +116,17 @@ actor WorkspaceController {
             candidate.workspaces[index].resizeIncrement = settings.resizeIncrement ?? 10
         }
         return candidate
+    }
+
+    private func resolve(_ affinity: DisplayAffinity, displays: [DisplayObservation]) -> String? {
+        let matches = displays.filter { display in
+            if let id = affinity.id { return display.id == id }
+            if let value = affinity.coreGraphicsDisplayID { return display.identifiers.cgDirectDisplayID == value }
+            if let value = affinity.nsScreenNumber { return display.identifiers.nsscreenNumber == value }
+            if let name = affinity.name { return display.name == name }
+            return false
+        }
+        return matches.count == 1 ? matches[0].id : nil
     }
 
     private func commit(

@@ -4,6 +4,49 @@ public enum WorkspaceMode: String, Codable, Sendable { case bsp, floating }
 public enum WindowBehavior: String, Codable, Sendable { case tiled, floating }
 public enum ResistantWindowPolicy: String, Codable, Sendable { case float, ignore }
 
+public struct DisplayAffinity: Codable, Equatable, Hashable, Sendable {
+    public var id: String?
+    public var coreGraphicsDisplayID: String?
+    public var nsScreenNumber: String?
+    public var name: String?
+
+    public init(id: String? = nil, coreGraphicsDisplayID: String? = nil, nsScreenNumber: String? = nil, name: String? = nil) {
+        self.id = id; self.coreGraphicsDisplayID = coreGraphicsDisplayID
+        self.nsScreenNumber = nsScreenNumber; self.name = name
+    }
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id, name
+        case coreGraphicsDisplayID = "core_graphics_display_id"
+        case nsScreenNumber = "ns_screen_number"
+    }
+
+    public init(from decoder: Decoder) throws {
+        if let value = try? decoder.singleValueContainer().decode(String.self) {
+            self.init(id: value); return
+        }
+        try rejectUnknown(decoder, allowed: CodingKeys.allCases.map(\.rawValue))
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try values.decodeIfPresent(String.self, forKey: .id),
+            coreGraphicsDisplayID: try values.decodeIfPresent(String.self, forKey: .coreGraphicsDisplayID),
+            nsScreenNumber: try values.decodeIfPresent(String.self, forKey: .nsScreenNumber),
+            name: try values.decodeIfPresent(String.self, forKey: .name)
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        if let id, coreGraphicsDisplayID == nil, nsScreenNumber == nil, name == nil {
+            var value = encoder.singleValueContainer(); try value.encode(id); return
+        }
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encodeIfPresent(id, forKey: .id)
+        try values.encodeIfPresent(coreGraphicsDisplayID, forKey: .coreGraphicsDisplayID)
+        try values.encodeIfPresent(nsScreenNumber, forKey: .nsScreenNumber)
+        try values.encodeIfPresent(name, forKey: .name)
+    }
+}
+
 public struct WorkspaceMargins: Codable, Equatable, Sendable {
     public var top: Double?; public var right: Double?; public var bottom: Double?; public var left: Double?
     public init(top: Double? = nil, right: Double? = nil, bottom: Double? = nil, left: Double? = nil) {
@@ -18,20 +61,20 @@ public struct WorkspaceMargins: Codable, Equatable, Sendable {
         bottom = try values.decodeIfPresent(Double.self, forKey: .bottom)
         left = try values.decodeIfPresent(Double.self, forKey: .left)
     }
-    func inheriting(_ defaults: Self) -> Self {
+    public func inheriting(_ defaults: Self) -> Self {
         Self(top: top ?? defaults.top, right: right ?? defaults.right,
              bottom: bottom ?? defaults.bottom, left: left ?? defaults.left)
     }
 }
 
 public struct WorkspaceSettings: Codable, Equatable, Sendable {
-    public var preferredDisplay: String?
+    public var preferredDisplay: DisplayAffinity?
     public var mode: WorkspaceMode?
     public var margin: WorkspaceMargins?
     public var gap: Double?
     public var resizeIncrement: Double?
 
-    public init(preferredDisplay: String? = nil, mode: WorkspaceMode? = nil, margin: WorkspaceMargins? = nil, gap: Double? = nil, resizeIncrement: Double? = nil) {
+    public init(preferredDisplay: DisplayAffinity? = nil, mode: WorkspaceMode? = nil, margin: WorkspaceMargins? = nil, gap: Double? = nil, resizeIncrement: Double? = nil) {
         self.preferredDisplay = preferredDisplay; self.mode = mode; self.margin = margin; self.gap = gap
         self.resizeIncrement = resizeIncrement
     }
@@ -44,7 +87,7 @@ public struct WorkspaceSettings: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         try rejectUnknown(decoder, allowed: CodingKeys.allCases.map(\.rawValue))
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        preferredDisplay = try values.decodeIfPresent(String.self, forKey: .preferredDisplay)
+        preferredDisplay = try values.decodeIfPresent(DisplayAffinity.self, forKey: .preferredDisplay)
         mode = try values.decodeIfPresent(WorkspaceMode.self, forKey: .mode)
         margin = try values.decodeIfPresent(WorkspaceMargins.self, forKey: .margin)
         gap = try values.decodeIfPresent(Double.self, forKey: .gap)
@@ -74,7 +117,7 @@ public struct WorkspaceConfiguration: Codable, Equatable, Sendable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         name = try values.decode(String.self, forKey: .name)
         settings = WorkspaceSettings(
-            preferredDisplay: try values.decodeIfPresent(String.self, forKey: .preferredDisplay),
+            preferredDisplay: try values.decodeIfPresent(DisplayAffinity.self, forKey: .preferredDisplay),
             mode: try values.decodeIfPresent(WorkspaceMode.self, forKey: .mode),
             margin: try values.decodeIfPresent(WorkspaceMargins.self, forKey: .margin),
             gap: try values.decodeIfPresent(Double.self, forKey: .gap),
@@ -90,6 +133,26 @@ public struct WorkspaceConfiguration: Codable, Equatable, Sendable {
         try values.encodeIfPresent(settings.margin, forKey: .margin)
         try values.encodeIfPresent(settings.gap, forKey: .gap)
         try values.encodeIfPresent(settings.resizeIncrement, forKey: .resizeIncrement)
+    }
+}
+
+public struct DisplayConfiguration: Codable, Equatable, Sendable {
+    public var display: DisplayAffinity
+    public var margin: WorkspaceMargins?
+    public var gap: Double?
+
+    public init(display: DisplayAffinity, margin: WorkspaceMargins? = nil, gap: Double? = nil) {
+        self.display = display; self.margin = margin; self.gap = gap
+    }
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case display, margin, gap }
+
+    public init(from decoder: Decoder) throws {
+        try rejectUnknown(decoder, allowed: CodingKeys.allCases.map(\.rawValue))
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        display = try values.decode(DisplayAffinity.self, forKey: .display)
+        margin = try values.decodeIfPresent(WorkspaceMargins.self, forKey: .margin)
+        gap = try values.decodeIfPresent(Double.self, forKey: .gap)
     }
 }
 
@@ -188,13 +251,15 @@ public struct WindowRule: Codable, Equatable, Sendable {
 }
 
 public struct Configuration: Codable, Equatable, Sendable {
-    public var defaults: WorkspaceSettings; public var workspaces: [WorkspaceConfiguration]; public var rules: [WindowRule]
+    public var defaults: WorkspaceSettings; public var displays: [DisplayConfiguration]
+    public var workspaces: [WorkspaceConfiguration]; public var rules: [WindowRule]
     public var hotload: Bool; public var port: UInt16
-    enum CodingKeys: String, CodingKey, CaseIterable { case defaults, workspaces, rules, hotload, port }
-    public init(defaults: WorkspaceSettings = .init(mode: .bsp, margin: .init(top: 0, right: 0, bottom: 0, left: 0), gap: 0, resizeIncrement: 10), workspaces: [WorkspaceConfiguration] = [], rules: [WindowRule] = [], hotload: Bool = true, port: UInt16 = 17_832) { self.defaults = defaults; self.workspaces = workspaces; self.rules = rules; self.hotload = hotload; self.port = port }
+    enum CodingKeys: String, CodingKey, CaseIterable { case defaults, displays, workspaces, rules, hotload, port }
+    public init(defaults: WorkspaceSettings = .init(mode: .bsp, margin: .init(top: 0, right: 0, bottom: 0, left: 0), gap: 0, resizeIncrement: 10), displays: [DisplayConfiguration] = [], workspaces: [WorkspaceConfiguration] = [], rules: [WindowRule] = [], hotload: Bool = true, port: UInt16 = 17_832) { self.defaults = defaults; self.displays = displays; self.workspaces = workspaces; self.rules = rules; self.hotload = hotload; self.port = port }
     public init(from decoder: Decoder) throws {
         try rejectUnknown(decoder, allowed: CodingKeys.allCases.map(\.rawValue)); let c = try decoder.container(keyedBy: CodingKeys.self)
         defaults = try c.decodeIfPresent(WorkspaceSettings.self, forKey: .defaults) ?? .init(mode: .bsp, margin: .init(top: 0, right: 0, bottom: 0, left: 0), gap: 0, resizeIncrement: 10)
+        displays = try c.decodeIfPresent([DisplayConfiguration].self, forKey: .displays) ?? []
         workspaces = try c.decodeIfPresent([WorkspaceConfiguration].self, forKey: .workspaces) ?? []
         rules = try c.decodeIfPresent([WindowRule].self, forKey: .rules) ?? []
         hotload = try c.decodeIfPresent(Bool.self, forKey: .hotload) ?? true; port = try c.decodeIfPresent(UInt16.self, forKey: .port) ?? 17_832
@@ -205,8 +270,23 @@ public struct Configuration: Codable, Equatable, Sendable {
     private func validate() throws {
         guard port > 0 else { throw ConfigurationError.invalid("port must be greater than zero") }
         guard Set(workspaces.map(\.name)).count == workspaces.count, workspaces.allSatisfy({ !$0.name.isEmpty }) else { throw ConfigurationError.invalid("workspace names must be non-empty and unique") }
-        let margins = defaults.margin.map { [$0.top, $0.right, $0.bottom, $0.left] } ?? []
-        for value in (margins + [defaults.gap, defaults.resizeIncrement]).compactMap({ $0 }) where !value.isFinite || value < 0 { throw ConfigurationError.invalid("workspace measurements must be finite and non-negative") }
+        let margins = [defaults.margin] + workspaces.map(\.settings.margin) + displays.map(\.margin)
+        let measurements = margins.compactMap { $0 }.flatMap { [$0.top, $0.right, $0.bottom, $0.left] }
+            + [defaults.gap, defaults.resizeIncrement] + workspaces.flatMap { [$0.settings.gap, $0.settings.resizeIncrement] }
+            + displays.map(\.gap)
+        for value in measurements.compactMap({ $0 }) where !value.isFinite || value < 0 { throw ConfigurationError.invalid("workspace measurements must be finite and non-negative") }
+        let affinities = ([defaults.preferredDisplay] + workspaces.map(\.settings.preferredDisplay)).compactMap { $0 }
+            + displays.map(\.display)
+        for affinity in affinities {
+            let selectors = [affinity.id, affinity.coreGraphicsDisplayID, affinity.nsScreenNumber, affinity.name].compactMap { $0 }
+            guard selectors.count == 1, selectors[0].isEmpty == false else {
+                throw ConfigurationError.invalid("preferred_display must contain exactly one non-empty selector")
+            }
+        }
+        let displaySelectors = displays.map(\.display)
+        guard Set(displaySelectors).count == displaySelectors.count else {
+            throw ConfigurationError.invalid("display selectors must be unique")
+        }
     }
 }
 
@@ -220,7 +300,7 @@ public enum ConfigurationParser {
         catch { throw ConfigurationError.invalid(String(describing: error)) }
     }
 
-    public static let schema = ##"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"properties":{"defaults":{"$ref":"#/$defs/settings"},"workspaces":{"type":"array"},"rules":{"type":"array"},"hotload":{"type":"boolean","default":true},"port":{"type":"integer","minimum":1,"maximum":65535,"default":17832}},"$defs":{"settings":{"type":"object","additionalProperties":false}}}"##
+    public static let schema = ##"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"properties":{"defaults":{"$ref":"#/$defs/settings"},"displays":{"type":"array"},"workspaces":{"type":"array"},"rules":{"type":"array"},"hotload":{"type":"boolean","default":true},"port":{"type":"integer","minimum":1,"maximum":65535,"default":17832}},"$defs":{"settings":{"type":"object","additionalProperties":false}}}"##
 }
 
 public struct AdoptedWindow: Equatable, Sendable {
@@ -232,6 +312,13 @@ public struct AdoptedWindow: Equatable, Sendable {
 }
 
 public enum ConfigurationFile {
+    public struct ExampleDisplay: Equatable, Sendable {
+        public var id: String
+        public var name: String
+
+        public init(id: String, name: String) { self.id = id; self.name = name }
+    }
+
     public static func path(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
         let base: URL
         if let configured = environment["XDG_CONFIG_HOME"], configured.hasPrefix("/") {
@@ -243,8 +330,18 @@ public enum ConfigurationFile {
         return base.appendingPathComponent("wm", isDirectory: true).appendingPathComponent("config.jsonc")
     }
 
-    public static func example() throws -> String {
-        """
+    public static func example(displays: [ExampleDisplay] = []) throws -> String {
+        let displayOverrides = displays.sorted { ($0.name, $0.id) < ($1.name, $1.id) }.map {
+            """
+                // \($0.name)
+                // {
+                //   "display": "\($0.id)",
+                //   "margin": {"top": 0, "right": 0, "bottom": 0, "left": 0},
+                //   "gap": 0
+                // }
+            """
+        }.joined(separator: ",\n")
+        return """
         {
           // Default layout settings inherited by every workspace.
           "defaults": {
@@ -266,6 +363,10 @@ public enum ConfigurationFile {
             // Keyboard resize step, in points.
             "resize_increment": 10
           },
+          // Per-display layout overrides, selected by ID, CG ID, NSScreen number, or name.
+          "displays": [
+        \(displayOverrides)
+          ],
           // Explicit workspace definitions and per-workspace overrides.
           "workspaces": [],
           // First-match window rules for assignment and behavior.
@@ -289,12 +390,14 @@ public enum ConfigurationFile {
         try ConfigurationParser.parse(String(contentsOf: path, encoding: .utf8))
     }
 
-    public static func initialize(at path: URL, fileManager: FileManager = .default) throws {
+    public static func initialize(
+        at path: URL, displays: [ExampleDisplay] = [], fileManager: FileManager = .default
+    ) throws {
         guard !fileManager.fileExists(atPath: path.path) else {
             throw ConfigurationError.invalid("config file already exists")
         }
         try fileManager.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(example().utf8).write(to: path, options: .withoutOverwriting)
+        try Data(example(displays: displays).utf8).write(to: path, options: .withoutOverwriting)
     }
 
     public static func adopt(
@@ -306,7 +409,7 @@ public enum ConfigurationFile {
         let existing = Dictionary(uniqueKeysWithValues: result.workspaces.map { ($0.name, $0) })
         result.workspaces = Set(existing.keys).union(workspaceDisplays.keys).sorted().map { name in
             var workspace = existing[name] ?? WorkspaceConfiguration(name: name)
-            if let display = workspaceDisplays[name] { workspace.settings.preferredDisplay = display }
+            if let display = workspaceDisplays[name] { workspace.settings.preferredDisplay = .init(id: display) }
             return workspace
         }
 

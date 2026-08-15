@@ -170,15 +170,20 @@ actor DaemonHandler: WebSocketRequestHandler {
         }
         let before = await workspaces.snapshot()
         var after = await workspaces.configuredState(
-            candidate, defaultDisplayID: displayID, availableDisplayIDs: Set(inventory.displays.map(\.id))
+            candidate, defaultDisplayID: displayID, displays: inventory.displays
         )
         guard after != before else { return }
         let modified = after.workspaces.filter { workspace in before[workspace: workspace.name] != workspace }.map(\.name)
         for name in modified where after[workspace: name]?.visible == true {
-            try await reconcileWorkspaceFocus(
-                before: before, after: &after, name: name, inventory: inventory,
-                tolerateGeometryClamp: true
-            )
+            if before[workspace: name]?.displayID == after[workspace: name]?.displayID,
+               before[workspace: name]?.visible == true {
+                await tileWorkspaceForObserver(after, named: name, inventory: inventory, forceStack: false)
+            } else {
+                try await reconcileWorkspaceFocus(
+                    before: before, after: &after, name: name, inventory: inventory,
+                    tolerateGeometryClamp: true
+                )
+            }
         }
         try await workspaces.commit(after)
         let result = WMWorkspace.WorkspaceMutationResult(workspaceState: after, modifiedWorkspaces: modified)
@@ -1274,6 +1279,16 @@ actor DaemonHandler: WebSocketRequestHandler {
             } catch let failure as WindowGeometryFailure {
                 guard failure.code == .geometryVerificationFailed, let observed = failure.observedFrame else {
                     reportInternalTransactionError(name: "observer.geometry", error: String(describing: failure)); continue
+                }
+                do {
+                    let fitted = try await geometry.fit(window: window, within: .init(
+                        x: target.x, y: target.y, width: target.width, height: target.height
+                    ))
+                    windowMinimumSizes[id] = .init(width: fitted.width, height: fitted.height)
+                    observerGeometryReliability.clear(windowID: id)
+                    continue
+                } catch {
+                    // Record the original clamp when fitting cannot improve the partial write.
                 }
                 let clamp = ObserverGeometryReliability.Clamp(
                     requestedWidth: target.width, requestedHeight: target.height,

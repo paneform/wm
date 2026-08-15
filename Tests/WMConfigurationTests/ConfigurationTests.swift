@@ -19,7 +19,25 @@ private let basic = #"{"workspaces":[{"name":"main"}]}"#
     #expect(value.port == 17_832)
     let margin = WorkspaceMargins(top: 12, right: 12, bottom: 12, left: 12)
     #expect(value.resolvedWorkspaces[0].settings == .init(mode: .floating, margin: margin, gap: 2, resizeIncrement: 4))
-    #expect(value.resolvedWorkspaces[1].settings == .init(preferredDisplay: "external", mode: .floating, margin: margin, gap: 7, resizeIncrement: 4))
+    #expect(value.resolvedWorkspaces[1].settings == .init(preferredDisplay: .init(id: "external"), mode: .floating, margin: margin, gap: 7, resizeIncrement: 4))
+}
+
+@Test func displayAffinityAcceptsCanonicalAndSelectorForms() throws {
+    let value = try ConfigurationParser.parse(#"""
+    {
+      "workspaces":[
+        {"name":"id","preferred_display":"display:uuid"},
+        {"name":"cg","preferred_display":{"core_graphics_display_id":"2"}},
+        {"name":"ns","preferred_display":{"ns_screen_number":"2"}},
+        {"name":"name","preferred_display":{"name":"DELL C3422WE"}}
+      ]
+    }
+    """#)
+    let affinities = Dictionary(uniqueKeysWithValues: value.workspaces.map { ($0.name, $0.settings.preferredDisplay) })
+    #expect(affinities["id"] == .init(id: "display:uuid"))
+    #expect(affinities["cg"] == .init(coreGraphicsDisplayID: "2"))
+    #expect(affinities["ns"] == .init(nsScreenNumber: "2"))
+    #expect(affinities["name"] == .init(name: "DELL C3422WE"))
 }
 
 @Test func commentsInsideStringsArePreserved() throws {
@@ -38,10 +56,29 @@ func rejectsUnknownFieldsAtEverySchemaLevel(source: String) {
     #expect(throws: ConfigurationError.self) { try ConfigurationParser.parse(source) }
 }
 
+@Test func parsesPerDisplayMarginAndGapOverrides() throws {
+    let value = try ConfigurationParser.parse(#"""
+    {
+      "defaults":{"margin":{"top":1,"right":2,"bottom":3,"left":4},"gap":5},
+      "displays":[
+        {"display":{"core_graphics_display_id":"2"},"margin":{"top":20,"left":40},"gap":12}
+      ]
+    }
+    """#)
+    #expect(value.displays == [.init(
+        display: .init(coreGraphicsDisplayID: "2"),
+        margin: .init(top: 20, left: 40), gap: 12
+    )])
+}
+
 @Test(arguments: [
     #"{"port":0}"#,
     #"{"defaults":{"gap":-1}}"#,
     #"{"defaults":{"margin":{"left":-1}}}"#,
+    #"{"displays":[{"display":{"name":"A"},"gap":-1}]}"#,
+    #"{"displays":[{"display":{"name":"A"},"margin":{"left":-1}}]}"#,
+    #"{"displays":[{"display":{"name":"A"}},{"display":{"name":"A"}}]}"#,
+    #"{"displays":[{"display":{"name":"A","ns_screen_number":"1"}}]}"#,
     #"{"workspaces":[{"name":"x"},{"name":"x"}]}"#,
     #"{"rules":[{"match":{"property":"title","operator":"regex","value":"["},"actions":{}}]}"#,
 ])
@@ -137,7 +174,9 @@ func rejectsSemanticErrors(source: String) {
 }
 
 @Test func exampleRoundTripsWithExplicitDefaults() throws {
-    let source = try ConfigurationFile.example()
+    let source = try ConfigurationFile.example(displays: [
+        .init(id: "display:12345678-abcd", name: "Studio Display")
+    ])
     let value = try ConfigurationParser.parse(source)
     #expect(value == Configuration())
     #expect(source.contains(#""resize_increment": 10"#))
@@ -155,6 +194,11 @@ func rejectsSemanticErrors(source: String) {
     #expect(source.contains("// Space between adjacent tiled windows, in points."))
     #expect(source.contains("// Keyboard resize step, in points."))
     #expect(source.contains("// Explicit workspace definitions and per-workspace overrides."))
+    #expect(source.contains("// Per-display layout overrides"))
+    #expect(source.contains("// Studio Display"))
+    #expect(source.contains(#"//   "display": "display:12345678-abcd""#))
+    #expect(source.contains(#"//   "margin": {"top": 0, "right": 0, "bottom": 0, "left": 0}"#))
+    #expect(source.contains(#"//   "gap": 0"#))
     #expect(source.contains("// First-match window rules for assignment and behavior."))
     #expect(source.contains("// Reload this file automatically when it changes."))
     #expect(source.contains("// Local WebSocket API port used by the daemon."))
@@ -192,9 +236,9 @@ func rejectsSemanticErrors(source: String) {
         windows: [.init(executableName: "Ghostty", workspace: "T")]
     )
     #expect(adopted.defaults.gap == 8)
-    #expect(adopted.workspaces.first(where: { $0.name == "T" })?.settings == .init(preferredDisplay: "display:2", mode: .floating))
+    #expect(adopted.workspaces.first(where: { $0.name == "T" })?.settings == .init(preferredDisplay: .init(id: "display:2"), mode: .floating))
     #expect(adopted.workspaces.first(where: { $0.name == "Other" })?.settings.gap == 3)
-    #expect(adopted.workspaces.first(where: { $0.name == "New" })?.settings.preferredDisplay == "display:1")
+    #expect(adopted.workspaces.first(where: { $0.name == "New" })?.settings.preferredDisplay == .init(id: "display:1"))
     #expect(adopted.rules.count == 3)
     #expect(adopted.actions(for: .init(executablePath: "/bin/Ghostty", processID: 1))?.workspace == "T")
     #expect(adopted.actions(for: .init(processID: 2, title: "docs"))?.workspace == "Docs")
