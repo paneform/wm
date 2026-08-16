@@ -129,7 +129,8 @@ extension Workspace {
       }
       if let frames = policyFrames(
         policy, bounds: bounds, content: content, cooperation: cooperation,
-        minimumSizes: minimumSizes, maximumSizes: maximumSizes) {
+        minimumSizes: minimumSizes, maximumSizes: maximumSizes),
+        framesAreFeasible(frames, cooperation: cooperation) {
         return .init(requestedChain: layoutPolicy, attemptedChain: attempted, effectivePolicy: policy,
           plan: .frames(frames), fallbackOccurred: attempted.count > 1)
       }
@@ -201,6 +202,21 @@ extension Workspace {
         width: max(allocation.width, constraint.minimumSize.width),
         height: max(allocation.height, constraint.minimumSize.height)))
     })
+  }
+
+  private func framesAreFeasible(
+    _ frames: [WorkspaceWindowID: WorkspaceLayoutRect],
+    cooperation: [WorkspaceWindowID: WorkspaceWindowCooperation]
+  ) -> Bool {
+    Set(frames.keys) == Set(windowIDs) && frames.allSatisfy { id, frame in
+      let constraint = cooperation[id] ?? .init()
+      return frame.x.isFinite && frame.y.isFinite && frame.width.isFinite && frame.height.isFinite
+        && frame.width > 0 && frame.height > 0
+        && frame.width >= constraint.minimumSize.width
+        && frame.height >= constraint.minimumSize.height
+        && constraint.maximumSize.width.map { frame.width <= $0 } != false
+        && constraint.maximumSize.height.map { frame.height <= $0 } != false
+    }
   }
 }
 

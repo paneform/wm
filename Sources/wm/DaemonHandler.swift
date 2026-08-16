@@ -1360,12 +1360,8 @@ actor DaemonHandler: WebSocketRequestHandler {
   }
 
   private func protocolHealth(_ value: InventoryHealth) -> Health {
-    let fallbackIssues = workspaceLayoutResults.compactMap { name, result in
-      result.fallbackOccurred ? "workspace \(name) layout fallback: \(result.attemptedChain.map(\.rawValue).joined(separator: "->"))" : nil
-    }.sorted()
     return Health(
-      status: fallbackIssues.isEmpty ? HealthStatus(rawValue: value.status.rawValue)! : .unhealthy,
-      issues: value.issues + fallbackIssues,
+      status: HealthStatus(rawValue: value.status.rawValue)!, issues: value.issues,
       capabilities: .init(
         accessibility: value.capabilities["accessibility"] as? Bool ?? false,
         screenRecording: value.capabilities["core_graphics"] as? Bool ?? false,
@@ -1373,11 +1369,8 @@ actor DaemonHandler: WebSocketRequestHandler {
   }
 
   private func workspaceHealth(_ name: String) -> JSONValue {
-    guard let result = workspaceLayoutResults[name], result.fallbackOccurred else { return healthyState }
-    return .object([
-      "status": .string("unhealthy"),
-      "issues": .array([.string("layout fallback: \(result.attemptedChain.map(\.rawValue).joined(separator: "->"))")]),
-    ])
+    guard workspaceLayoutResults[name]?.plan == .rejected else { return healthyState }
+    return .object(["status": .string("unhealthy"), "issues": .array([.string("layout rejected")])])
   }
 
   private func layoutResultJSON(_ result: WorkspaceLayoutResult) -> JSONValue {

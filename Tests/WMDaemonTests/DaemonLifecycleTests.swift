@@ -446,6 +446,11 @@ private func response(_ text: String) throws -> Response {
         return
     }
     #expect(expected["management"] == .string("managed"))
+    guard case .object(let health)? = result["health"] else {
+        Issue.record("expected workspace health")
+        return
+    }
+    #expect(health["status"] == .string("healthy"))
 }
 
 @Test func configurationResolvesDisplayAffinitySelectors() async throws {

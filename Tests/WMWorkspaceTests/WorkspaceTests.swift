@@ -478,6 +478,27 @@ import Testing
   #expect(frames["peer"]?.width == 781)
 }
 
+@Test func invalidNestedMaximumAllocationFallsBackToStack() {
+  var workspace = tiled("M", display: "d", windows: ["messages", "discord", "settings"])
+  workspace.focusedWindowID = "settings"
+  workspace.layoutPolicy = [.greedy, .stack, .overflow]
+  let bounds = WorkspaceLayoutRect(x: 0, y: 32, width: 1_512, height: 950)
+  let result = workspace.layoutResult(in: bounds, cooperation: [
+    "messages": .init(minimumSize: .init(width: 712), maximumSize: .init(width: 712), isCooperative: false),
+    "discord": .init(minimumSize: .init(width: 800), maximumSize: .init(width: 800), isCooperative: false),
+    "settings": .init(minimumSize: .init(width: 723), maximumSize: .init(width: 723), isCooperative: false),
+  ])
+
+  #expect(result.attemptedChain == [.greedy, .stack])
+  #expect(result.effectivePolicy == .stack)
+  #expect(result.fallbackOccurred)
+  #expect(result.plan == .frames([
+    "messages": .init(x: 0, y: 32, width: 712, height: 950),
+    "discord": .init(x: 0, y: 32, width: 800, height: 950),
+    "settings": .init(x: 0, y: 32, width: 723, height: 950),
+  ]))
+}
+
 @Test func bspLayoutReportsWhenMinimumSizesCannotFit() {
   let workspace = tiled("tile", display: "d", windows: ["a", "b", "c"])
   let bounds = WorkspaceLayoutRect(x: 0, y: 32, width: 1512, height: 950)
