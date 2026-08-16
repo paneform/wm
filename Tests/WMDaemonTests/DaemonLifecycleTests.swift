@@ -65,6 +65,39 @@ private actor EventProbe {
     func contains(_ topic: EventTopic) -> Bool { topics.contains(topic) }
 }
 
+private actor DirectionalGeometry: WindowGeometryEffects {
+    var frames: [String: InventoryRect]
+    var focused: String?
+    var failFocus = false
+
+    init(frames: [String: InventoryRect]) { self.frames = frames }
+    func setFailFocus(_ value: Bool) { failFocus = value }
+    func reconcile(windows: [NormalizedWindow]) async {}
+    func evict(lifetimes: Set<WindowLifetime>) async {}
+    func get(window: NormalizedWindow) async throws -> WindowFrameGetResult {
+        let frame = frames[window.id] ?? window.frame!
+        return .init(windowID: window.id, frame: frame.protocolFrame, observedAt: .init())
+    }
+    func set(window: NormalizedWindow, params: WindowFrameSetParams) async throws -> WindowFrameSetResult {
+        frames[window.id] = .init(
+            x: params.frame.x, y: params.frame.y,
+            width: params.frame.width, height: params.frame.height)
+        return .init(windowID: window.id, requestedFrame: params.frame, observedFrame: params.frame,
+                     verified: true, attempts: 1, strategy: .positionThenSize, durationMilliseconds: 0)
+    }
+    func setGeometry(window: NormalizedWindow, request: WindowGeometrySetRequest) async throws -> WindowGeometrySetOutcome {
+        frames[window.id] = request.frame
+        return .init(requestedFrame: request.frame, observedFrame: request.frame,
+                     classification: .exact, attempts: 1, strategy: .positionThenSize)
+    }
+    func focus(window: NormalizedWindow) async throws {
+        if failFocus { throw WindowGeometryFailure(code: .geometryVerificationFailed, message: "focus failed") }
+        focused = window.id
+    }
+    func fit(window: NormalizedWindow, within frame: InventoryRect) async throws -> InventoryRect { frame }
+    func park(window: NormalizedWindow, frame: InventoryRect) async throws -> InventoryRect { frame }
+}
+
 private func clientMessage(_ message: ClientMessage) throws -> String {
     String(data: try ProtocolCodec.encode(message), encoding: .utf8)!
 }
@@ -244,6 +277,57 @@ private func response(_ text: String) throws -> Response {
         #expect(value.error == nil, Comment(rawValue: value.error?.message ?? expected))
         #expect(await controller.snapshot()[workspace: "T"]?.displayID == expected, Comment(rawValue: expected))
     }
+}
+
+@Test func directionalWindowCommandsVerifyPersistAndRemainAtomicOnFailure() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let controller = try WorkspaceController(
+        buildVersion: "test", stateURL: directory.appendingPathComponent("state.json"))
+    try await controller.commit(.init(
+        workspaces: [.init(
+            name: "T", origin: .configured, displayID: "display:1", visible: true, focused: true,
+            windowIDs: ["left", "right"], focusedWindowID: "right",
+            bsp: .init(root: .split(axis: .vertical, ratio: 0.5,
+                first: .leaf(windowID: "left"), second: .leaf(windowID: "right"))))],
+        focusedWorkspaceName: "T", displays: ["display:1": .init(visibleWorkspaceName: "T")]))
+    let geometry = DirectionalGeometry(frames: [
+        "left": .init(x: 0, y: 0, width: 496, height: 800),
+        "right": .init(x: 504, y: 0, width: 496, height: 800),
+    ])
+    let state = DaemonHandler.State(provider: SystemInventoryProvider(scanner: .init(sources: .init(
+        displays: StubDisplays(), accessibility: StubAX(), coreGraphics: StubCG()))))
+    let handler = DaemonHandler(state: state, workspaces: controller, geometryEffects: geometry)
+    _ = try await state.refresh()
+    let windows = [
+        recoveryWindow(id: "left", bundleID: "test", displayID: "display:1"),
+        recoveryWindow(id: "right", bundleID: "test", displayID: "display:1"),
+    ]
+    try await handler.reconcileObservedWindows(lifecycleInventory(windows), displayID: "display:1")
+
+    let focusReply = await handler.handle(text: try clientMessage(.request(.init(
+        requestId: "focus", method: .windowFocus,
+        params: ["direction": .string("left"), "return_mode": .string("completion")]
+    ))), clientID: UUID())
+    #expect(try response(focusReply[0]).error == nil)
+    #expect(await controller.snapshot()[workspace: "T"]?.focusedWindowID == "left")
+    #expect(await geometry.focused == "left")
+
+    let committed = await controller.snapshot()
+    await geometry.setFailFocus(true)
+    let failedMove = await handler.handle(text: try clientMessage(.request(.init(
+        requestId: "move", method: .windowMove,
+        params: ["direction": .string("right"), "return_mode": .string("completion")]
+    ))), clientID: UUID())
+    let failedReceipt = try #require(try response(failedMove[0]).result)
+    guard case .object(let failedObject) = failedReceipt,
+          case .object(let transaction)? = failedObject["transaction"],
+          case .object(let failure)? = transaction["failure"] else {
+        Issue.record("expected failed transaction receipt")
+        return
+    }
+    #expect(failure["code"] == .string("geometry_verification_failed"))
+    #expect(await controller.snapshot() == committed)
 }
 
 @Test func configurationResolvesDisplayAffinitySelectors() async throws {
@@ -911,12 +995,16 @@ private func recoveryWindow(id: String, bundleID: String, displayID: String?) ->
 }
 
 private func lifecycleInventory(_ window: NormalizedWindow) -> InventorySnapshot {
+    lifecycleInventory([window])
+}
+
+private func lifecycleInventory(_ windows: [NormalizedWindow]) -> InventorySnapshot {
     InventorySnapshot(
         timestamp: .init(), durationMilliseconds: 0, displays: [], rawAXWindows: [], rawCGWindows: [],
-        windows: [window], rejectedAXWindows: [], joinDecisions: [], sourceHealth: [],
+        windows: windows, rejectedAXWindows: [], joinDecisions: [], sourceHealth: [],
         appScans: [.init(
-            application: .init(pid: window.pid, name: window.appName), status: .succeeded,
-            durationMilliseconds: 0, windowCount: 1, issues: []
+            application: .init(pid: windows[0].pid, name: windows[0].appName), status: .succeeded,
+            durationMilliseconds: 0, windowCount: windows.count, issues: []
         )]
     )
 }

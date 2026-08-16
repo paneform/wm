@@ -30,6 +30,13 @@ private let workspace = WorkspaceState(
     #expect(throws: Never.self) { try ProtocolCodec.encode(WorkspaceMoveWindowParams(windowIds: [], workspace: "T")) }
     #expect(throws: Never.self) { try ProtocolCodec.encode(WorkspaceMoveDisplayParams(workspace: "T", displayId: "display:uuid")) }
     #expect(throws: Never.self) { try ProtocolCodec.encode(WorkspaceSetModeParams(workspace: "T", mode: .floating)) }
+    let directional = WindowDirectionalParams(direction: .left)
+    #expect(try ProtocolCodec.decode(WindowDirectionalParams.self, from: ProtocolCodec.encode(directional)) == directional)
+    let directionalResult = WindowDirectionalResult(
+        workspace: "T", windowId: "window:2", targetWindowId: "window:1",
+        direction: .left, effectStatus: .verified
+    )
+    #expect(try ProtocolCodec.decode(WindowDirectionalResult.self, from: ProtocolCodec.encode(directionalResult)) == directionalResult)
     #expect(throws: Never.self) { try ProtocolCodec.encode(UncooperativeWindowPolicySetParams(policy: .overlap, workspace: "T")) }
     let policy = GeometryPolicySetParams(workspace: "T", maxGeometryRetries: 5, geometryProfileMode: .optimistic)
     #expect(try ProtocolCodec.decode(GeometryPolicySetParams.self, from: ProtocolCodec.encode(policy)) == policy)
@@ -46,6 +53,8 @@ private let workspace = WorkspaceState(
 
 @Test func workspaceProtocolEnumsExposeDocumentedValues() {
     #expect(Method.workspaceList.rawValue == "workspace.list")
+    #expect(Method.windowFocus.rawValue == "window.focus")
+    #expect(Method.windowMove.rawValue == "window.move")
     #expect(Method.workspaceFocus.rawValue == "workspace.focus")
     #expect(Method.workspaceMoveWindow.rawValue == "workspace.move_window")
     #expect(Method.workspaceMoveDisplay.rawValue == "workspace.move_display")

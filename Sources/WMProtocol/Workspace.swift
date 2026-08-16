@@ -244,6 +244,45 @@ public struct WorkspaceMoveWindowParams: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey { case windowIds = "window_ids", workspace }
 }
 
+public enum WindowDirection: String, Codable, CaseIterable, Sendable {
+    case left, down, up, right
+}
+
+public struct WindowDirectionalParams: Codable, Equatable, Sendable {
+    public var direction: WindowDirection
+
+    public init(direction: WindowDirection) {
+        self.direction = direction
+    }
+}
+
+public struct WindowDirectionalResult: Codable, Equatable, Sendable {
+    public var workspace: String
+    public var windowId: String
+    public var targetWindowId: String
+    public var direction: WindowDirection
+    public var effectStatus: WorkspaceEffectStatus
+
+    public init(
+        workspace: String, windowId: String,
+        targetWindowId: String, direction: WindowDirection,
+        effectStatus: WorkspaceEffectStatus
+    ) {
+        self.workspace = workspace
+        self.windowId = windowId
+        self.targetWindowId = targetWindowId
+        self.direction = direction
+        self.effectStatus = effectStatus
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case workspace, direction
+        case windowId = "window_id"
+        case targetWindowId = "target_window_id"
+        case effectStatus = "effect_status"
+    }
+}
+
 public struct WorkspaceMoveDisplayParams: Codable, Equatable, Sendable {
     public var workspace: String?
     public var displayId: String?

@@ -18,7 +18,7 @@ actor DaemonHandler: WebSocketRequestHandler {
   private let state: State
   private let router: RequestRouter<SystemInventoryProvider>
   private let geometryProfiles: WindowGeometryProfileRecorder
-  private let geometry: WindowGeometryService<AXWindowGeometryAdapter>
+  private let geometry: any WindowGeometryEffects
   private let rawGeometry = AXWindowGeometryAdapter()
   private let workspaces: WorkspaceController
   private let sessionID = UUID().uuidString
@@ -51,12 +51,14 @@ actor DaemonHandler: WebSocketRequestHandler {
 
   init(
     state: State, workspaces: WorkspaceController,
-    geometryProfiles: WindowGeometryProfileRecorder = .init()
+    geometryProfiles: WindowGeometryProfileRecorder = .init(),
+    geometryEffects: (any WindowGeometryEffects)? = nil
   ) {
     self.state = state
     self.workspaces = workspaces
     self.geometryProfiles = geometryProfiles
-    geometry = WindowGeometryService(adapter: AXWindowGeometryAdapter(), profiles: geometryProfiles)
+    geometry = geometryEffects
+      ?? WindowGeometryService(adapter: AXWindowGeometryAdapter(), profiles: geometryProfiles)
     router = RequestRouter(inventory: state)
   }
 
@@ -721,6 +723,41 @@ actor DaemonHandler: WebSocketRequestHandler {
         result = displayList(
           snapshot.inventory.displays, verbose: request.params["verbose"] == .bool(true))
       case .windowList: result = json(["windows": snapshot.inventory.windows])
+      case .windowFocus, .windowMove:
+        let params = try decodeParams(WindowDirectionalParams.self, from: .object(request.params))
+        let before = await workspaces.snapshot()
+        guard let name = before.focusedWorkspaceName,
+          let workspace = before[workspace: name]
+        else { throw WorkspaceMutationError.focusedWorkspaceRequired }
+        guard let workArea = DisplayTopologySnapshot(displays: snapshot.inventory.displays)
+          .axWorkAreas[workspace.displayID]
+        else { throw WorkspaceRequestError.displayRequired }
+        let bounds = WorkspaceLayoutRect(
+          x: workArea.x, y: workArea.y, width: workArea.width, height: workArea.height)
+        let direction = workspaceDirection(params.direction)
+        let directional = try request.method == .windowFocus
+          ? await workspaces.previewFocusWindow(direction: direction, bounds: bounds)
+          : await workspaces.previewMoveWindow(direction: direction, bounds: bounds)
+        var mutation = directional.result
+        guard let focusedAfter = mutation.workspaceState[workspace: name]?.focusedWindowID else {
+          throw WorkspaceMutationError.focusedWindowRequired(name)
+        }
+        let target = request.method == .windowFocus ? focusedAfter : directional.sourceWindowID
+        if request.method == .windowMove {
+          try await tileWorkspace(
+            mutation.workspaceState, named: name, inventory: snapshot.inventory)
+        }
+        try await geometry.focus(window: resolveWindow(target, in: snapshot.inventory.windows))
+        mutation.effectStatus = .verified
+        try await workspaces.commitFocus(mutation)
+        await publishWorkspaceMutation(
+          mutation, before: before,
+          reason: request.method == .windowFocus ? .workspaceFocused : .workspaceChanged)
+        result = json(WindowDirectionalResult(
+          workspace: name, windowId: directional.sourceWindowID,
+          targetWindowId: directional.targetWindowID, direction: params.direction,
+          effectStatus: .verified
+        ))
       case .windowManage, .windowUnmanage:
         let params = try decodeParams(WindowManagementParams.self, from: .object(request.params))
         guard
@@ -1605,6 +1642,15 @@ actor DaemonHandler: WebSocketRequestHandler {
     return ids[(index + 1) % ids.count]
   }
 
+  private func workspaceDirection(_ direction: WMProtocol.WindowDirection) -> WMWorkspace.WindowDirection {
+    switch direction {
+    case .left: .left
+    case .down: .down
+    case .up: .up
+    case .right: .right
+    }
+  }
+
   private func validateWindows(_ ids: [String], inventory: InventorySnapshot) throws {
     let known = Set(inventory.windows.map(\.id))
     if let missing = ids.first(where: { !known.contains($0) }) {
@@ -2182,6 +2228,16 @@ actor DaemonHandler: WebSocketRequestHandler {
         retryable: false)
     case .duplicateWindowSelection(let id):
       .init(code: .invalidParams, message: "duplicate window selection: \(id)", retryable: false)
+    case .focusedWorkspaceRequired:
+      .init(code: .workspaceNotFound, message: "no focused workspace is available", retryable: false)
+    case .focusedWindowRequired(let workspace):
+      .init(code: .windowNotFound, message: "workspace \(workspace) has no focused window", retryable: false)
+    case .bspWorkspaceRequired(let workspace):
+      .init(code: .workspaceConflict, message: "workspace \(workspace) is floating", retryable: false)
+    case .directionalTargetNotFound(let id, let direction):
+      .init(
+        code: .workspaceConflict,
+        message: "window \(id) has no target to the \(direction.rawValue)", retryable: false)
     case .invalidState(let issues):
       .init(
         code: .invalidWorkspaceState, message: "workspace invariant violation", retryable: false,
@@ -2242,7 +2298,7 @@ private enum DaemonLifecycleRequestError: Error { case permissionDenied }
 extension WMProtocol.Method {
   fileprivate var isMutation: Bool {
     switch self {
-    case .windowManage, .windowUnmanage, .windowFrameSet, .workspaceFocus, .workspaceMoveWindow,
+    case .windowManage, .windowUnmanage, .windowFocus, .windowMove, .windowFrameSet, .workspaceFocus, .workspaceMoveWindow,
       .workspaceMoveWindowBulk, .workspaceMoveDisplay, .workspaceSetMode,
       .uncooperativeWindowPolicySet, .geometryPolicySet, .inventoryRefresh,
       .configurationReload, .commandBatch, .daemonPause, .daemonResume, .debugAXFrameSet,

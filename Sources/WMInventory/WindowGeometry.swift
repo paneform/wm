@@ -151,6 +151,17 @@ public struct WindowGeometrySetOutcome: Equatable, Sendable {
   }
 }
 
+public protocol WindowGeometryEffects: Sendable {
+  func reconcile(windows: [NormalizedWindow]) async
+  func evict(lifetimes: Set<WindowLifetime>) async
+  func get(window: NormalizedWindow) async throws -> WindowFrameGetResult
+  func set(window: NormalizedWindow, params: WindowFrameSetParams) async throws -> WindowFrameSetResult
+  func setGeometry(window: NormalizedWindow, request: WindowGeometrySetRequest) async throws -> WindowGeometrySetOutcome
+  func focus(window: NormalizedWindow) async throws
+  func fit(window: NormalizedWindow, within frame: InventoryRect) async throws -> InventoryRect
+  func park(window: NormalizedWindow, frame: InventoryRect) async throws -> InventoryRect
+}
+
 public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
   private let adapter: Adapter
   private let now: @Sendable () -> Date
@@ -512,6 +523,8 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
     }
   }
 }
+
+extension WindowGeometryService: WindowGeometryEffects {}
 
 extension WindowGeometryStrategy {
   fileprivate static let all: [Self] = [

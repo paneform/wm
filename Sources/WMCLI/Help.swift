@@ -44,6 +44,10 @@ COMMANDS
   window                       Inspect and manage windows.
     list                       List known windows.
       --url URL                Connect to a WebSocket URL.
+    focus DIRECTION            Focus and raise the nearest BSP window.
+    move DIRECTION             Swap the focused BSP window spatially and retile.
+      DIRECTION                left, down, up, or right.
+      --url URL                Connect to a WebSocket URL.
 
   debug                        Bypass normal window-management behavior.
     ax focus WINDOW_ID         Focus and raise a window directly through AX.

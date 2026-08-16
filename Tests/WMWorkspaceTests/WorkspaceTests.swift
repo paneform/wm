@@ -168,6 +168,51 @@ import Testing
   #expect(state[workspace: "source"]?.bsp == tree)
 }
 
+@Test func directionalFocusUsesSpatialCentersAndRemembersTarget() throws {
+  var state = directionalState()
+  let bounds = WorkspaceLayoutRect(x: 0, y: 0, width: 1200, height: 800)
+
+  let result = try state.focusWindow(direction: .down, bounds: bounds)
+
+  #expect(result.result.modifiedWorkspaces == ["grid"])
+  #expect(result.targetWindowID == "bottom-right")
+  #expect(state[workspace: "grid"]?.focusedWindowID == "bottom-right")
+  #expect(state[workspace: "grid"]?.bsp.root?.windowIDs == ["left", "top-right", "bottom-right"])
+}
+
+@Test func directionalMoveSwapsLeavesAndMembershipOrderDeterministically() throws {
+  var state = directionalState()
+  let bounds = WorkspaceLayoutRect(x: 0, y: 0, width: 1200, height: 800)
+
+  _ = try state.moveWindow(direction: .left, bounds: bounds)
+
+  #expect(state[workspace: "grid"]?.focusedWindowID == "top-right")
+  #expect(state[workspace: "grid"]?.bsp.root?.windowIDs == ["top-right", "left", "bottom-right"])
+  #expect(state[workspace: "grid"]?.windowIDs == ["top-right", "left", "bottom-right"])
+}
+
+@Test func directionalCommandsRejectEdgesFloatingAndMissingFocusAtomically() throws {
+  let bounds = WorkspaceLayoutRect(x: 0, y: 0, width: 1200, height: 800)
+  var edge = directionalState()
+  let original = edge
+  #expect(throws: WorkspaceMutationError.directionalTargetNotFound(windowID: "top-right", direction: .up)) {
+    try edge.focusWindow(direction: .up, bounds: bounds)
+  }
+  #expect(edge == original)
+
+  var floating = directionalState()
+  floating.workspaces[0].mode = .floating
+  #expect(throws: WorkspaceMutationError.bspWorkspaceRequired("grid")) {
+    try floating.moveWindow(direction: .left, bounds: bounds)
+  }
+
+  var missing = directionalState()
+  missing.workspaces[0].focusedWindowID = nil
+  #expect(throws: WorkspaceMutationError.focusedWindowRequired("grid")) {
+    try missing.focusWindow(direction: .left, bounds: bounds)
+  }
+}
+
 @Test func validationReportsTreeAndDisplayViolations() {
   let state = WorkspaceState(
     workspaces: [
@@ -497,6 +542,24 @@ private func sampleState() -> WorkspaceState {
     ],
     focusedWorkspaceName: "source",
     displays: ["d": .init(visibleWorkspaceName: "source")]
+  )
+}
+
+private func directionalState() -> WorkspaceState {
+  let root = BSPNode.split(
+    axis: .vertical, ratio: 0.5,
+    first: .leaf(windowID: "left"),
+    second: .split(
+      axis: .horizontal, ratio: 0.5,
+      first: .leaf(windowID: "top-right"), second: .leaf(windowID: "bottom-right")
+    )
+  )
+  return WorkspaceState(
+    workspaces: [.init(
+      name: "grid", origin: .configured, displayID: "d", visible: true, focused: true,
+      windowIDs: root.windowIDs, focusedWindowID: "top-right", bsp: .init(root: root)
+    )],
+    focusedWorkspaceName: "grid", displays: ["d": .init(visibleWorkspaceName: "grid")]
   )
 }
 

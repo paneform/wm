@@ -6,10 +6,65 @@ public enum WorkspaceMutationError: Error, Equatable, Sendable {
     case duplicateWindowSelection(WorkspaceWindowID)
     case windowNotFound(WorkspaceWindowID)
     case windowAlreadyInDestination(windowID: WorkspaceWindowID, workspace: WorkspaceName)
+    case focusedWorkspaceRequired
+    case focusedWindowRequired(WorkspaceName)
+    case bspWorkspaceRequired(WorkspaceName)
+    case directionalTargetNotFound(windowID: WorkspaceWindowID, direction: WindowDirection)
     case invalidState([WorkspaceValidationIssue])
 }
 
 extension WorkspaceState {
+    public mutating func focusWindow(
+        direction: WindowDirection, bounds: WorkspaceLayoutRect
+    ) throws -> DirectionalWindowMutation {
+        try directionalMutation(direction: direction, bounds: bounds, move: false)
+    }
+
+    public mutating func moveWindow(
+        direction: WindowDirection, bounds: WorkspaceLayoutRect
+    ) throws -> DirectionalWindowMutation {
+        try directionalMutation(direction: direction, bounds: bounds, move: true)
+    }
+
+    private mutating func directionalMutation(
+        direction: WindowDirection, bounds: WorkspaceLayoutRect, move: Bool
+    ) throws -> DirectionalWindowMutation {
+        try mutate { state in
+            guard let name = state.focusedWorkspaceName,
+                  let index = state.index(of: name) else {
+                throw WorkspaceMutationError.focusedWorkspaceRequired
+            }
+            let workspace = state.workspaces[index]
+            guard workspace.mode == .bsp else {
+                throw WorkspaceMutationError.bspWorkspaceRequired(name)
+            }
+            guard let focused = workspace.focusedWindowID else {
+                throw WorkspaceMutationError.focusedWindowRequired(name)
+            }
+            let frames = workspace.layout(in: bounds)
+            guard let target = directionalTarget(
+                from: focused, direction: direction, frames: frames
+            ) else {
+                throw WorkspaceMutationError.directionalTargetNotFound(
+                    windowID: focused, direction: direction
+                )
+            }
+            if move {
+                state.workspaces[index].bsp.root = workspace.bsp.root?.swapping(focused, with: target)
+                if let first = state.workspaces[index].windowIDs.firstIndex(of: focused),
+                   let second = state.workspaces[index].windowIDs.firstIndex(of: target) {
+                    state.workspaces[index].windowIDs.swapAt(first, second)
+                }
+            } else {
+                state.workspaces[index].focusedWindowID = target
+            }
+            return (DirectionalWindowMutation(
+                result: WorkspaceMutationResult(workspaceState: state, modifiedWorkspaces: [name]),
+                sourceWindowID: focused, targetWindowID: target
+            ), true)
+        }
+    }
+
     public mutating func focusWorkspace(
         named name: WorkspaceName,
         displayID: WorkspaceDisplayID? = nil
@@ -228,6 +283,48 @@ extension WorkspaceState {
     }
 }
 
+private func directionalTarget(
+    from focused: WorkspaceWindowID, direction: WindowDirection,
+    frames: [WorkspaceWindowID: WorkspaceLayoutRect]
+) -> WorkspaceWindowID? {
+    guard let source = frames[focused] else { return nil }
+    let sourceX = source.x + source.width / 2
+    let sourceY = source.y + source.height / 2
+    return frames.compactMap { id, frame -> (String, Double, Double)? in
+        guard id != focused else { return nil }
+        let x = frame.x + frame.width / 2
+        let y = frame.y + frame.height / 2
+        let primary: Double
+        let overlap: Double
+        switch direction {
+        case .left:
+            primary = source.x - (frame.x + frame.width)
+            overlap = min(source.y + source.height, frame.y + frame.height) - max(source.y, frame.y)
+        case .right:
+            primary = frame.x - (source.x + source.width)
+            overlap = min(source.y + source.height, frame.y + frame.height) - max(source.y, frame.y)
+        case .up:
+            primary = source.y - (frame.y + frame.height)
+            overlap = min(source.x + source.width, frame.x + frame.width) - max(source.x, frame.x)
+        case .down:
+            primary = frame.y - (source.y + source.height)
+            overlap = min(source.x + source.width, frame.x + frame.width) - max(source.x, frame.x)
+        }
+        let centerPrimary: Double
+        switch direction {
+        case .left: centerPrimary = sourceX - x
+        case .right: centerPrimary = x - sourceX
+        case .up: centerPrimary = sourceY - y
+        case .down: centerPrimary = y - sourceY
+        }
+        return centerPrimary > 0 ? (id, max(0, primary), overlap > 0 ? 0 : -overlap) : nil
+    }.min {
+        if $0.2 != $1.2 { return $0.2 < $1.2 }
+        if $0.1 != $1.1 { return $0.1 < $1.1 }
+        return $0.0 < $1.0
+    }?.0
+}
+
 private extension WorkspaceState {
     mutating func restoreReconnectedDisplays(_ connected: Set<WorkspaceDisplayID>) {
         for displayID in disconnectedDisplays.keys.sorted() where connected.contains(displayID) {
@@ -300,6 +397,9 @@ private extension WorkspaceState {
         if var mutation = result as? WorkspaceMutationResult {
             mutation.workspaceState = candidate
             result = mutation as! T
+        } else if var directional = result as? DirectionalWindowMutation {
+            directional.result.workspaceState = candidate
+            result = directional as! T
         }
         if changed { self = candidate }
         return result

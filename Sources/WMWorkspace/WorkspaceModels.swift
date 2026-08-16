@@ -28,6 +28,25 @@ public enum BSPAxis: String, Codable, CaseIterable, Sendable {
     case horizontal
 }
 
+public enum WindowDirection: String, Codable, CaseIterable, Sendable {
+    case left, down, up, right
+}
+
+public struct DirectionalWindowMutation: Equatable, Sendable {
+    public var result: WorkspaceMutationResult
+    public var sourceWindowID: WorkspaceWindowID
+    public var targetWindowID: WorkspaceWindowID
+
+    public init(
+        result: WorkspaceMutationResult, sourceWindowID: WorkspaceWindowID,
+        targetWindowID: WorkspaceWindowID
+    ) {
+        self.result = result
+        self.sourceWindowID = sourceWindowID
+        self.targetWindowID = targetWindowID
+    }
+}
+
 public struct WorkspaceMargin: Codable, Equatable, Sendable {
     public var top: Double
     public var right: Double
@@ -96,6 +115,21 @@ public indirect enum BSPNode: Equatable, Sendable {
                 return .split(axis: axis, ratio: ratio, first: first, second: remaining)
             }
             return self
+        }
+    }
+
+    public func swapping(_ firstWindowID: WorkspaceWindowID, with secondWindowID: WorkspaceWindowID) -> BSPNode {
+        switch self {
+        case .leaf(let windowID):
+            if windowID == firstWindowID { return .leaf(windowID: secondWindowID) }
+            if windowID == secondWindowID { return .leaf(windowID: firstWindowID) }
+            return self
+        case .split(let axis, let ratio, let first, let second):
+            return .split(
+                axis: axis, ratio: ratio,
+                first: first.swapping(firstWindowID, with: secondWindowID),
+                second: second.swapping(firstWindowID, with: secondWindowID)
+            )
         }
     }
 }

@@ -62,6 +62,20 @@ actor WorkspaceController {
         return try candidate.setMode(of: name, to: mode)
     }
 
+    func previewFocusWindow(
+        direction: WMWorkspace.WindowDirection, bounds: WorkspaceLayoutRect
+    ) throws -> WMWorkspace.DirectionalWindowMutation {
+        var candidate = state
+        return try candidate.focusWindow(direction: direction, bounds: bounds)
+    }
+
+    func previewMoveWindow(
+        direction: WMWorkspace.WindowDirection, bounds: WorkspaceLayoutRect
+    ) throws -> WMWorkspace.DirectionalWindowMutation {
+        var candidate = state
+        return try candidate.moveWindow(direction: direction, bounds: bounds)
+    }
+
     func previewSetUncooperativePolicy(
         _ name: String, policy: WMWorkspace.UncooperativeWindowPolicy
     ) throws -> WMWorkspace.WorkspaceMutationResult {

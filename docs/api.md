@@ -122,6 +122,16 @@ with the configured `greedy`, `stack`, `overlap`, or `reject` policy. A higher o
 new observed constraint is learned after engine retries, then the workspace is
 replanned.
 
+### Directional Window Commands
+
+`window.focus` and `window.move` accept `{"direction":"left|down|up|right"}`.
+Both target the focused BSP workspace. Focus chooses and verifies the nearest
+window in that spatial half-plane, then persists the remembered focused window.
+Move swaps the focused and target BSP leaves, preserves split topology/ratios,
+verifies the complete retile and exact raised focus, then commits and emits a
+workspace event. Floating workspaces, absent focus, edge directions without a
+target, stale inventory, and failed effects return errors without committing.
+
 ### Request
 
 ```json
@@ -437,6 +447,8 @@ Returns:
 | `health.get` | `{}` | Health |
 | `display.list` | `{}` | `{ "displays": [...] }` |
 | `window.list` | `{}` | `{ "windows": [...] }` |
+| `window.focus` | `{ "direction": "left" }` | Direction, source/target IDs, workspace, verified status |
+| `window.move` | `{ "direction": "left" }` | Direction, source/target IDs, workspace, verified status |
 | `diagnostics.inventory` | `{}` | Diagnostic inventory |
 | `inventory.refresh` | `{}` | New observed/user-facing state after scan |
 | `daemon.ping` | `{}` | Session/version/readiness data |
@@ -496,6 +508,8 @@ wm health [--url URL]
 wm display list [--verbose] [--url URL]
 wm monitor list [--verbose] [--url URL] # CLI alias
 wm window list [--url URL]
+wm window focus left|down|up|right [--url URL]
+wm window move left|down|up|right [--url URL]
 wm diagnostics inventory [--url URL]
 wm inventory refresh [--url URL]
 wm subscribe [TOPIC ...] [--projection delta|snapshot|invalidation]

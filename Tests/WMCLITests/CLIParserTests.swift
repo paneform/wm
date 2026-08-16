@@ -35,6 +35,8 @@ import WMConfiguration
         (["window", "list"], "window.list"),
         (["window", "manage", "window:1"], "window.manage"),
         (["window", "unmanage", "window:1"], "window.unmanage"),
+        (["window", "focus", "left"], "window.focus"),
+        (["window", "move", "down"], "window.move"),
         (["observe", "window"], "observe.window"),
         (["observe", "workspace", "T"], "observe.workspace"),
         (["diagnostics", "inventory"], "diagnostics.inventory"),
@@ -52,6 +54,17 @@ import WMConfiguration
         #expect(method == expected)
         #expect(url == defaultWMWebSocketURL)
     }
+}
+
+@Test func parsesDirectionalWindowCommands() throws {
+    #expect(try CLIParser().parse(["window", "focus", "left"]) == .request(
+        method: "window.focus", params: ["direction": .string("left")], url: defaultWMWebSocketURL
+    ))
+    #expect(try CLIParser().parse(["window", "move", "right", "--url", "ws://localhost:9000/v1"]) == .request(
+        method: "window.move", params: ["direction": .string("right")], url: URL(string: "ws://localhost:9000/v1")!
+    ))
+    #expect(throws: CLIParseError.self) { try CLIParser().parse(["window", "focus", "next"]) }
+    #expect(throws: CLIParseError.self) { try CLIParser().parse(["window", "move"]) }
 }
 
 @Test func parsesConfigurationCommandsWithWebSocketParity() throws {

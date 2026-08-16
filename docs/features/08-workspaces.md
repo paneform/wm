@@ -201,6 +201,28 @@ Params:
 Changing the focused workspace mode reconciles its platform geometry before the
 mode state commits. Parked workspaces update intent without moving windows.
 
+### `window.focus`
+
+Params: `{"direction":"left"}` where direction is `left`, `down`, `up`, or
+`right`. The command operates on the focused BSP workspace and its remembered
+focused window. It selects the nearest leaf whose tile center lies in the
+requested half-plane, preferring candidates whose perpendicular tile spans
+overlap, then primary-axis distance, perpendicular gap, and window ID. The daemon raises and focuses that exact window through
+the verified effect service before persisting `focused_window_id` and publishing
+`workspace.focused`. No target at an edge is an error; there is no wrapping.
+
+### `window.move`
+
+Params use the same direction. The focused leaf swaps identities with the same
+spatial target selected by `window.focus`; split axes and ratios are preserved,
+so the focused window occupies the target tile and the target occupies its old
+tile. Membership order swaps consistently with leaf order. The daemon applies
+and verifies every resulting BSP frame, raises and verifies the moved window,
+then atomically persists the tree and emits `workspace.changed`. Any geometry or
+focus failure restores platform frames and leaves persisted intent unchanged.
+Floating workspaces, missing focused workspaces/windows, and missing directional
+targets return explicit errors.
+
 ## Result Envelope
 
 Every workspace mutation returns:
@@ -225,6 +247,8 @@ wm workspace move-window NAME [WINDOW_ID ...]
 wm workspace move NAME [DISPLAY_ID|--cg ID|--ns NUMBER|--name NAME]
 wm workspace move next [NAME]
 wm workspace mode NAME bsp|floating
+wm window focus left|down|up|right
+wm window move left|down|up|right
 wm uncooperative-window-policy greedy|stack|overlap|reject
 wm workspace uncooperative-window-policy NAME greedy|stack|overlap|reject
 ```

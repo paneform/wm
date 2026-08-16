@@ -250,9 +250,21 @@ public struct CLIParser: Sendable {
         switch child {
         case "list": return try request("window.list", Array(arguments.dropFirst()))
         case "manage", "unmanage": return try parseWindowManagement(child, Array(arguments.dropFirst()))
+        case "focus", "move": return try parseWindowDirectional(child, Array(arguments.dropFirst()))
         case "frame": return try parseWindowFrame(Array(arguments.dropFirst()))
         default: throw CLIParseError("unknown window command: \(child)")
         }
+    }
+
+    private func parseWindowDirectional(_ operation: String, _ arguments: [String]) throws -> CLICommand {
+        guard let direction = arguments.first,
+              ["left", "down", "up", "right"].contains(direction) else {
+            throw CLIParseError("expected 'window \(operation) left|down|up|right'")
+        }
+        return .request(
+            method: "window.\(operation)", params: ["direction": .string(direction)],
+            url: try parseURLOnly(Array(arguments.dropFirst()))
+        )
     }
 
     private func parseDebug(_ arguments: [String]) throws -> CLICommand {
