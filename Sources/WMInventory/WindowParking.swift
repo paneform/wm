@@ -10,10 +10,25 @@ public struct WindowParkingPlan: Sendable {
     public let targetFrame: InventoryRect
 
     public init?(displayFrame: InventoryRect, otherDisplayFrames: [InventoryRect], windowFrame: InventoryRect, offset: Double = 100) {
-        guard let corner = Self.preferredCorner(on: displayFrame, avoiding: otherDisplayFrames, window: windowFrame) else { return nil }
+        guard let corner = Self.availableCorners(on: displayFrame, avoiding: otherDisplayFrames, window: windowFrame).first else { return nil }
         self.corner = corner
         self.displayFrame = displayFrame
         targetFrame = Self.target(for: corner, display: displayFrame, window: windowFrame, offset: offset)
+    }
+
+    public static func alternatives(
+        displayFrame: InventoryRect, otherDisplayFrames: [InventoryRect], windowFrame: InventoryRect,
+        offset: Double = 100
+    ) -> [Self] {
+        availableCorners(on: displayFrame, avoiding: otherDisplayFrames, window: windowFrame).map {
+            Self(corner: $0, displayFrame: displayFrame, targetFrame: target(for: $0, display: displayFrame, window: windowFrame, offset: offset))
+        }
+    }
+
+    private init(corner: ParkingCorner, displayFrame: InventoryRect, targetFrame: InventoryRect) {
+        self.corner = corner
+        self.displayFrame = displayFrame
+        self.targetFrame = targetFrame
     }
 
     public func accepts(_ observed: InventoryRect, tolerance: Double = 40) -> Bool {
@@ -21,18 +36,18 @@ public struct WindowParkingPlan: Sendable {
               abs(observed.height - targetFrame.height) <= tolerance else { return false }
         switch corner {
         case .bottomLeft:
-            return observed.x <= displayFrame.x + tolerance && observed.y + observed.height >= displayFrame.maxY - tolerance
+            return observed.maxX <= displayFrame.x + tolerance && observed.y >= displayFrame.maxY - tolerance
         case .bottomRight:
-            return observed.x + observed.width >= displayFrame.maxX - tolerance && observed.y + observed.height >= displayFrame.maxY - tolerance
+            return observed.x >= displayFrame.maxX - tolerance && observed.y >= displayFrame.maxY - tolerance
         case .topLeft:
-            return observed.x <= displayFrame.x + tolerance && observed.y <= displayFrame.y + tolerance
+            return observed.maxX <= displayFrame.x + tolerance && observed.maxY <= displayFrame.y + tolerance
         case .topRight:
-            return observed.x + observed.width >= displayFrame.maxX - tolerance && observed.y <= displayFrame.y + tolerance
+            return observed.x >= displayFrame.maxX - tolerance && observed.maxY <= displayFrame.y + tolerance
         }
     }
 
-    private static func preferredCorner(on display: InventoryRect, avoiding others: [InventoryRect], window: InventoryRect) -> ParkingCorner? {
-        ParkingCorner.allCases.first { corner in
+    private static func availableCorners(on display: InventoryRect, avoiding others: [InventoryRect], window: InventoryRect) -> [ParkingCorner] {
+        ParkingCorner.allCases.filter { corner in
             !others.contains { $0.intersects(clampedFrame(for: corner, display: display, window: window)) }
         }
     }
@@ -69,11 +84,7 @@ private extension InventoryRect {
 }
 
 public func axDisplayFrames(_ displays: [DisplayObservation]) -> [String: InventoryRect] {
-    let primaryTop = displays.first(where: \.isPrimary).map { $0.frame.y + $0.frame.height } ?? 0
-    return Dictionary(uniqueKeysWithValues: displays.map { display in
-        let frame = display.frame
-        return (display.id, InventoryRect(x: frame.x, y: primaryTop - frame.y - frame.height, width: frame.width, height: frame.height))
-    })
+    DisplayTopologySnapshot(displays: displays).axFrames
 }
 
 public func isCenteredOnDisplay(_ frame: InventoryRect, displays: [InventoryRect]) -> Bool {

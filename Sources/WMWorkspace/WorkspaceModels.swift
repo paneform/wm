@@ -14,6 +14,15 @@ public enum WorkspaceMode: String, Codable, CaseIterable, Sendable {
     case floating
 }
 
+public enum UncooperativeWindowPolicy: String, Codable, CaseIterable, Sendable {
+    case greedy
+    case stack
+    case overlap
+    case reject
+}
+
+public enum GeometryProfileMode: String, Codable, CaseIterable, Sendable { case store, infer, optimistic }
+
 public enum BSPAxis: String, Codable, CaseIterable, Sendable {
     case vertical
     case horizontal
@@ -145,6 +154,9 @@ public struct Workspace: Codable, Equatable, Sendable {
     public var margin: WorkspaceMargin
     public var gap: Double
     public var resizeIncrement: Double
+    public var uncooperativeWindowPolicy: UncooperativeWindowPolicy
+    public var maxGeometryRetries: Int
+    public var geometryProfileMode: GeometryProfileMode
     public var windowIDs: [WorkspaceWindowID]
     public var focusedWindowID: WorkspaceWindowID?
     public var bsp: BSPTree
@@ -160,6 +172,9 @@ public struct Workspace: Codable, Equatable, Sendable {
         margin: WorkspaceMargin = .init(),
         gap: Double = 8,
         resizeIncrement: Double = 0.05,
+        uncooperativeWindowPolicy: UncooperativeWindowPolicy = .greedy,
+        maxGeometryRetries: Int = 5,
+        geometryProfileMode: GeometryProfileMode = .store,
         windowIDs: [WorkspaceWindowID] = [],
         focusedWindowID: WorkspaceWindowID? = nil,
         bsp: BSPTree = .init()
@@ -174,6 +189,9 @@ public struct Workspace: Codable, Equatable, Sendable {
         self.margin = margin
         self.gap = gap
         self.resizeIncrement = resizeIncrement
+        self.uncooperativeWindowPolicy = uncooperativeWindowPolicy
+        self.maxGeometryRetries = maxGeometryRetries
+        self.geometryProfileMode = geometryProfileMode
         self.windowIDs = windowIDs
         self.focusedWindowID = focusedWindowID
         self.bsp = bsp
@@ -184,6 +202,9 @@ public struct Workspace: Codable, Equatable, Sendable {
         case displayID = "display_id"
         case preferredDisplayID = "preferred_display_id"
         case resizeIncrement = "resize_increment"
+        case uncooperativeWindowPolicy = "uncooperative_window_policy"
+        case maxGeometryRetries = "max_geometry_retries"
+        case geometryProfileMode = "geometry_profile_mode"
         case windowIDs = "window_ids"
         case focusedWindowID = "focused_window_id"
     }
@@ -201,6 +222,22 @@ public struct DisplayWorkspaceState: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case visibleWorkspaceName = "visible_workspace_name"
         case previousWorkspaceName = "previous_workspace_name"
+    }
+}
+
+public struct DisconnectedDisplayState: Codable, Equatable, Sendable {
+    public var workspaceNames: [WorkspaceName]
+    public var visibleWorkspaceName: WorkspaceName?
+    public var previousWorkspaceName: WorkspaceName?
+
+    public init(
+        workspaceNames: [WorkspaceName],
+        visibleWorkspaceName: WorkspaceName? = nil,
+        previousWorkspaceName: WorkspaceName? = nil
+    ) {
+        self.workspaceNames = workspaceNames
+        self.visibleWorkspaceName = visibleWorkspaceName
+        self.previousWorkspaceName = previousWorkspaceName
     }
 }
 
@@ -224,19 +261,22 @@ public struct WorkspaceState: Codable, Equatable, Sendable {
     public var displays: [WorkspaceDisplayID: DisplayWorkspaceState]
     public var runtimeDisplayAssignments: [WorkspaceName: WorkspaceDisplayID]
     public var parkedWindowFrames: [WorkspaceWindowID: ParkedWindowFrame]
+    public var disconnectedDisplays: [WorkspaceDisplayID: DisconnectedDisplayState]
 
     public init(
         workspaces: [Workspace] = [],
         focusedWorkspaceName: WorkspaceName? = nil,
         displays: [WorkspaceDisplayID: DisplayWorkspaceState] = [:],
         runtimeDisplayAssignments: [WorkspaceName: WorkspaceDisplayID] = [:],
-        parkedWindowFrames: [WorkspaceWindowID: ParkedWindowFrame] = [:]
+        parkedWindowFrames: [WorkspaceWindowID: ParkedWindowFrame] = [:],
+        disconnectedDisplays: [WorkspaceDisplayID: DisconnectedDisplayState] = [:]
     ) {
         self.workspaces = workspaces
         self.focusedWorkspaceName = focusedWorkspaceName
         self.displays = displays
         self.runtimeDisplayAssignments = runtimeDisplayAssignments
         self.parkedWindowFrames = parkedWindowFrames
+        self.disconnectedDisplays = disconnectedDisplays
     }
 
     public subscript(workspace name: WorkspaceName) -> Workspace? {
@@ -269,6 +309,7 @@ public struct WorkspaceState: Codable, Equatable, Sendable {
         case focusedWorkspaceName = "focused_workspace_name"
         case runtimeDisplayAssignments = "runtime_display_assignments"
         case parkedWindowFrames = "parked_window_frames"
+        case disconnectedDisplays = "disconnected_displays"
     }
 
     public init(from decoder: Decoder) throws {
@@ -278,6 +319,7 @@ public struct WorkspaceState: Codable, Equatable, Sendable {
         displays = try container.decode([WorkspaceDisplayID: DisplayWorkspaceState].self, forKey: .displays)
         runtimeDisplayAssignments = try container.decode([WorkspaceName: WorkspaceDisplayID].self, forKey: .runtimeDisplayAssignments)
         parkedWindowFrames = try container.decodeIfPresent([WorkspaceWindowID: ParkedWindowFrame].self, forKey: .parkedWindowFrames) ?? [:]
+        disconnectedDisplays = try container.decodeIfPresent([WorkspaceDisplayID: DisconnectedDisplayState].self, forKey: .disconnectedDisplays) ?? [:]
     }
 }
 

@@ -19,6 +19,7 @@ off-screen workspace parking.
   "visible": true,
   "focused": true,
   "mode": "bsp",
+  "uncooperative_window_policy": "greedy",
   "margin": {"top": 0, "right": 0, "bottom": 0, "left": 0},
   "gap": 8,
   "resize_increment": 0.05,
@@ -33,6 +34,8 @@ off-screen workspace parking.
 Origins: `configured`, `runtime`.
 
 Modes: `bsp`, `floating`.
+
+Uncooperative-window policies: `greedy`, `stack`, `overlap`, `reject`.
 
 Exactly one workspace may be globally focused. At most one workspace per
 display may be visible. Every workspace has a display assignment.
@@ -195,12 +198,50 @@ Workspace mutations report `verified` after platform reconciliation succeeds.
 wm workspace list
 wm workspace focus NAME [--display DISPLAY_ID]
 wm workspace move-window NAME [WINDOW_ID ...]
-wm workspace move-display NAME DISPLAY_ID
+wm workspace move NAME [DISPLAY_ID|--cg ID|--ns NUMBER|--name NAME]
+wm workspace move next [NAME]
 wm workspace mode NAME bsp|floating
+wm uncooperative-window-policy greedy|stack|overlap|reject
+wm workspace uncooperative-window-policy NAME greedy|stack|overlap|reject
 ```
 
 `move-window` with no IDs targets the currently observed focused window. The
 handler resolves that default before applying workspace intent.
+
+Display selectors accept canonical IDs, `--cg`/`--core-graphics-display-id`,
+`--ns`/`--ns-screen-number`, and exact `--name` values. Configuration accepts
+the same selectors in `preferred_display`, for example
+`{"core_graphics_display_id":"2"}`, `{"ns_screen_number":"2"}`, or
+`{"name":"DELL C3422WE"}`. A canonical display ID remains valid as a string.
+
+Per-display layout overrides use a `displays` array. They apply after global and
+workspace settings to every workspace currently assigned to the matching display:
+
+```jsonc
+"displays": [
+  {
+    "display": {"name": "DELL C3422WE"},
+    "margin": {"top": 12, "right": 12, "bottom": 12, "left": 12},
+    "gap": 8
+  }
+]
+```
+
+`defaults.uncooperative_window_policy` defaults to `greedy`. A workspace's
+`uncooperative_window_policy` overrides that global value. Runtime global and
+workspace commands override configuration until daemon restart or configuration
+reload; they do not write durable cooperation profiles.
+
+Policy behavior:
+
+- `greedy` reserves known minimum size for constrained windows and takes the
+  required space from BSP peers.
+- `stack` gives every window the workspace content frame; the focused window is
+  applied last/front where focus ordering permits.
+- `overlap` starts from cooperative BSP tiles, expands constrained windows to
+  known minimums, clamps them fully onscreen, and permits overlap.
+- `reject` fails reconciliation, letting the existing transaction rollback
+  restore source frames and intent.
 
 ## Events
 

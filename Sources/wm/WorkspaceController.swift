@@ -7,19 +7,27 @@ import WMWorkspace
 actor WorkspaceController {
     private let store: WorkspaceStateStore<WMWorkspace.WorkspaceState>
     private(set) var state: WMWorkspace.WorkspaceState
+    let recoveredFromInvalidPersistedState: Bool
 
     init(buildVersion: String, stateURL: URL = WorkspaceStatePath.resolve()) throws {
         store = WorkspaceStateStore(stateURL: stateURL, buildVersion: buildVersion) { try $0.validate() }
         switch try store.load() {
-        case .loaded(let loaded): state = loaded
-        case .absent: state = .init()
-        case .quarantined(let url): throw WorkspaceControllerError.invalidPersistedState(url)
+        case .loaded(let loaded):
+            state = loaded
+            recoveredFromInvalidPersistedState = false
+        case .absent:
+            state = .init()
+            recoveredFromInvalidPersistedState = false
+        case .quarantined:
+            state = .init()
+            recoveredFromInvalidPersistedState = true
         }
     }
 
     init(store: WorkspaceStateStore<WMWorkspace.WorkspaceState>, state: WMWorkspace.WorkspaceState) {
         self.store = store
         self.state = state
+        recoveredFromInvalidPersistedState = false
     }
 
     func snapshot() -> WMWorkspace.WorkspaceState { state }
@@ -54,6 +62,13 @@ actor WorkspaceController {
         return try candidate.setMode(of: name, to: mode)
     }
 
+    func previewSetUncooperativePolicy(
+        _ name: String, policy: WMWorkspace.UncooperativeWindowPolicy
+    ) throws -> WMWorkspace.WorkspaceMutationResult {
+        var candidate = state
+        return try candidate.setUncooperativeWindowPolicy(of: name, to: policy)
+    }
+
     func commitFocus(_ result: WMWorkspace.WorkspaceMutationResult) throws {
         guard result.workspaceState != state else { return }
         try store.save(result.workspaceState)
@@ -81,9 +96,10 @@ actor WorkspaceController {
     }
 
     func configuredState(
-        _ configuration: Configuration, defaultDisplayID: String, displays: [DisplayObservation]
+        _ configuration: Configuration, defaultDisplayID: String, displays: [DisplayObservation],
+        state source: WMWorkspace.WorkspaceState? = nil
     ) -> WMWorkspace.WorkspaceState {
-        var candidate = state
+        var candidate = source ?? state
         let configured = Dictionary(uniqueKeysWithValues: configuration.resolvedWorkspaces.map { ($0.name, $0.settings) })
         for name in configured.keys.sorted() where candidate[workspace: name] == nil {
             let settings = configured[name]!
@@ -114,6 +130,18 @@ actor WorkspaceController {
             )
             candidate.workspaces[index].gap = settings.gap ?? 0
             candidate.workspaces[index].resizeIncrement = settings.resizeIncrement ?? 10
+            candidate.workspaces[index].uncooperativeWindowPolicy = switch settings.uncooperativeWindowPolicy ?? .greedy {
+            case .greedy: .greedy
+            case .stack: .stack
+            case .overlap: .overlap
+            case .reject: .reject
+            }
+            candidate.workspaces[index].maxGeometryRetries = settings.maxGeometryRetries ?? 5
+            candidate.workspaces[index].geometryProfileMode = switch settings.geometryProfileMode ?? .store {
+            case .store: .store
+            case .infer: .infer
+            case .optimistic: .optimistic
+            }
         }
         return candidate
     }
@@ -140,8 +168,4 @@ actor WorkspaceController {
         }
         return result
     }
-}
-
-enum WorkspaceControllerError: Error, Equatable {
-    case invalidPersistedState(URL)
 }

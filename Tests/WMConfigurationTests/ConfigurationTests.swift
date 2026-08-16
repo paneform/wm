@@ -8,7 +8,7 @@ private let basic = #"{"workspaces":[{"name":"main"}]}"#
     let value = try ConfigurationParser.parse(#"""
     {
       // global layout
-      "defaults": { "mode": "floating", "margin": {"top":12,"right":12,"bottom":12,"left":12}, "gap": 7, "resize_increment": 4 },
+      "defaults": { "mode": "floating", "margin": {"top":12,"right":12,"bottom":12,"left":12}, "gap": 7, "resize_increment": 4, "uncooperative_window_policy":"overlap" },
       "workspaces": [
         { "name": "code", "gap": 2 }, /* local override */
         { "name": "web", "preferred_display": "external" }
@@ -18,8 +18,30 @@ private let basic = #"{"workspaces":[{"name":"main"}]}"#
     #expect(value.hotload)
     #expect(value.port == 17_832)
     let margin = WorkspaceMargins(top: 12, right: 12, bottom: 12, left: 12)
-    #expect(value.resolvedWorkspaces[0].settings == .init(mode: .floating, margin: margin, gap: 2, resizeIncrement: 4))
-    #expect(value.resolvedWorkspaces[1].settings == .init(preferredDisplay: .init(id: "external"), mode: .floating, margin: margin, gap: 7, resizeIncrement: 4))
+    #expect(value.resolvedWorkspaces[0].settings == .init(mode: .floating, margin: margin, gap: 2, resizeIncrement: 4, uncooperativeWindowPolicy: .overlap, maxGeometryRetries: 5, geometryProfileMode: .store))
+    #expect(value.resolvedWorkspaces[1].settings == .init(preferredDisplay: .init(id: "external"), mode: .floating, margin: margin, gap: 7, resizeIncrement: 4, uncooperativeWindowPolicy: .overlap, maxGeometryRetries: 5, geometryProfileMode: .store))
+}
+
+@Test func uncooperativePolicyDefaultsToGreedyAndWorkspaceOverridesGlobal() throws {
+    #expect(try ConfigurationParser.parse("{}").defaults.uncooperativeWindowPolicy == .greedy)
+    let value = try ConfigurationParser.parse(#"{"defaults":{"uncooperative_window_policy":"stack"},"workspaces":[{"name":"code","uncooperative_window_policy":"reject"},{"name":"web"}]}"#)
+    #expect(value.resolvedWorkspaces.map(\.settings.uncooperativeWindowPolicy) == [.reject, .stack])
+}
+
+@Test func adaptiveGeometryDefaultsAndWorkspaceOverridesResolve() throws {
+    let defaults = try ConfigurationParser.parse("{}").defaults
+    #expect(defaults.maxGeometryRetries == 5)
+    #expect(defaults.geometryProfileMode == .store)
+    let value = try ConfigurationParser.parse(#"{"defaults":{"max_geometry_retries":4,"geometry_profile_mode":"optimistic"},"workspaces":[{"name":"code","max_geometry_retries":2,"geometry_profile_mode":"infer"},{"name":"web"}]}"#)
+    #expect(value.resolvedWorkspaces.map(\.settings.maxGeometryRetries) == [2, 4])
+    #expect(value.resolvedWorkspaces.map(\.settings.geometryProfileMode) == [.infer, .optimistic])
+}
+
+@Test(arguments: [0, 6])
+func rejectsInvalidGeometryRetryCount(value: Int) {
+    #expect(throws: ConfigurationError.self) {
+        try ConfigurationParser.parse(#"{"defaults":{"max_geometry_retries":\#(value)}}"#)
+    }
 }
 
 @Test func displayAffinityAcceptsCanonicalAndSelectorForms() throws {
@@ -130,6 +152,10 @@ func rejectsSemanticErrors(source: String) {
 @Test func schemaDeclaresStrictRootAndDefaults() {
     #expect(ConfigurationParser.schema.contains(#""additionalProperties":false"#))
     #expect(ConfigurationParser.schema.contains(#""default":17832"#))
+    #expect(ConfigurationParser.schema.contains(#""uncooperative_window_policy""#))
+    #expect(ConfigurationParser.schema.contains(#"["greedy","stack","overlap","reject"]"#))
+    #expect(ConfigurationParser.schema.contains(#""max_geometry_retries""#))
+    #expect(ConfigurationParser.schema.contains(#"["store","infer","optimistic"]"#))
 }
 
 @Test func reloadIsAtomicAndPreservesRuntimeOverlay() async throws {
@@ -180,6 +206,12 @@ func rejectsSemanticErrors(source: String) {
     let value = try ConfigurationParser.parse(source)
     #expect(value == Configuration())
     #expect(source.contains(#""resize_increment": 10"#))
+    #expect(source.contains(#""uncooperative_window_policy": "greedy""#))
+    #expect(source.contains(#""max_geometry_retries": 5"#))
+    #expect(source.contains(#""geometry_profile_mode": "store""#))
+    #expect(source.contains(#"// "uncooperative_window_policy": "stack""#))
+    #expect(source.contains(#"// "uncooperative_window_policy": "overlap""#))
+    #expect(source.contains(#"// "uncooperative_window_policy": "reject""#))
     #expect(source.contains(#""top": 0"#))
     #expect(source.contains(#""right": 0"#))
     #expect(source.contains(#""bottom": 0"#))

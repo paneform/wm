@@ -132,11 +132,14 @@ public struct CLIParser: Sendable {
         case "resume": return try request("daemon.resume", rest)
         case "state": return try parseState(rest)
         case "health": return try request("health.get", rest)
-        case "display": return try nestedRequest("display", child: "list", method: "display.list", rest)
-        case "monitor": return try nestedRequest("monitor", child: "list", method: "display.list", rest)
+        case "display": return try parseDisplay(rest, command: "display")
+        case "monitor": return try parseDisplay(rest, command: "monitor")
         case "window": return try parseWindow(rest)
+        case "debug": return try parseDebug(rest)
         case "observe": return try parseObserve(rest)
         case "workspace": return try parseWorkspace(rest)
+        case "uncooperative-window-policy": return try parseUncooperativeWindowPolicy(rest)
+        case "geometry-policy": return try parseGeometryPolicy(rest)
         case "diagnostics": return try nestedRequest("diagnostics", child: "inventory", method: "diagnostics.inventory", rest)
         case "inventory": return try nestedRequest("inventory", child: "refresh", method: "inventory.refresh", rest)
         case "config", "configuration": return try parseConfiguration(rest)
@@ -252,6 +255,77 @@ public struct CLIParser: Sendable {
         }
     }
 
+    private func parseDebug(_ arguments: [String]) throws -> CLICommand {
+        guard let target = arguments.first else { throw CLIParseError("expected 'debug ax' or 'debug engine'") }
+        switch target {
+        case "ax": return try parseDebugAX(Array(arguments.dropFirst()))
+        case "engine": return try parseDebugEngine(Array(arguments.dropFirst()))
+        default: throw CLIParseError("expected 'debug ax' or 'debug engine'")
+        }
+    }
+
+    private func parseDebugAX(_ arguments: [String]) throws -> CLICommand {
+        if arguments.first == "focus" {
+            guard arguments.count >= 2, !arguments[1].isEmpty else { throw CLIParseError("missing window ID") }
+            return .request(
+                method: "debug.ax.focus", params: ["window_id": .string(arguments[1])],
+                url: try parseURLOnly(Array(arguments.dropFirst(2)))
+            )
+        }
+        guard arguments.first == "frame", arguments.count >= 3 else {
+            throw CLIParseError("expected 'debug ax focus WINDOW_ID' or 'debug ax frame get|set WINDOW_ID'")
+        }
+        let operation = arguments[1]
+        let values = Array(arguments.dropFirst(2))
+        if operation == "get" {
+            guard let windowID = values.first, !windowID.isEmpty else { throw CLIParseError("missing window ID") }
+            return .request(method: "debug.ax.frame.get", params: ["window_id": .string(windowID)], url: try parseURLOnly(Array(values.dropFirst())))
+        }
+        guard operation == "set", values.count >= 6 else {
+            throw CLIParseError("expected window ID, x, y, width, height, and write order")
+        }
+        let windowID = values[0]
+        let names = ["x", "y", "width", "height"]
+        var frame: [String: JSONValue] = [:]
+        for (name, raw) in zip(names, values[1...4]) {
+            guard let number = Double(raw), number.isFinite else { throw CLIParseError("invalid \(name): \(raw)") }
+            if ["width", "height"].contains(name), number <= 0 { throw CLIParseError("\(name) must be greater than zero") }
+            frame[name] = .number(number)
+        }
+        guard DebugAXWriteOrder(rawValue: values[5]) != nil else { throw CLIParseError("invalid AX write order: \(values[5])") }
+        var settle = 0, url = defaultWMWebSocketURL, index = 6
+        while index < values.count {
+            switch values[index] {
+            case "--settle-ms":
+                let raw = try value(after: &index, in: values)
+                guard let milliseconds = Int(raw), (0...10_000).contains(milliseconds) else {
+                    throw CLIParseError("settle-ms must be between 0 and 10000")
+                }
+                settle = milliseconds
+            case "--url": url = try webSocketURL(try value(after: &index, in: values))
+            default: throw CLIParseError("unknown debug ax argument: \(values[index])")
+            }
+            index += 1
+        }
+        return .request(method: "debug.ax.frame.set", params: [
+            "window_id": .string(windowID), "frame": .object(frame), "order": .string(values[5]),
+            "settle_ms": .number(Double(settle)),
+        ], url: url)
+    }
+
+    private func parseDebugEngine(_ arguments: [String]) throws -> CLICommand {
+        guard let operation = arguments.first else { throw CLIParseError("expected 'debug engine get|set'") }
+        if operation == "get" { return try request("debug.engine.get", Array(arguments.dropFirst())) }
+        guard operation == "set", arguments.count >= 3, arguments[1] == "automatic-reconciliation",
+              let enabled = ["on": true, "off": false][arguments[2]] else {
+            throw CLIParseError("expected 'debug engine set automatic-reconciliation on|off'")
+        }
+        return .request(
+            method: "debug.engine.set", params: ["automatic_reconciliation": .bool(enabled)],
+            url: try parseURLOnly(Array(arguments.dropFirst(3)))
+        )
+    }
+
     private func parseWindowManagement(_ operation: String, _ arguments: [String]) throws -> CLICommand {
         guard let windowID = arguments.first, !windowID.isEmpty else { throw CLIParseError("missing window ID") }
         return .request(
@@ -301,26 +375,86 @@ public struct CLIParser: Sendable {
         case "focus": return try parseWorkspaceFocus(values)
         case "move-window": return try parseWorkspaceMoveWindow(values)
         case "move-window-bulk": return try parseWorkspaceMoveWindowBulk(values)
-        case "move-display": return try parseWorkspaceMoveDisplay(values)
+        case "move": return try parseWorkspaceMoveDisplay(values)
         case "mode": return try parseWorkspaceMode(values)
+        case "uncooperative-window-policy": return try parseUncooperativeWindowPolicy(values, workspace: true)
         default: throw CLIParseError("unknown workspace command: \(operation)")
         }
     }
 
+    private func parseUncooperativeWindowPolicy(
+        _ arguments: [String], workspace: Bool = false
+    ) throws -> CLICommand {
+        let policyIndex = workspace ? 1 : 0
+        guard arguments.count > policyIndex else {
+            throw CLIParseError(workspace ? "expected workspace name and policy" : "expected policy")
+        }
+        let policy = arguments[policyIndex]
+        guard ["greedy", "stack", "overlap", "reject"].contains(policy) else {
+            throw CLIParseError("invalid uncooperative-window policy: \(policy)")
+        }
+        var params: [String: JSONValue] = ["policy": .string(policy)]
+        if workspace { params["workspace"] = .string(arguments[0]) }
+        return .request(
+            method: "uncooperative_window_policy.set", params: params,
+            url: try parseURLOnly(Array(arguments.dropFirst(policyIndex + 1)))
+        )
+    }
+
+    private func parseGeometryPolicy(_ arguments: [String]) throws -> CLICommand {
+        var params: [String: JSONValue] = [:]
+        var url = defaultWMWebSocketURL, index = 0
+        if let first = arguments.first, !first.hasPrefix("-") {
+            params["workspace"] = .string(first)
+            index = 1
+        }
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--max-retries":
+                let raw = try value(after: &index, in: arguments)
+                guard let retries = Int(raw), (1...5).contains(retries) else {
+                    throw CLIParseError("max-retries must be between 1 and 5")
+                }
+                params["max_geometry_retries"] = .number(Double(retries))
+            case "--profile-mode":
+                let mode = try value(after: &index, in: arguments)
+                guard ["store", "infer", "optimistic"].contains(mode) else {
+                    throw CLIParseError("invalid geometry profile mode: \(mode)")
+                }
+                params["geometry_profile_mode"] = .string(mode)
+            case "--url": url = try webSocketURL(try value(after: &index, in: arguments))
+            default: throw CLIParseError("unknown geometry-policy argument: \(arguments[index])")
+            }
+            index += 1
+        }
+        guard params["max_geometry_retries"] != nil || params["geometry_profile_mode"] != nil else {
+            throw CLIParseError("geometry-policy requires --max-retries or --profile-mode")
+        }
+        return .request(method: "geometry_policy.set", params: params, url: url)
+    }
+
     private func parseWorkspaceFocus(_ arguments: [String]) throws -> CLICommand {
         guard let name = arguments.first, !name.isEmpty else { throw CLIParseError("missing workspace name") }
-        var display: JSONValue = .null
+        var display: JSONValue = .null, selector: JSONValue?
         var url = defaultWMWebSocketURL
         var index = 1
         while index < arguments.count {
             switch arguments[index] {
             case "--display": display = .string(try value(after: &index, in: arguments))
+            case "--cg", "--core-graphics-display-id", "--core_graphics_display_id":
+                selector = try displaySelector("core_graphics_display_id", value: value(after: &index, in: arguments), existing: selector)
+            case "--ns", "--ns-screen-number", "--ns_screen_number":
+                selector = try displaySelector("ns_screen_number", value: value(after: &index, in: arguments), existing: selector)
+            case "--name":
+                selector = try displaySelector("name", value: value(after: &index, in: arguments), existing: selector)
             case "--url": url = try webSocketURL(try value(after: &index, in: arguments))
             default: throw CLIParseError("unknown workspace focus argument: \(arguments[index])")
             }
             index += 1
         }
-        return .request(method: "workspace.focus", params: ["name": .string(name), "display_id": display], url: url)
+        var params: [String: JSONValue] = ["name": .string(name), "display_id": display]
+        if let selector { params["display_selector"] = selector }
+        return .request(method: "workspace.focus", params: params, url: url)
     }
 
     private func parseWorkspaceMoveWindow(_ arguments: [String]) throws -> CLICommand {
@@ -360,10 +494,60 @@ public struct CLIParser: Sendable {
     }
 
     private func parseWorkspaceMoveDisplay(_ arguments: [String]) throws -> CLICommand {
-        guard arguments.count >= 2 else { throw CLIParseError("expected workspace name and display ID") }
-        return .request(method: "workspace.move_display", params: [
-            "workspace": .string(arguments[0]), "display_id": .string(arguments[1]),
-        ], url: try parseURLOnly(Array(arguments.dropFirst(2))))
+        guard let first = arguments.first, !first.isEmpty else { throw CLIParseError("missing workspace name") }
+        if first == "next" {
+            var params: [String: JSONValue] = ["next": .bool(true)]
+            var index = 1
+            if index < arguments.count, !arguments[index].hasPrefix("-") {
+                params["workspace"] = .string(arguments[index]); index += 1
+            }
+            return .request(
+                method: "workspace.move_display", params: params,
+                url: try parseURLOnly(Array(arguments.dropFirst(index)))
+            )
+        }
+        let workspace = first
+        var params: [String: JSONValue] = ["workspace": .string(workspace)]
+        var url = defaultWMWebSocketURL, selector: JSONValue?, index = 1
+        if index < arguments.count, !arguments[index].hasPrefix("-") {
+            params["display_id"] = .string(arguments[index]); index += 1
+        }
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--cg", "--core-graphics-display-id", "--core_graphics_display_id":
+                selector = try displaySelector("core_graphics_display_id", value: value(after: &index, in: arguments), existing: selector)
+            case "--ns", "--ns-screen-number", "--ns_screen_number":
+                selector = try displaySelector("ns_screen_number", value: value(after: &index, in: arguments), existing: selector)
+            case "--name": selector = try displaySelector("name", value: value(after: &index, in: arguments), existing: selector)
+            case "--url": url = try webSocketURL(try value(after: &index, in: arguments))
+            default: throw CLIParseError("unknown workspace move argument: \(arguments[index])")
+            }
+            index += 1
+        }
+        guard params["display_id"] != nil || selector != nil else { throw CLIParseError("display selector is required") }
+        guard !(params["display_id"] != nil && selector != nil) else { throw CLIParseError("specify one display selector") }
+        if let selector { params["display_selector"] = selector }
+        return .request(method: "workspace.move_display", params: params, url: url)
+    }
+
+    private func parseDisplay(_ arguments: [String], command: String) throws -> CLICommand {
+        guard arguments.first == "list" else { throw CLIParseError("expected '\(command) list'") }
+        var params: [String: JSONValue] = ["verbose": .bool(false)]
+        var url = defaultWMWebSocketURL, index = 1
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--verbose": params["verbose"] = .bool(true)
+            case "--url": url = try webSocketURL(try value(after: &index, in: arguments))
+            default: throw CLIParseError("unknown \(command) list argument: \(arguments[index])")
+            }
+            index += 1
+        }
+        return .request(method: "display.list", params: params, url: url)
+    }
+
+    private func displaySelector(_ key: String, value: String, existing: JSONValue?) throws -> JSONValue {
+        guard existing == nil, !value.isEmpty else { throw CLIParseError("specify one display selector") }
+        return .object([key: .string(value)])
     }
 
     private func parseWorkspaceMode(_ arguments: [String]) throws -> CLICommand {

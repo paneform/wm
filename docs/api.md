@@ -79,6 +79,49 @@ Statuses: `healthy`, `degraded`, `recovering`, `unhealthy`.
 
 ## Client Messages
 
+### Uncooperative Window Policy
+
+Set the session-wide policy:
+
+```json
+{"method":"uncooperative_window_policy.set","params":{"policy":"greedy"}}
+```
+
+Set a per-workspace runtime override:
+
+```json
+{"method":"uncooperative_window_policy.set","params":{"workspace":"T","policy":"overlap"}}
+```
+
+Accepted policies are `greedy`, `stack`, `overlap`, and `reject`. Runtime values
+are in-memory overlays and do not persist cooperation profiles.
+
+### Adaptive Geometry Policy
+
+`max_geometry_retries` defaults to `5` and accepts `1` through `5`.
+`geometry_profile_mode` accepts:
+
+- `store`: store and reuse learned constraints and retry policy.
+- `infer`: infer constraints independently on every request.
+- `optimistic`: try ideal geometry first, then use learned constraints as fallback.
+
+Both settings support global and per-workspace configuration under `defaults`
+and each `workspaces` entry. Runtime updates are partial in-memory overlays:
+
+```json
+{"method":"geometry_policy.set","params":{"max_geometry_retries":4,"geometry_profile_mode":"store"}}
+{"method":"geometry_policy.set","params":{"workspace":"T","geometry_profile_mode":"optimistic"}}
+```
+
+CLI equivalents are `wm geometry-policy --max-retries 4 --profile-mode store`
+and `wm geometry-policy T --profile-mode optimistic`.
+
+Tiling, window moves, and workspace focus first request ideal geometry. A stable
+known constraint is accepted promptly and all workspace frames are replanned
+with the configured `greedy`, `stack`, `overlap`, or `reject` policy. A higher or
+new observed constraint is learned after engine retries, then the workspace is
+replanned.
+
 ### Request
 
 ```json
@@ -450,8 +493,8 @@ wm ping [--url URL]
 wm state [--url URL]
 wm state observed [--url URL]
 wm health [--url URL]
-wm display list [--url URL]
-wm monitor list [--url URL]            # CLI alias
+wm display list [--verbose] [--url URL]
+wm monitor list [--verbose] [--url URL] # CLI alias
 wm window list [--url URL]
 wm diagnostics inventory [--url URL]
 wm inventory refresh [--url URL]

@@ -30,7 +30,7 @@ let package = Package(
         ),
         .target(
             name: "WMPersistence",
-            dependencies: ["WMProtocol", "WMWorkspace"]
+            dependencies: ["WMProtocol", "WMWorkspace", "WMInventory"]
         ),
         .target(
             name: "WMCore",
@@ -60,7 +60,7 @@ let package = Package(
         .testTarget(name: "WMProtocolTests", dependencies: ["WMProtocol"]),
         .testTarget(name: "WMInventoryTests", dependencies: ["WMInventory", "WMProtocol"]),
         .testTarget(name: "WMWorkspaceTests", dependencies: ["WMWorkspace", "WMProtocol"]),
-        .testTarget(name: "WMPersistenceTests", dependencies: ["WMPersistence", "WMWorkspace", "WMProtocol"]),
+        .testTarget(name: "WMPersistenceTests", dependencies: ["WMPersistence", "WMWorkspace", "WMProtocol", "WMInventory"]),
         .testTarget(name: "WMCoreTests", dependencies: ["WMCore", "WMInventory", "WMProtocol"]),
         .testTarget(name: "WMConfigurationTests", dependencies: ["WMConfiguration"]),
         .testTarget(name: "WMWebSocketTests", dependencies: ["WMWebSocket", "WMCore", "WMProtocol"]),

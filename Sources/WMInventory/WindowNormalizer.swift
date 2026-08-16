@@ -184,10 +184,10 @@ public enum WindowNormalizer {
         guard let frame else { return nil }
         let centerX = frame.x + frame.width / 2
         let centerY = frame.y + frame.height / 2
-        return displays.first {
-            centerX >= $0.frame.x && centerX <= $0.frame.x + $0.frame.width
-                && centerY >= $0.frame.y && centerY <= $0.frame.y + $0.frame.height
-        }?.id
+        return DisplayTopologySnapshot(displays: displays).axFrames.first {
+            centerX >= $0.value.x && centerX <= $0.value.x + $0.value.width
+                && centerY >= $0.value.y && centerY <= $0.value.y + $0.value.height
+        }?.key
     }
 
     private static func normalized(_ value: String?) -> String? {

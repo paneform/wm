@@ -139,6 +139,37 @@ import WMConfiguration
     }
 }
 
+@Test func parsesRawAXDebugCommands() throws {
+    let parser = CLIParser()
+    #expect(try parser.parse(["debug", "ax", "focus", "window:1"]) == .request(
+        method: "debug.ax.focus", params: ["window_id": .string("window:1")], url: defaultWMWebSocketURL
+    ))
+    #expect(try parser.parse(["debug", "ax", "frame", "get", "window:1"]) == .request(
+        method: "debug.ax.frame.get", params: ["window_id": .string("window:1")], url: defaultWMWebSocketURL
+    ))
+    #expect(try parser.parse([
+        "debug", "ax", "frame", "set", "window:1", "-1030", "-1408", "3440", "1408",
+        "size_position_size", "--settle-ms", "600",
+    ]) == .request(method: "debug.ax.frame.set", params: [
+        "window_id": .string("window:1"),
+        "frame": .object(["x": .number(-1030), "y": .number(-1408), "width": .number(3440), "height": .number(1408)]),
+        "order": .string("size_position_size"), "settle_ms": .number(600),
+    ], url: defaultWMWebSocketURL))
+    #expect(throws: CLIParseError.self) {
+        try parser.parse(["debug", "ax", "frame", "set", "window:1", "0", "0", "1", "1", "unknown"])
+    }
+}
+
+@Test func parsesEngineDebugCommands() throws {
+    let parser = CLIParser()
+    #expect(try parser.parse(["debug", "engine", "get"]) == .request(
+        method: "debug.engine.get", params: [:], url: defaultWMWebSocketURL
+    ))
+    #expect(try parser.parse(["debug", "engine", "set", "automatic-reconciliation", "off"]) == .request(
+        method: "debug.engine.set", params: ["automatic_reconciliation": .bool(false)], url: defaultWMWebSocketURL
+    ))
+}
+
 @Test func parsesSubscriptionInAnyOptionOrder() throws {
     let command = try CLIParser().parse([
         "subscribe", "window.inventory", "--url", "ws://localhost:9000/v1",
@@ -183,20 +214,71 @@ import WMConfiguration
             "workspace": .string("T"), "window_ids": .array([.string("window:1"), .string("window:2")]),
         ], url: defaultWMWebSocketURL
     ))
-    #expect(try parser.parse(["workspace", "move-display", "T", "display:2"]) == .request(
+    #expect(try parser.parse(["workspace", "move", "T", "display:2"]) == .request(
         method: "workspace.move_display", params: ["workspace": .string("T"), "display_id": .string("display:2")], url: defaultWMWebSocketURL
+    ))
+    #expect(try parser.parse(["workspace", "move", "T", "--cg", "1"]) == .request(
+        method: "workspace.move_display", params: [
+            "workspace": .string("T"), "display_selector": .object(["core_graphics_display_id": .string("1")]),
+        ], url: defaultWMWebSocketURL
+    ))
+    #expect(try parser.parse(["workspace", "move", "T", "--ns_screen_number", "2"]) == .request(
+        method: "workspace.move_display", params: [
+            "workspace": .string("T"), "display_selector": .object(["ns_screen_number": .string("2")]),
+        ], url: defaultWMWebSocketURL
+    ))
+    #expect(try parser.parse(["workspace", "move", "T", "--name", "Built-in Retina Display"]) == .request(
+        method: "workspace.move_display", params: [
+            "workspace": .string("T"), "display_selector": .object(["name": .string("Built-in Retina Display")]),
+        ], url: defaultWMWebSocketURL
+    ))
+    #expect(try parser.parse(["workspace", "move", "next"]) == .request(
+        method: "workspace.move_display", params: ["next": .bool(true)], url: defaultWMWebSocketURL
+    ))
+    #expect(try parser.parse(["workspace", "move", "next", "T"]) == .request(
+        method: "workspace.move_display", params: ["next": .bool(true), "workspace": .string("T")], url: defaultWMWebSocketURL
     ))
     #expect(try parser.parse(["workspace", "mode", "T", "floating"]) == .request(
         method: "workspace.set_mode", params: ["workspace": .string("T"), "mode": .string("floating")], url: defaultWMWebSocketURL
+    ))
+    #expect(try parser.parse(["uncooperative-window-policy", "stack"]) == .request(
+        method: "uncooperative_window_policy.set", params: ["policy": .string("stack")], url: defaultWMWebSocketURL
+    ))
+    #expect(try parser.parse(["workspace", "uncooperative-window-policy", "T", "reject"]) == .request(
+        method: "uncooperative_window_policy.set",
+        params: ["workspace": .string("T"), "policy": .string("reject")], url: defaultWMWebSocketURL
+    ))
+    #expect(try parser.parse(["geometry-policy", "--max-retries", "4", "--profile-mode", "store"]) == .request(
+        method: "geometry_policy.set", params: [
+            "max_geometry_retries": .number(4), "geometry_profile_mode": .string("store"),
+        ], url: defaultWMWebSocketURL
+    ))
+    #expect(try parser.parse(["geometry-policy", "T", "--profile-mode", "optimistic"]) == .request(
+        method: "geometry_policy.set", params: [
+            "workspace": .string("T"), "geometry_profile_mode": .string("optimistic"),
+        ], url: defaultWMWebSocketURL
     ))
 }
 
 @Test func rejectsInvalidWorkspaceCommands() {
     let invalid = [
         ["workspace"], ["workspace", "focus"], ["workspace", "move-window"],
-        ["workspace", "move-display", "T"], ["workspace", "mode", "T", "stacked"],
+        ["workspace", "move", "T"], ["workspace", "move-display", "T", "display:1"],
+        ["workspace", "mode", "T", "stacked"],
+        ["uncooperative-window-policy", "float"],
+        ["geometry-policy"], ["geometry-policy", "--max-retries", "0"],
+        ["geometry-policy", "--profile-mode", "cached"],
     ]
     for arguments in invalid {
         #expect(throws: CLIParseError.self) { try CLIParser().parse(arguments) }
     }
+}
+
+@Test func parsesCompactAndVerboseDisplayLists() throws {
+    #expect(try CLIParser().parse(["display", "list"]) == .request(
+        method: "display.list", params: ["verbose": .bool(false)], url: defaultWMWebSocketURL
+    ))
+    #expect(try CLIParser().parse(["display", "list", "--verbose"]) == .request(
+        method: "display.list", params: ["verbose": .bool(true)], url: defaultWMWebSocketURL
+    ))
 }

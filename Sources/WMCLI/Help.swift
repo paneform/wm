@@ -34,6 +34,7 @@ COMMANDS
 
   display                      Inspect connected displays.
     list                       List connected displays.
+      --verbose                Include frames, scale, and hardware metadata.
       --url URL                Connect to a WebSocket URL.
 
   monitor                      Alias for display.
@@ -42,6 +43,20 @@ COMMANDS
 
   window                       Inspect and manage windows.
     list                       List known windows.
+      --url URL                Connect to a WebSocket URL.
+
+  debug                        Bypass normal window-management behavior.
+    ax focus WINDOW_ID         Focus and raise a window directly through AX.
+    ax frame get WINDOW_ID     Read a frame directly through AX.
+    ax frame set WINDOW_ID X Y WIDTH HEIGHT ORDER
+                               Write AX position/size without reconciliation.
+      ORDER                    position, size, position_then_size,
+                               size_then_position, or size_position_size.
+      --settle-ms MS           Wait before reading the observed frame.
+      --url URL                Connect to a WebSocket URL.
+    engine get                 Show runtime engine switches.
+    engine set automatic-reconciliation on|off
+                               Enable or suppress observer reconciliation.
       --url URL                Connect to a WebSocket URL.
     manage WINDOW_ID           Add a window to management.
       --url URL                Connect to a WebSocket URL.
@@ -70,6 +85,9 @@ COMMANDS
       --url URL                Connect to a WebSocket URL.
     focus NAME                 Focus a workspace.
       --display DISPLAY_ID     Focus it on a specific display.
+      --cg ID                  Select by Core Graphics display ID.
+      --ns NUMBER              Select by NSScreen number.
+      --name NAME              Select by exact display name.
       --url URL                Connect to a WebSocket URL.
     move-window NAME [WINDOW_ID ...]
                                Move windows to a workspace.
@@ -77,11 +95,42 @@ COMMANDS
     move-window-bulk NAME WINDOW_ID ...
                                Move 1-128 windows in one transaction.
       --url URL                Connect to a WebSocket URL.
-    move-display NAME DISPLAY_ID
-                               Move a workspace to a display.
+    move NAME [DISPLAY_ID]
+                                Move a workspace to a display.
+    move next [NAME]            Move the focused or named workspace to the next display.
+      --cg ID                  Select by Core Graphics display ID.
+      --core-graphics-display-id ID
+      --core_graphics_display_id ID
+      --ns NUMBER              Select by NSScreen number.
+      --ns-screen-number NUMBER
+      --ns_screen_number NUMBER
+      --name NAME              Select by exact display name.
       --url URL                Connect to a WebSocket URL.
     mode NAME bsp|floating     Set a workspace's layout mode.
       --url URL                Connect to a WebSocket URL.
+    uncooperative-window-policy NAME POLICY
+                                Override constrained-window behavior for a workspace.
+      greedy                    Take space from peer tiles to satisfy minimum sizes.
+      stack                     Give every window the workspace frame; focus controls the front.
+      overlap                   Keep constrained windows onscreen and allow tiles to overlap.
+      reject                    Restore the previous layout and fail the action.
+      --url URL                Connect to a WebSocket URL.
+
+  uncooperative-window-policy POLICY
+                                Set the global runtime constrained-window policy.
+    greedy                     Take space from peer tiles to satisfy minimum sizes.
+    stack                      Give every window the workspace frame; focus controls the front.
+    overlap                    Keep constrained windows onscreen and allow tiles to overlap.
+    reject                     Restore the previous layout and fail the action.
+    --url URL                  Connect to a WebSocket URL.
+
+  geometry-policy [WORKSPACE] Set global or per-workspace adaptive geometry behavior.
+    --max-retries COUNT        Set verified geometry attempts from 1-5 (default: 5).
+    --profile-mode MODE        store, infer, or optimistic.
+                               store reuses and updates learned constraints/retry policy.
+                               infer learns independently on every request.
+                               optimistic tries ideal geometry before learned fallback.
+    --url URL                  Connect to a WebSocket URL.
 
   diagnostics                  Inspect daemon diagnostics.
     inventory                  Show inventory diagnostics.

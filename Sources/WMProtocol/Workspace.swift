@@ -10,6 +10,15 @@ public enum WorkspaceMode: String, Codable, CaseIterable, Sendable {
     case floating
 }
 
+public enum UncooperativeWindowPolicy: String, Codable, CaseIterable, Sendable {
+    case greedy
+    case stack
+    case overlap
+    case reject
+}
+
+public enum GeometryProfileMode: String, Codable, CaseIterable, Sendable { case store, infer, optimistic }
+
 public enum BSPAxis: String, Codable, CaseIterable, Sendable {
     case vertical
     case horizontal
@@ -96,6 +105,9 @@ public struct WorkspaceState: Codable, Equatable, Sendable {
     public var margin: WorkspaceMargin
     public var gap: Double
     public var resizeIncrement: Double
+    public var uncooperativeWindowPolicy: UncooperativeWindowPolicy
+    public var maxGeometryRetries: Int
+    public var geometryProfileMode: GeometryProfileMode
     public var windowIds: [String]
     public var focusedWindowId: String?
     public var bsp: BSPTree
@@ -111,6 +123,9 @@ public struct WorkspaceState: Codable, Equatable, Sendable {
         margin: WorkspaceMargin,
         gap: Double,
         resizeIncrement: Double,
+        uncooperativeWindowPolicy: UncooperativeWindowPolicy = .greedy,
+        maxGeometryRetries: Int = 5,
+        geometryProfileMode: GeometryProfileMode = .store,
         windowIds: [String],
         focusedWindowId: String? = nil,
         bsp: BSPTree
@@ -125,6 +140,9 @@ public struct WorkspaceState: Codable, Equatable, Sendable {
         self.margin = margin
         self.gap = gap
         self.resizeIncrement = resizeIncrement
+        self.uncooperativeWindowPolicy = uncooperativeWindowPolicy
+        self.maxGeometryRetries = maxGeometryRetries
+        self.geometryProfileMode = geometryProfileMode
         self.windowIds = windowIds
         self.focusedWindowId = focusedWindowId
         self.bsp = bsp
@@ -135,6 +153,9 @@ public struct WorkspaceState: Codable, Equatable, Sendable {
         case displayId = "display_id"
         case preferredDisplayId = "preferred_display_id"
         case resizeIncrement = "resize_increment"
+        case uncooperativeWindowPolicy = "uncooperative_window_policy"
+        case maxGeometryRetries = "max_geometry_retries"
+        case geometryProfileMode = "geometry_profile_mode"
         case windowIds = "window_ids"
         case focusedWindowId = "focused_window_id"
     }
@@ -151,6 +172,9 @@ public struct WorkspaceState: Codable, Equatable, Sendable {
         try container.encode(margin, forKey: .margin)
         try container.encode(gap, forKey: .gap)
         try container.encode(resizeIncrement, forKey: .resizeIncrement)
+        try container.encode(uncooperativeWindowPolicy, forKey: .uncooperativeWindowPolicy)
+        try container.encode(maxGeometryRetries, forKey: .maxGeometryRetries)
+        try container.encode(geometryProfileMode, forKey: .geometryProfileMode)
         try container.encode(windowIds, forKey: .windowIds)
         try container.encode(focusedWindowId, forKey: .focusedWindowId)
         try container.encode(bsp, forKey: .bsp)
@@ -172,18 +196,39 @@ public struct ObserveWorkspaceParams: Codable, Equatable, Sendable {
 public struct WorkspaceFocusParams: Codable, Equatable, Sendable {
     public var name: String
     public var displayId: String?
+    public var displaySelector: DisplaySelector?
 
-    public init(name: String, displayId: String? = nil) {
+    public init(name: String, displayId: String? = nil, displaySelector: DisplaySelector? = nil) {
         self.name = name
         self.displayId = displayId
+        self.displaySelector = displaySelector
     }
 
-    enum CodingKeys: String, CodingKey { case name, displayId = "display_id" }
+    enum CodingKeys: String, CodingKey { case name, displayId = "display_id", displaySelector = "display_selector" }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(name, forKey: .name)
         try container.encode(displayId, forKey: .displayId)
+        try container.encodeIfPresent(displaySelector, forKey: .displaySelector)
+    }
+}
+
+public struct DisplaySelector: Codable, Equatable, Sendable {
+    public var coreGraphicsDisplayId: String?
+    public var nsScreenNumber: String?
+    public var name: String?
+
+    public init(coreGraphicsDisplayId: String? = nil, nsScreenNumber: String? = nil, name: String? = nil) {
+        self.coreGraphicsDisplayId = coreGraphicsDisplayId
+        self.nsScreenNumber = nsScreenNumber
+        self.name = name
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case coreGraphicsDisplayId = "core_graphics_display_id"
+        case nsScreenNumber = "ns_screen_number"
+        case name
     }
 }
 
@@ -200,15 +245,27 @@ public struct WorkspaceMoveWindowParams: Codable, Equatable, Sendable {
 }
 
 public struct WorkspaceMoveDisplayParams: Codable, Equatable, Sendable {
-    public var workspace: String
-    public var displayId: String
+    public var workspace: String?
+    public var displayId: String?
+    public var displaySelector: DisplaySelector?
+    public var next: Bool
 
-    public init(workspace: String, displayId: String) {
+    public init(workspace: String? = nil, displayId: String? = nil, displaySelector: DisplaySelector? = nil, next: Bool = false) {
         self.workspace = workspace
         self.displayId = displayId
+        self.displaySelector = displaySelector
+        self.next = next
     }
 
-    enum CodingKeys: String, CodingKey { case workspace, displayId = "display_id" }
+    enum CodingKeys: String, CodingKey { case workspace, displayId = "display_id", displaySelector = "display_selector", next }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        workspace = try values.decodeIfPresent(String.self, forKey: .workspace)
+        displayId = try values.decodeIfPresent(String.self, forKey: .displayId)
+        displaySelector = try values.decodeIfPresent(DisplaySelector.self, forKey: .displaySelector)
+        next = try values.decodeIfPresent(Bool.self, forKey: .next) ?? false
+    }
 }
 
 public struct WorkspaceSetModeParams: Codable, Equatable, Sendable {
@@ -218,6 +275,34 @@ public struct WorkspaceSetModeParams: Codable, Equatable, Sendable {
     public init(workspace: String, mode: WorkspaceMode) {
         self.workspace = workspace
         self.mode = mode
+    }
+}
+
+public struct UncooperativeWindowPolicySetParams: Codable, Equatable, Sendable {
+    public var policy: UncooperativeWindowPolicy
+    public var workspace: String?
+
+    public init(policy: UncooperativeWindowPolicy, workspace: String? = nil) {
+        self.policy = policy
+        self.workspace = workspace
+    }
+}
+
+public struct GeometryPolicySetParams: Codable, Equatable, Sendable {
+    public var workspace: String?
+    public var maxGeometryRetries: Int?
+    public var geometryProfileMode: GeometryProfileMode?
+
+    public init(workspace: String? = nil, maxGeometryRetries: Int? = nil, geometryProfileMode: GeometryProfileMode? = nil) {
+        self.workspace = workspace
+        self.maxGeometryRetries = maxGeometryRetries
+        self.geometryProfileMode = geometryProfileMode
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case workspace
+        case maxGeometryRetries = "max_geometry_retries"
+        case geometryProfileMode = "geometry_profile_mode"
     }
 }
 

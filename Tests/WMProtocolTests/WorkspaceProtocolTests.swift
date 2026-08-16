@@ -30,6 +30,9 @@ private let workspace = WorkspaceState(
     #expect(throws: Never.self) { try ProtocolCodec.encode(WorkspaceMoveWindowParams(windowIds: [], workspace: "T")) }
     #expect(throws: Never.self) { try ProtocolCodec.encode(WorkspaceMoveDisplayParams(workspace: "T", displayId: "display:uuid")) }
     #expect(throws: Never.self) { try ProtocolCodec.encode(WorkspaceSetModeParams(workspace: "T", mode: .floating)) }
+    #expect(throws: Never.self) { try ProtocolCodec.encode(UncooperativeWindowPolicySetParams(policy: .overlap, workspace: "T")) }
+    let policy = GeometryPolicySetParams(workspace: "T", maxGeometryRetries: 5, geometryProfileMode: .optimistic)
+    #expect(try ProtocolCodec.decode(GeometryPolicySetParams.self, from: ProtocolCodec.encode(policy)) == policy)
     #expect(throws: Never.self) { try ProtocolCodec.encode(WorkspaceListResult(workspaces: [workspace], focusedWorkspaceName: "T")) }
     #expect(throws: Never.self) {
         try ProtocolCodec.encode(WorkspaceMutationResult(
@@ -47,6 +50,8 @@ private let workspace = WorkspaceState(
     #expect(Method.workspaceMoveWindow.rawValue == "workspace.move_window")
     #expect(Method.workspaceMoveDisplay.rawValue == "workspace.move_display")
     #expect(Method.workspaceSetMode.rawValue == "workspace.set_mode")
+    #expect(Method.uncooperativeWindowPolicySet.rawValue == "uncooperative_window_policy.set")
+    #expect(Method.geometryPolicySet.rawValue == "geometry_policy.set")
     #expect(Method.observeWorkspace.rawValue == "observe.workspace")
     #expect(EventTopic.workspaceDisplayChanged.rawValue == "workspace.display_changed")
     #expect(EventTopic.workspaceModeChanged.rawValue == "workspace.mode_changed")

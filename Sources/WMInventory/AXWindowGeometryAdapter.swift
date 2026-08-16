@@ -1,6 +1,7 @@
 import ApplicationServices
 import AppKit
 import Foundation
+import WMProtocol
 
 public struct AXWindowGeometryAdapter: WindowGeometryAdapter, @unchecked Sendable {
     private final class Storage: @unchecked Sendable {
@@ -10,11 +11,14 @@ public struct AXWindowGeometryAdapter: WindowGeometryAdapter, @unchecked Sendabl
         var lifetimesByWindowID: [String: WindowLifetime] = [:]
     }
 
+
     private let storage = Storage()
     private let delayDuration: Duration
+    private let settlementInterval: Duration
 
-    public init(delayDuration: Duration = .milliseconds(25)) {
+    public init(delayDuration: Duration = .milliseconds(25), settlementInterval: Duration = .milliseconds(17)) {
         self.delayDuration = delayDuration
+        self.settlementInterval = settlementInterval
     }
 
     public func reconcile(windows: [NormalizedWindow]) async {
@@ -87,6 +91,36 @@ public struct AXWindowGeometryAdapter: WindowGeometryAdapter, @unchecked Sendabl
         try frame(element(for: handle))
     }
 
+    public func rawFrame(_ window: NormalizedWindow) async throws -> InventoryRect {
+        try await readFrame(of: resolve(window))
+    }
+
+    public func rawSetFrame(
+        _ frame: InventoryRect,
+        of window: NormalizedWindow,
+        order: DebugAXWriteOrder,
+        settleMilliseconds: Int = 0
+    ) async throws -> InventoryRect {
+        let handle = try await resolve(window)
+        let element = try element(for: handle)
+        switch order {
+        case .position: try setPosition(frame, element: element)
+        case .size: try setSize(frame, element: element)
+        case .positionThenSize:
+            try setPosition(frame, element: element)
+            try setSize(frame, element: element)
+        case .sizeThenPosition:
+            try setSize(frame, element: element)
+            try setPosition(frame, element: element)
+        case .sizePositionSize:
+            try setSize(frame, element: element)
+            try setPosition(frame, element: element)
+            try setSize(frame, element: element)
+        }
+        if settleMilliseconds > 0 { try await Task.sleep(for: .milliseconds(settleMilliseconds)) }
+        return try self.frame(element)
+    }
+
     public func write(_ component: WindowGeometryComponent, frame: InventoryRect, to handle: WindowGeometryHandle) async throws {
         let element = try element(for: handle)
         let result: AXError
@@ -104,6 +138,62 @@ public struct AXWindowGeometryAdapter: WindowGeometryAdapter, @unchecked Sendabl
     }
 
     public func delay() async throws { try await Task.sleep(for: delayDuration) }
+
+    public func settle(
+        _ handle: WindowGeometryHandle, requested: InventoryRect, tolerance: Double
+    ) async throws -> WindowGeometrySettlement {
+        let element = try element(for: handle)
+        var reads = 0
+        var targetSamples = 0
+        var stableSamples = 0
+        var previous: InventoryRect?
+        var previousDistance = Double.infinity
+        for _ in 0..<36 {
+            let observed = try frame(element)
+            reads += 1
+            let matches = observed.approximatelyEquals(requested, tolerance: tolerance)
+            targetSamples = matches ? targetSamples + 1 : 0
+            stableSamples = previous?.approximatelyEquals(observed, tolerance: 0.5) == true ? stableSamples + 1 : 0
+            let distance = observed.normalizedDistance(to: requested)
+            if targetSamples >= 3 || stableSamples >= 3 && distance >= previousDistance - 0.0001 {
+                return .init(frame: observed, reads: reads)
+            }
+            previous = observed
+            previousDistance = distance
+            try await Task.sleep(for: settlementInterval)
+        }
+        return .init(frame: try frame(element), reads: reads + 1)
+    }
+
+    public func transact(
+        _ transaction: WindowGeometryTransaction, frame: InventoryRect,
+        handle: WindowGeometryHandle
+    ) async throws {
+        let element = try element(for: handle)
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(element, &pid) == .success else { throw WindowGeometryAdapterError.stale }
+        let app = AXUIElementCreateApplication(pid)
+        let enhanced: Bool? = try? copy(app, "AXEnhancedUserInterface")
+        if enhanced == true {
+            _ = AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanFalse)
+        }
+        defer {
+            if enhanced == true {
+                _ = AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+            }
+        }
+        switch transaction {
+        case .positionSize:
+            try setPosition(frame, element: element)
+            try setSize(frame, element: element)
+        case .sizeOnly:
+            try setSize(frame, element: element)
+        case .sizePositionSize:
+            try setSize(frame, element: element)
+            try setPosition(frame, element: element)
+            try setSize(frame, element: element)
+        }
+    }
 
     public func focus(_ handle: WindowGeometryHandle) async throws {
         let element = try element(for: handle)
@@ -127,6 +217,17 @@ public struct AXWindowGeometryAdapter: WindowGeometryAdapter, @unchecked Sendabl
         var pid: pid_t = 0
         guard AXUIElementGetPid(element, &pid) == .success else { throw WindowGeometryAdapterError.stale }
         return NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+    }
+
+    public func fit(_ handle: WindowGeometryHandle, within frame: InventoryRect) async throws {
+        let element = try element(for: handle)
+        var point = CGPoint(x: frame.x, y: frame.y)
+        guard let position = AXValueCreate(.cgPoint, &point),
+              AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, position) == .success,
+              AXUIElementPerformAction(element, "AXZoomWindow" as CFString) == .success else {
+            throw WindowGeometryAdapterError.rejected
+        }
+        try await delay()
     }
 
 
@@ -170,6 +271,22 @@ public struct AXWindowGeometryAdapter: WindowGeometryAdapter, @unchecked Sendabl
         return InventoryRect(x: position.x, y: position.y, width: size.width, height: size.height)
     }
 
+    private func setPosition(_ frame: InventoryRect, element: AXUIElement) throws {
+        var point = CGPoint(x: frame.x, y: frame.y)
+        guard let value = AXValueCreate(.cgPoint, &point),
+              AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, value) == .success else {
+            throw WindowGeometryAdapterError.rejected
+        }
+    }
+
+    private func setSize(_ frame: InventoryRect, element: AXUIElement) throws {
+        var size = CGSize(width: frame.width, height: frame.height)
+        guard let value = AXValueCreate(.cgSize, &size),
+              AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, value) == .success else {
+            throw WindowGeometryAdapterError.rejected
+        }
+    }
+
     private func copy<T>(_ element: AXUIElement, _ attribute: String) throws -> T {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success, let typed = value as? T else {
@@ -183,5 +300,14 @@ public struct AXWindowGeometryAdapter: WindowGeometryAdapter, @unchecked Sendabl
         let result = AXUIElementIsAttributeSettable(element, attribute as CFString, &settable)
         guard result == .success else { throw WindowGeometryAdapterError.notControllable }
         return settable.boolValue
+    }
+}
+
+extension InventoryRect {
+    func normalizedDistance(to target: Self) -> Double {
+        abs(x - target.x) / max(1, target.width)
+            + abs(y - target.y) / max(1, target.height)
+            + abs(width - target.width) / max(1, target.width)
+            + abs(height - target.height) / max(1, target.height)
     }
 }

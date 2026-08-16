@@ -134,6 +134,20 @@ extension WorkspaceState {
         }
     }
 
+    public mutating func setUncooperativeWindowPolicy(
+        of name: WorkspaceName,
+        to policy: UncooperativeWindowPolicy
+    ) throws -> WorkspaceMutationResult {
+        try mutate { state in
+            guard let index = state.index(of: name) else { throw WorkspaceMutationError.workspaceNotFound(name) }
+            guard state.workspaces[index].uncooperativeWindowPolicy != policy else {
+                return (WorkspaceMutationResult(workspaceState: state, modifiedWorkspaces: []), false)
+            }
+            state.workspaces[index].uncooperativeWindowPolicy = policy
+            return (WorkspaceMutationResult(workspaceState: state, modifiedWorkspaces: [name]), true)
+        }
+    }
+
     public mutating func adoptUnassignedWindows(
         _ windowIDs: [WorkspaceWindowID],
         into workspaceName: WorkspaceName = "1",
@@ -195,9 +209,77 @@ extension WorkspaceState {
             )
         }
     }
+
+    public mutating func reconcileDisplayTopology(
+        connectedDisplayIDs: Set<WorkspaceDisplayID>,
+        fallbackDisplayID: WorkspaceDisplayID
+    ) throws -> WorkspaceMutationResult {
+        try mutate { state in
+            guard connectedDisplayIDs.contains(fallbackDisplayID) else {
+                throw WorkspaceMutationError.displayRequired("topology recovery")
+            }
+            let before = state
+            state.restoreReconnectedDisplays(connectedDisplayIDs)
+            state.migrateDisconnectedDisplays(connectedDisplayIDs, fallbackDisplayID: fallbackDisplayID)
+            let modified = state.workspaces.compactMap { workspace in
+                before[workspace: workspace.name] == workspace ? nil : workspace.name
+            }.sorted()
+            return (.init(workspaceState: state, modifiedWorkspaces: modified), state != before)
+        }
+    }
 }
 
 private extension WorkspaceState {
+    mutating func restoreReconnectedDisplays(_ connected: Set<WorkspaceDisplayID>) {
+        for displayID in disconnectedDisplays.keys.sorted() where connected.contains(displayID) {
+            guard let saved = disconnectedDisplays.removeValue(forKey: displayID) else { continue }
+            for name in saved.workspaceNames {
+                guard let index = index(of: name), workspaces[index].displayID != displayID else { continue }
+                let temporaryDisplay = workspaces[index].displayID
+                if displays[temporaryDisplay]?.visibleWorkspaceName == name {
+                    displays[temporaryDisplay]?.visibleWorkspaceName = nil
+                }
+                workspaces[index].displayID = displayID
+                workspaces[index].visible = false
+            }
+            let visible = saved.visibleWorkspaceName.flatMap { self[workspace: $0]?.displayID == displayID ? $0 : nil }
+            displays[displayID] = .init(
+                visibleWorkspaceName: visible,
+                previousWorkspaceName: saved.previousWorkspaceName.flatMap { self[workspace: $0]?.displayID == displayID ? $0 : nil }
+            )
+            if let visible { setVisible(visible, true) }
+        }
+    }
+
+    mutating func migrateDisconnectedDisplays(
+        _ connected: Set<WorkspaceDisplayID>, fallbackDisplayID: WorkspaceDisplayID
+    ) {
+        let disconnected = Set(workspaces.map(\.displayID)).subtracting(connected)
+        for displayID in disconnected.sorted() {
+            let names = workspaces.filter { $0.displayID == displayID }.map(\.name)
+            if disconnectedDisplays[displayID] == nil {
+                let displayState = displays[displayID]
+                disconnectedDisplays[displayID] = .init(
+                    workspaceNames: names,
+                    visibleWorkspaceName: displayState?.visibleWorkspaceName,
+                    previousWorkspaceName: displayState?.previousWorkspaceName
+                )
+            }
+            var fallbackHasVisible = displays[fallbackDisplayID]?.visibleWorkspaceName != nil
+            for name in names {
+                guard let index = index(of: name) else { continue }
+                let shouldReveal = workspaces[index].visible && !fallbackHasVisible
+                workspaces[index].displayID = fallbackDisplayID
+                workspaces[index].visible = shouldReveal
+                if shouldReveal {
+                    displays[fallbackDisplayID, default: .init()].visibleWorkspaceName = name
+                    fallbackHasVisible = true
+                }
+            }
+            displays.removeValue(forKey: displayID)
+        }
+    }
+
     var focusedWorkspace: Workspace? {
         focusedWorkspaceName.flatMap { self[workspace: $0] }
     }

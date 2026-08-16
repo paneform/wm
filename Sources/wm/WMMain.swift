@@ -52,7 +52,16 @@ import WMWorkspace
             FileHandle.standardError.write(Data("workspace state validation failed: \(error)\n".utf8))
             return CLIExitCode.unavailable.rawValue
         }
-        let handler = DaemonHandler(state: state, workspaces: workspaces)
+        let profileStore = WindowGeometryProfileStore()
+        let profileCatalog: WindowGeometryProfileCatalog
+        do { profileCatalog = try profileStore.load() } catch {
+            FileHandle.standardError.write(Data("geometry profile load failed: \(error)\n".utf8))
+            return CLIExitCode.unavailable.rawValue
+        }
+        let handler = DaemonHandler(
+            state: state, workspaces: workspaces,
+            geometryProfiles: .init(catalog: profileCatalog, persistence: profileStore)
+        )
         let configPath = ConfigurationFile.path()
         do {
             let committed = try await state.refresh()
@@ -64,11 +73,15 @@ import WMWorkspace
             guard let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id else {
                 throw StartupError.noDisplay
             }
+            var loadedConfiguration = Configuration()
             if FileManager.default.fileExists(atPath: configPath.path) {
-                _ = try await handler.loadConfiguration(
-                    source: String(contentsOf: configPath, encoding: .utf8), inventory: inventory
-                )
+                let source = try String(contentsOf: configPath, encoding: .utf8)
+                loadedConfiguration = try ConfigurationParser.parse(source)
+                _ = try await handler.loadConfiguration(source: source, inventory: inventory)
             }
+            try await handler.recoverInvalidPersistedState(
+                configuration: loadedConfiguration, inventory: inventory, defaultDisplayID: displayID
+            )
             try await handler.auditStartupIntent(inventory)
             try await handler.reconcileObservedWindows(inventory, displayID: displayID)
         } catch {

@@ -3,6 +3,8 @@ import Foundation
 public enum WorkspaceMode: String, Codable, Sendable { case bsp, floating }
 public enum WindowBehavior: String, Codable, Sendable { case tiled, floating }
 public enum ResistantWindowPolicy: String, Codable, Sendable { case float, ignore }
+public enum UncooperativeWindowPolicy: String, Codable, CaseIterable, Sendable { case greedy, stack, overlap, reject }
+public enum GeometryProfileMode: String, Codable, CaseIterable, Sendable { case store, infer, optimistic }
 
 public struct DisplayAffinity: Codable, Equatable, Hashable, Sendable {
     public var id: String?
@@ -73,15 +75,24 @@ public struct WorkspaceSettings: Codable, Equatable, Sendable {
     public var margin: WorkspaceMargins?
     public var gap: Double?
     public var resizeIncrement: Double?
+    public var uncooperativeWindowPolicy: UncooperativeWindowPolicy?
+    public var maxGeometryRetries: Int?
+    public var geometryProfileMode: GeometryProfileMode?
 
-    public init(preferredDisplay: DisplayAffinity? = nil, mode: WorkspaceMode? = nil, margin: WorkspaceMargins? = nil, gap: Double? = nil, resizeIncrement: Double? = nil) {
+    public init(preferredDisplay: DisplayAffinity? = nil, mode: WorkspaceMode? = nil, margin: WorkspaceMargins? = nil, gap: Double? = nil, resizeIncrement: Double? = nil, uncooperativeWindowPolicy: UncooperativeWindowPolicy? = nil, maxGeometryRetries: Int? = nil, geometryProfileMode: GeometryProfileMode? = nil) {
         self.preferredDisplay = preferredDisplay; self.mode = mode; self.margin = margin; self.gap = gap
         self.resizeIncrement = resizeIncrement
+        self.uncooperativeWindowPolicy = uncooperativeWindowPolicy
+        self.maxGeometryRetries = maxGeometryRetries
+        self.geometryProfileMode = geometryProfileMode
     }
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case preferredDisplay = "preferred_display", mode, margin, gap
         case resizeIncrement = "resize_increment"
+        case uncooperativeWindowPolicy = "uncooperative_window_policy"
+        case maxGeometryRetries = "max_geometry_retries"
+        case geometryProfileMode = "geometry_profile_mode"
     }
 
     public init(from decoder: Decoder) throws {
@@ -92,12 +103,18 @@ public struct WorkspaceSettings: Codable, Equatable, Sendable {
         margin = try values.decodeIfPresent(WorkspaceMargins.self, forKey: .margin)
         gap = try values.decodeIfPresent(Double.self, forKey: .gap)
         resizeIncrement = try values.decodeIfPresent(Double.self, forKey: .resizeIncrement)
+        uncooperativeWindowPolicy = try values.decodeIfPresent(UncooperativeWindowPolicy.self, forKey: .uncooperativeWindowPolicy)
+        maxGeometryRetries = try values.decodeIfPresent(Int.self, forKey: .maxGeometryRetries)
+        geometryProfileMode = try values.decodeIfPresent(GeometryProfileMode.self, forKey: .geometryProfileMode)
     }
 
     func inheriting(_ defaults: Self) -> Self {
         Self(preferredDisplay: preferredDisplay ?? defaults.preferredDisplay, mode: mode ?? defaults.mode,
              margin: margin.map { $0.inheriting(defaults.margin ?? .init()) } ?? defaults.margin, gap: gap ?? defaults.gap,
-             resizeIncrement: resizeIncrement ?? defaults.resizeIncrement)
+             resizeIncrement: resizeIncrement ?? defaults.resizeIncrement,
+             uncooperativeWindowPolicy: uncooperativeWindowPolicy ?? defaults.uncooperativeWindowPolicy,
+             maxGeometryRetries: maxGeometryRetries ?? defaults.maxGeometryRetries,
+             geometryProfileMode: geometryProfileMode ?? defaults.geometryProfileMode)
     }
 }
 
@@ -110,6 +127,9 @@ public struct WorkspaceConfiguration: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey, CaseIterable {
         case name, preferredDisplay = "preferred_display", mode, margin, gap
         case resizeIncrement = "resize_increment"
+        case uncooperativeWindowPolicy = "uncooperative_window_policy"
+        case maxGeometryRetries = "max_geometry_retries"
+        case geometryProfileMode = "geometry_profile_mode"
     }
 
     public init(from decoder: Decoder) throws {
@@ -122,6 +142,9 @@ public struct WorkspaceConfiguration: Codable, Equatable, Sendable {
             margin: try values.decodeIfPresent(WorkspaceMargins.self, forKey: .margin),
             gap: try values.decodeIfPresent(Double.self, forKey: .gap),
             resizeIncrement: try values.decodeIfPresent(Double.self, forKey: .resizeIncrement)
+            , uncooperativeWindowPolicy: try values.decodeIfPresent(UncooperativeWindowPolicy.self, forKey: .uncooperativeWindowPolicy),
+            maxGeometryRetries: try values.decodeIfPresent(Int.self, forKey: .maxGeometryRetries),
+            geometryProfileMode: try values.decodeIfPresent(GeometryProfileMode.self, forKey: .geometryProfileMode)
         )
     }
 
@@ -133,6 +156,9 @@ public struct WorkspaceConfiguration: Codable, Equatable, Sendable {
         try values.encodeIfPresent(settings.margin, forKey: .margin)
         try values.encodeIfPresent(settings.gap, forKey: .gap)
         try values.encodeIfPresent(settings.resizeIncrement, forKey: .resizeIncrement)
+        try values.encodeIfPresent(settings.uncooperativeWindowPolicy, forKey: .uncooperativeWindowPolicy)
+        try values.encodeIfPresent(settings.maxGeometryRetries, forKey: .maxGeometryRetries)
+        try values.encodeIfPresent(settings.geometryProfileMode, forKey: .geometryProfileMode)
     }
 }
 
@@ -255,10 +281,13 @@ public struct Configuration: Codable, Equatable, Sendable {
     public var workspaces: [WorkspaceConfiguration]; public var rules: [WindowRule]
     public var hotload: Bool; public var port: UInt16
     enum CodingKeys: String, CodingKey, CaseIterable { case defaults, displays, workspaces, rules, hotload, port }
-    public init(defaults: WorkspaceSettings = .init(mode: .bsp, margin: .init(top: 0, right: 0, bottom: 0, left: 0), gap: 0, resizeIncrement: 10), displays: [DisplayConfiguration] = [], workspaces: [WorkspaceConfiguration] = [], rules: [WindowRule] = [], hotload: Bool = true, port: UInt16 = 17_832) { self.defaults = defaults; self.displays = displays; self.workspaces = workspaces; self.rules = rules; self.hotload = hotload; self.port = port }
+    public init(defaults: WorkspaceSettings = .init(mode: .bsp, margin: .init(top: 0, right: 0, bottom: 0, left: 0), gap: 0, resizeIncrement: 10, uncooperativeWindowPolicy: .greedy, maxGeometryRetries: 5, geometryProfileMode: .store), displays: [DisplayConfiguration] = [], workspaces: [WorkspaceConfiguration] = [], rules: [WindowRule] = [], hotload: Bool = true, port: UInt16 = 17_832) { self.defaults = defaults; self.displays = displays; self.workspaces = workspaces; self.rules = rules; self.hotload = hotload; self.port = port }
     public init(from decoder: Decoder) throws {
         try rejectUnknown(decoder, allowed: CodingKeys.allCases.map(\.rawValue)); let c = try decoder.container(keyedBy: CodingKeys.self)
-        defaults = try c.decodeIfPresent(WorkspaceSettings.self, forKey: .defaults) ?? .init(mode: .bsp, margin: .init(top: 0, right: 0, bottom: 0, left: 0), gap: 0, resizeIncrement: 10)
+        defaults = try c.decodeIfPresent(WorkspaceSettings.self, forKey: .defaults) ?? .init(mode: .bsp, margin: .init(top: 0, right: 0, bottom: 0, left: 0), gap: 0, resizeIncrement: 10, uncooperativeWindowPolicy: .greedy, maxGeometryRetries: 5, geometryProfileMode: .store)
+        defaults.uncooperativeWindowPolicy = defaults.uncooperativeWindowPolicy ?? .greedy
+        defaults.maxGeometryRetries = defaults.maxGeometryRetries ?? 5
+        defaults.geometryProfileMode = defaults.geometryProfileMode ?? .store
         displays = try c.decodeIfPresent([DisplayConfiguration].self, forKey: .displays) ?? []
         workspaces = try c.decodeIfPresent([WorkspaceConfiguration].self, forKey: .workspaces) ?? []
         rules = try c.decodeIfPresent([WindowRule].self, forKey: .rules) ?? []
@@ -275,6 +304,9 @@ public struct Configuration: Codable, Equatable, Sendable {
             + [defaults.gap, defaults.resizeIncrement] + workspaces.flatMap { [$0.settings.gap, $0.settings.resizeIncrement] }
             + displays.map(\.gap)
         for value in measurements.compactMap({ $0 }) where !value.isFinite || value < 0 { throw ConfigurationError.invalid("workspace measurements must be finite and non-negative") }
+        for value in ([defaults.maxGeometryRetries] + workspaces.map(\.settings.maxGeometryRetries)).compactMap({ $0 }) where !(1...5).contains(value) {
+            throw ConfigurationError.invalid("max_geometry_retries must be between 1 and 5")
+        }
         let affinities = ([defaults.preferredDisplay] + workspaces.map(\.settings.preferredDisplay)).compactMap { $0 }
             + displays.map(\.display)
         for affinity in affinities {
@@ -300,7 +332,7 @@ public enum ConfigurationParser {
         catch { throw ConfigurationError.invalid(String(describing: error)) }
     }
 
-    public static let schema = ##"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"properties":{"defaults":{"$ref":"#/$defs/settings"},"displays":{"type":"array"},"workspaces":{"type":"array"},"rules":{"type":"array"},"hotload":{"type":"boolean","default":true},"port":{"type":"integer","minimum":1,"maximum":65535,"default":17832}},"$defs":{"settings":{"type":"object","additionalProperties":false}}}"##
+    public static let schema = ##"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"properties":{"defaults":{"$ref":"#/$defs/settings"},"displays":{"type":"array"},"workspaces":{"type":"array"},"rules":{"type":"array"},"hotload":{"type":"boolean","default":true},"port":{"type":"integer","minimum":1,"maximum":65535,"default":17832}},"$defs":{"settings":{"type":"object","additionalProperties":false,"properties":{"uncooperative_window_policy":{"enum":["greedy","stack","overlap","reject"],"default":"greedy"},"max_geometry_retries":{"type":"integer","minimum":1,"maximum":5,"default":5},"geometry_profile_mode":{"enum":["store","infer","optimistic"],"default":"store"}}}}}"##
 }
 
 public struct AdoptedWindow: Equatable, Sendable {
@@ -347,6 +379,17 @@ public enum ConfigurationFile {
           "defaults": {
             // Layout algorithm used unless a workspace overrides it.
             "mode": "bsp",
+            // Give constrained windows their minimum space by taking it from peers.
+            "uncooperative_window_policy": "greedy",
+            // "uncooperative_window_policy": "stack", // Stack all windows; focused window is front.
+            // "uncooperative_window_policy": "overlap", // Keep constrained windows onscreen and allow overlap.
+            // "uncooperative_window_policy": "reject", // Restore the source layout and fail the action.
+            // Maximum verified geometry attempts per window action (1-5).
+            "max_geometry_retries": 5,
+            // Store and reuse learned constraints and retry policy.
+            "geometry_profile_mode": "store",
+            // "geometry_profile_mode": "infer", // Infer constraints on every request; ignore stored profiles.
+            // "geometry_profile_mode": "optimistic", // Try the ideal frame first, then fall back to learned constraints.
             // Space between the display work area and tiled windows, in points.
             "margin": {
               // Space along the top edge.

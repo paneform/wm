@@ -40,6 +40,32 @@ public struct WindowFrameSetParams: Codable, Equatable, Sendable {
     }
 }
 
+public enum DebugAXWriteOrder: String, Codable, CaseIterable, Sendable {
+    case position
+    case size
+    case positionThenSize = "position_then_size"
+    case sizeThenPosition = "size_then_position"
+    case sizePositionSize = "size_position_size"
+}
+
+public struct DebugAXFrameSetParams: Codable, Equatable, Sendable {
+    public var windowID: String
+    public var frame: Rectangle
+    public var order: DebugAXWriteOrder
+    public var settleMilliseconds: Int
+
+    public init(windowID: String, frame: Rectangle, order: DebugAXWriteOrder, settleMilliseconds: Int = 0) {
+        self.windowID = windowID
+        self.frame = frame
+        self.order = order
+        self.settleMilliseconds = settleMilliseconds
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case windowID = "window_id", frame, order, settleMilliseconds = "settle_ms"
+    }
+}
+
 public struct WindowFrameGetResult: Codable, Equatable, Sendable {
     public var windowID: String
     public var frame: Rectangle

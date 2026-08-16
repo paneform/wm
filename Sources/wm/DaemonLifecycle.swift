@@ -43,6 +43,10 @@ struct SessionTransitionResult: Equatable, Sendable {
     var stabilizationAttempts: Int
 }
 
+enum SessionTransitionError: Error, Equatable {
+    case displayTopologyUnstable(attempts: Int)
+}
+
 actor SessionTransitionEpochs<Display: Equatable & Sendable, Inventory: Sendable> {
     typealias Sleep = @Sendable (Duration) async throws -> Void
     typealias Run = @Sendable (SessionTransitionCause) async throws -> SessionTransitionResult
@@ -139,6 +143,9 @@ actor SessionTransitionEpochs<Display: Equatable & Sendable, Inventory: Sendable
         pendingCause = cause
         epoch &+= 1
         let stabilization = try await stableDisplays(displays)
+        guard stabilization.stable else {
+            throw SessionTransitionError.displayTopologyUnstable(attempts: stabilization.attempts)
+        }
         try await permissions()
         observerGeneration &+= 1
         try await recreateObservers(observerGeneration)

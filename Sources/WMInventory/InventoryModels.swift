@@ -96,6 +96,45 @@ public struct DisplayObservation: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
+public struct DisplayTopologySnapshot: Equatable, Sendable {
+    public var displays: [DisplayObservation]
+
+    public init(displays: [DisplayObservation]) {
+        self.displays = displays.sorted { $0.id < $1.id }
+    }
+
+    public var displayIDs: Set<String> { Set(displays.map(\.id)) }
+    public var axFrames: [String: InventoryRect] {
+        guard let primaryTop = displays.first(where: \.isPrimary).map({ $0.frame.y + $0.frame.height }) else {
+            return [:]
+        }
+        return Dictionary(uniqueKeysWithValues: displays.map { display in
+            let frame = display.frame
+            return (display.id, InventoryRect(
+                x: frame.x,
+                y: primaryTop - frame.y - frame.height,
+                width: frame.width,
+                height: frame.height
+            ))
+        })
+    }
+
+    public var axWorkAreas: [String: InventoryRect] {
+        guard let primaryTop = displays.first(where: \.isPrimary).map({ $0.frame.y + $0.frame.height }) else {
+            return [:]
+        }
+        return Dictionary(uniqueKeysWithValues: displays.map { display in
+            let frame = display.visibleFrame
+            return (display.id, InventoryRect(
+                x: frame.x,
+                y: primaryTop - frame.y - frame.height,
+                width: frame.width,
+                height: frame.height
+            ))
+        })
+    }
+}
+
 public struct ApplicationObservation: Codable, Hashable, Sendable {
     public var pid: Int32
     public var name: String

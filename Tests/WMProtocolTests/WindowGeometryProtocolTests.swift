@@ -11,5 +11,8 @@ func testGeometryParamsApplyDefaultsAndUseWireKeys() throws {
     XCTAssertEqual(decoded.attempts, 3)
     XCTAssertEqual(Method.windowFrameGet.rawValue, "window.frame.get")
     XCTAssertEqual(Method.windowFrameSet.rawValue, "window.frame.set")
+    XCTAssertEqual(Method.debugAXFrameGet.rawValue, "debug.ax.frame.get")
+    XCTAssertEqual(Method.debugAXFrameSet.rawValue, "debug.ax.frame.set")
+    XCTAssertEqual(Method.debugAXFocus.rawValue, "debug.ax.focus")
 }
 }

@@ -27,6 +27,25 @@ private struct StubDisplays: DisplayInventorySource {
     }
 }
 
+private struct TwoDisplays: DisplayInventorySource {
+    func displays() async -> SourceResult<[DisplayObservation]> {
+        .init(value: [
+            .init(
+                id: "display:built-in", name: "Built-in Retina Display", isBuiltin: true, isPrimary: true,
+                frame: .init(x: 0, y: 0, width: 1000, height: 800),
+                visibleFrame: .init(x: 0, y: 0, width: 1000, height: 780), backingScale: 2,
+                identifiers: .init(nsscreenNumber: "1", cgDirectDisplayID: "1", uuid: "built-in")
+            ),
+            .init(
+                id: "display:external", name: "Studio Display", isBuiltin: false, isPrimary: false,
+                frame: .init(x: 1000, y: 0, width: 1200, height: 900),
+                visibleFrame: .init(x: 1000, y: 0, width: 1200, height: 860), backingScale: 2,
+                identifiers: .init(nsscreenNumber: "2", cgDirectDisplayID: "7", uuid: "external")
+            ),
+        ], health: .init(source: .displays, status: .healthy, permissionGranted: nil))
+    }
+}
+
 private struct StubCG: CoreGraphicsInventorySource {
     func windows() async -> SourceResult<[WMInventory.RawCGWindow]> {
         .init(value: [], health: .init(source: .coreGraphics, status: .healthy, permissionGranted: true))
@@ -57,6 +76,71 @@ private func response(_ text: String) throws -> Response {
     return response
 }
 
+@Test func fittedFrameOnlyContributesDimensionsThatExceedTile() {
+    let target = WorkspaceLayoutRect(x: 0, y: 32, width: 756, height: 950)
+
+    #expect(DaemonHandler.constrainedMinimum(
+        fitted: .init(x: 0, y: 32, width: 1512, height: 950), target: target
+    ) == .init(width: 1512, height: 0))
+    #expect(DaemonHandler.constrainedMinimum(
+        fitted: .init(x: 0, y: 32, width: 756, height: 950), target: target
+    ) == .init())
+}
+
+@Test func workspaceGeometryPolicyTranslatesToEngineRetryPolicy() {
+    #expect(DaemonHandler.geometryRetryPolicy(retries: 2, mode: .store) == .init(
+        maximumAttempts: 2, mode: .storeAndReuse
+    ))
+    #expect(DaemonHandler.geometryRetryPolicy(retries: 3, mode: .infer) == .init(
+        maximumAttempts: 3, mode: .inferEveryRequest
+    ))
+    #expect(DaemonHandler.geometryRetryPolicy(retries: 5, mode: .optimistic) == .init(
+        maximumAttempts: 5, mode: .optimisticIdealFirst
+    ))
+}
+
+@Test func debugEngineSwitchIsInspectableAndMutable() async throws {
+    let (handler, state) = try daemonHandler()
+    _ = try await state.refresh()
+    let client = UUID()
+
+    let disabled = await handler.handle(text: try clientMessage(.request(.init(
+        requestId: "disable", method: .debugEngineSet, params: ["automatic_reconciliation": .bool(false)]
+    ))), clientID: client)
+    let disabledResult = try #require(try response(disabled[0]).result)
+    #expect(disabledResult == .object(["automatic_reconciliation": .bool(false)]))
+
+    let status = await handler.handle(text: try clientMessage(.request(.init(
+        requestId: "status", method: .debugEngineGet
+    ))), clientID: client)
+    #expect(try response(status[0]).result == .object(["automatic_reconciliation": .bool(false)]))
+}
+
+@Test func geometryPolicyRuntimeUpdatesGlobalAndWorkspaceSettings() async throws {
+    let (handler, state) = try daemonHandler()
+    let inventory = try await state.refresh().snapshot.inventory
+    _ = try await handler.loadConfiguration(source: #"{"workspaces":[{"name":"T"}]}"#, inventory: inventory)
+
+    for (id, params, expected) in [
+        ("global", ["max_geometry_retries": JSONValue.number(3), "geometry_profile_mode": .string("infer"), "return_mode": .string("completion")], JSONValue.object([
+            "workspace": .null, "max_geometry_retries": .number(3), "geometry_profile_mode": .string("infer"),
+        ])),
+        ("workspace", ["workspace": .string("T"), "geometry_profile_mode": .string("optimistic"), "return_mode": .string("completion")], .object([
+            "workspace": .string("T"), "max_geometry_retries": .number(3), "geometry_profile_mode": .string("optimistic"),
+        ])),
+    ] {
+        let replies = await handler.handle(text: try clientMessage(.request(.init(
+            requestId: id, method: .geometryPolicySet, params: params
+        ))), clientID: UUID())
+        let receipt = try #require(try response(replies[0]).result)
+        guard case .object(let object) = receipt else {
+            Issue.record("expected transaction receipt")
+            continue
+        }
+        #expect(object["result"] == expected)
+    }
+}
+
 @Test func configurationAppliesWorkspaceLayoutSettingsAtRuntime() async throws {
     let (handler, state) = try daemonHandler()
     let inventory = try await state.refresh().snapshot.inventory
@@ -80,6 +164,199 @@ private func response(_ text: String) throws -> Response {
     #expect(workspace["resize_increment"] as? Double == 7)
     #expect(workspace["preferred_display_id"] as? String == "display:1")
     #expect(workspace["margin"] as? [String: Double] == ["top": 1, "right": 2, "bottom": 3, "left": 4])
+}
+
+@Test func displayListIsConciseUnlessVerbose() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let state = DaemonHandler.State(provider: SystemInventoryProvider(scanner: .init(sources: .init(
+        displays: TwoDisplays(), accessibility: StubAX(), coreGraphics: StubCG()
+    ))))
+    let handler = DaemonHandler(
+        state: state,
+        workspaces: try WorkspaceController(buildVersion: "test", stateURL: directory.appendingPathComponent("state.json"))
+    )
+    _ = try await state.refresh()
+
+    let concise = await handler.handle(text: try clientMessage(.request(.init(
+        requestId: "concise", method: .displayList, params: ["verbose": .bool(false)]
+    ))), clientID: UUID())
+    let conciseResult = try #require(try response(concise[0]).result)
+    let conciseJSON = try #require(JSONSerialization.jsonObject(with: ProtocolCodec.encode(conciseResult)) as? [String: Any])
+    let displays = try #require(conciseJSON["displays"] as? [[String: Any]])
+    #expect(displays[0]["core_graphics_display_id"] as? String == "1")
+    #expect(displays[0]["frame"] == nil)
+
+    let verbose = await handler.handle(text: try clientMessage(.request(.init(
+        requestId: "verbose", method: .displayList, params: ["verbose": .bool(true)]
+    ))), clientID: UUID())
+    let verboseResult = try #require(try response(verbose[0]).result)
+    let verboseJSON = try #require(JSONSerialization.jsonObject(with: ProtocolCodec.encode(verboseResult)) as? [String: Any])
+    #expect(((verboseJSON["displays"] as? [[String: Any]])?.first?["frame"] as? [String: Any]) != nil)
+}
+
+@Test func workspaceMoveResolvesDisplayIdentifiers() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let state = DaemonHandler.State(provider: SystemInventoryProvider(scanner: .init(sources: .init(
+        displays: TwoDisplays(), accessibility: StubAX(), coreGraphics: StubCG()
+    ))))
+    let handler = DaemonHandler(
+        state: state,
+        workspaces: try WorkspaceController(buildVersion: "test", stateURL: directory.appendingPathComponent("state.json"))
+    )
+    let inventory = try await state.refresh().snapshot.inventory
+    _ = try await handler.loadConfiguration(source: #"{"workspaces":[{"name":"T"}]}"#, inventory: inventory)
+
+    for (key, value) in [
+        ("core_graphics_display_id", "7"), ("ns_screen_number", "2"), ("name", "Studio Display"),
+    ] {
+        let replies = await handler.handle(text: try clientMessage(.request(.init(
+            requestId: key, method: .workspaceMoveDisplay, params: [
+                "workspace": .string("T"), "display_selector": .object([key: .string(value)]),
+            ]
+        ))), clientID: UUID())
+        #expect(try response(replies[0]).error == nil)
+    }
+}
+
+@Test func workspaceMoveNextDefaultsToFocusedAndWraps() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let state = DaemonHandler.State(provider: SystemInventoryProvider(scanner: .init(sources: .init(
+        displays: TwoDisplays(), accessibility: StubAX(), coreGraphics: StubCG()
+    ))))
+    let controller = try WorkspaceController(
+        buildVersion: "test", stateURL: directory.appendingPathComponent("state.json")
+    )
+    let handler = DaemonHandler(state: state, workspaces: controller)
+    let inventory = try await state.refresh().snapshot.inventory
+    _ = try await handler.loadConfiguration(source: #"{"workspaces":[{"name":"T"}]}"#, inventory: inventory)
+    _ = try await controller.focus(name: "T", displayID: "display:built-in")
+
+    for expected in ["display:external", "display:built-in"] {
+        let replies = await handler.handle(text: try clientMessage(.request(.init(
+            requestId: expected, method: .workspaceMoveDisplay, params: [
+                "next": .bool(true), "return_mode": .string("completion"),
+            ]
+        ))), clientID: UUID())
+        let value = try response(replies[0])
+        #expect(value.error == nil, Comment(rawValue: value.error?.message ?? expected))
+        #expect(await controller.snapshot()[workspace: "T"]?.displayID == expected, Comment(rawValue: expected))
+    }
+}
+
+@Test func configurationResolvesDisplayAffinitySelectors() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let state = DaemonHandler.State(provider: SystemInventoryProvider(scanner: .init(sources: .init(
+        displays: TwoDisplays(), accessibility: StubAX(), coreGraphics: StubCG()
+    ))))
+    let controller = try WorkspaceController(
+        buildVersion: "test", stateURL: directory.appendingPathComponent("state.json")
+    )
+    let handler = DaemonHandler(state: state, workspaces: controller)
+    let inventory = try await state.refresh().snapshot.inventory
+
+    _ = try await handler.loadConfiguration(source: #"""
+    {
+      "workspaces":[
+        {"name":"cg","preferred_display":{"core_graphics_display_id":"7"}},
+        {"name":"ns","preferred_display":{"ns_screen_number":"2"}},
+        {"name":"named","preferred_display":{"name":"Studio Display"}}
+      ]
+    }
+    """#, inventory: inventory)
+
+    let workspaceState = await controller.snapshot()
+    #expect(workspaceState[workspace: "cg"]?.displayID == "display:external")
+    #expect(workspaceState[workspace: "ns"]?.displayID == "display:external")
+    #expect(workspaceState[workspace: "named"]?.displayID == "display:external")
+}
+
+@Test func displayLayoutOverridesApplyAfterWorkspaceSettings() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let state = DaemonHandler.State(provider: SystemInventoryProvider(scanner: .init(sources: .init(
+        displays: TwoDisplays(), accessibility: StubAX(), coreGraphics: StubCG()
+    ))))
+    let controller = try WorkspaceController(
+        buildVersion: "test", stateURL: directory.appendingPathComponent("state.json")
+    )
+    let handler = DaemonHandler(state: state, workspaces: controller)
+    let inventory = try await state.refresh().snapshot.inventory
+
+    _ = try await handler.loadConfiguration(source: #"""
+    {
+      "defaults":{"margin":{"top":1,"right":2,"bottom":3,"left":4},"gap":5},
+      "displays":[{"display":{"ns_screen_number":"2"},"margin":{"top":20,"left":40},"gap":12}],
+      "workspaces":[{"name":"T","preferred_display":{"name":"Studio Display"},"margin":{"right":8}}]
+    }
+    """#, inventory: inventory)
+
+    let workspace = await controller.snapshot()[workspace: "T"]
+    #expect(workspace?.displayID == "display:external")
+    #expect(workspace?.margin == .init(top: 20, right: 8, bottom: 3, left: 40))
+    #expect(workspace?.gap == 12)
+}
+
+@Test func movedWorkspaceReappliesDestinationDisplayOverrides() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let controller = try WorkspaceController(
+        buildVersion: "test", stateURL: directory.appendingPathComponent("state.json")
+    )
+    let displays = await TwoDisplays().displays().value
+    let configuration = try ConfigurationParser.parse(#"""
+    {
+      "displays":[{"display":{"ns_screen_number":"2"},"margin":{"top":32}}],
+      "workspaces":[{"name":"B","preferred_display":"display:1"}]
+    }
+    """#)
+    let configured = await controller.configuredState(
+        configuration, defaultDisplayID: "display:1", displays: displays
+    )
+    var source = configured
+    _ = try source.focusWorkspace(named: "B", displayID: "display:1")
+    try await controller.commit(source)
+
+    var moved = try await controller.previewMoveWorkspace("B", to: "display:external")
+    moved.workspaceState = await controller.configuredState(
+        configuration, defaultDisplayID: "display:external", displays: displays,
+        state: moved.workspaceState
+    )
+    #expect(moved.workspaceState[workspace: "B"]?.margin.top == 32)
+
+    var returned = moved.workspaceState
+    _ = try returned.moveWorkspace(named: "B", to: "display:1")
+    returned = await controller.configuredState(
+        configuration, defaultDisplayID: "display:1", displays: displays, state: returned
+    )
+    #expect(returned[workspace: "B"]?.margin.top == 0)
+}
+
+@Test func wildcardDisplayLayoutOverridesApplyToEveryConnectedDisplay() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let state = DaemonHandler.State(provider: SystemInventoryProvider(scanner: .init(sources: .init(
+        displays: TwoDisplays(), accessibility: StubAX(), coreGraphics: StubCG()
+    ))))
+    let controller = try WorkspaceController(
+        buildVersion: "test", stateURL: directory.appendingPathComponent("state.json")
+    )
+    let handler = DaemonHandler(state: state, workspaces: controller)
+    let inventory = try await state.refresh().snapshot.inventory
+
+    _ = try await handler.loadConfiguration(source: #"""
+    {
+      "displays":[{"display":"*","margin":{"top":8,"right":8,"bottom":8,"left":8},"gap":8}],
+      "workspaces":[{"name":"external","preferred_display":"display:external"}]
+    }
+    """#, inventory: inventory)
+
+    let workspaces = await controller.snapshot().workspaces
+    #expect(workspaces.allSatisfy { $0.margin == .init(top: 8, right: 8, bottom: 8, left: 8) })
+    #expect(workspaces.allSatisfy { $0.gap == 8 })
 }
 
 @Test func configurationFallsBackFromUnknownDisplayAndResetsRemovedSettings() async throws {
@@ -307,26 +584,25 @@ private func response(_ text: String) throws -> Response {
     #expect(await probe.failureCount == 1)
 }
 
-@Test func unstableDisplaysUseBoundedDegradedFallback() async throws {
+@Test func unstableDisplaysRemainPausedWithoutRebuilding() async {
     actor Displays {
         var value = 0
         func next() -> Int { defer { value += 1 }; return value }
     }
     let displays = Displays()
     let epochs = SessionTransitionEpochs<Int, Void>(maximumDisplayAttempts: 3, sleep: { _ in })
-    let result = try await epochs.resynchronize(
-        cause: .clamshell,
-        pause: {},
-        displays: { await displays.next() },
-        permissions: {},
-        recreateObservers: { _ in },
-        rebuildInventory: {},
-        reconstructAndReconcile: { _ in },
-        resume: {}
-    )
-
-    #expect(!result.displayStabilized)
-    #expect(result.stabilizationAttempts == 3)
+    await #expect(throws: SessionTransitionError.displayTopologyUnstable(attempts: 3)) {
+        try await epochs.resynchronize(
+            cause: .clamshell,
+            pause: {},
+            displays: { await displays.next() },
+            permissions: {},
+            recreateObservers: { _ in Issue.record("unstable topology must not recreate observers") },
+            rebuildInventory: { Issue.record("unstable topology must not rebuild inventory") },
+            reconstructAndReconcile: { _ in Issue.record("unstable topology must not reconcile") },
+            resume: { Issue.record("unstable topology must not resume") }
+        )
+    }
 }
 
 @Test func sessionActivationAfterSleepIsClassifiedAsUnlock() async {
@@ -335,14 +611,60 @@ private func response(_ text: String) throws -> Response {
     #expect(await epochs.activationCause() == .unlock)
 }
 
-@Test func invalidPersistedStateFailsControllerInitialization() throws {
+@Test func invalidPersistedStateIsQuarantinedAndRecoversByRulesThenFallback() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let stateURL = directory.appendingPathComponent("state.json")
     try Data("not json".utf8).write(to: stateURL)
-    #expect(throws: WorkspaceControllerError.self) {
-        _ = try WorkspaceController(buildVersion: "test", stateURL: stateURL)
+    let controller = try WorkspaceController(buildVersion: "test", stateURL: stateURL)
+    #expect(await controller.recoveredFromInvalidPersistedState)
+    #expect(!FileManager.default.fileExists(atPath: stateURL.path))
+    #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).contains {
+        $0.hasPrefix("state.corrupt.")
+    })
+
+    let configuration = try ConfigurationParser.parse(#"""
+    {
+      "defaults":{"gap":3},
+      "workspaces":[
+        {"name":"rules","preferred_display":"display:external","gap":11},
+        {"name":"missing","preferred_display":"unavailable"}
+      ],
+      "rules":[
+        {"match":{"property":"bundle_id","operator":"exact","value":"com.example.match"},"actions":{"workspace":"rules"}}
+      ]
     }
+    """#)
+    let displays = await TwoDisplays().displays().value
+    let windows = [
+        recoveryWindow(id: "window:matched", bundleID: "com.example.match", displayID: "display:built-in"),
+        recoveryWindow(id: "window:unmatched", bundleID: "com.example.other", displayID: nil),
+    ]
+    let inventory = InventorySnapshot(
+        timestamp: .init(timeIntervalSince1970: 0), durationMilliseconds: 0, displays: displays,
+        rawAXWindows: [], rawCGWindows: [], windows: windows, rejectedAXWindows: [],
+        joinDecisions: [], sourceHealth: [], appScans: []
+    )
+    let scanner = InventoryScanner(sources: .init(
+        displays: StubDisplays(), accessibility: StubAX(), coreGraphics: StubCG()
+    ))
+    let handler = DaemonHandler(
+        state: .init(provider: SystemInventoryProvider(scanner: scanner)), workspaces: controller
+    )
+    try await handler.recoverInvalidPersistedState(
+        configuration: configuration, inventory: inventory, defaultDisplayID: "display:built-in"
+    )
+
+    let recovered = await controller.snapshot()
+    #expect(recovered[workspace: "rules"]?.windowIDs == ["window:matched"])
+    #expect(recovered[workspace: "1"]?.windowIDs == ["window:unmatched"])
+    #expect(recovered[workspace: "rules"]?.gap == 11)
+    #expect(recovered[workspace: "rules"]?.displayID == "display:external")
+    #expect(recovered[workspace: "rules"]?.preferredDisplayID == "display:external")
+    #expect(recovered[workspace: "missing"]?.displayID == "display:built-in")
+    #expect(recovered[workspace: "missing"]?.preferredDisplayID == nil)
+    #expect(recovered.workspaces.flatMap(\.windowIDs).sorted() == ["window:matched", "window:unmatched"])
+    #expect(Set(recovered.workspaces.flatMap(\.windowIDs)).count == 2)
     try? FileManager.default.removeItem(at: directory)
 }
 
@@ -544,5 +866,14 @@ private func inventory(_ ids: [String], enumeration: SourceStatus? = nil) -> Inv
         rawCGWindows: [], windows: windows, rejectedAXWindows: [], joinDecisions: [],
         sourceHealth: enumeration.map { [.init(source: .accessibility, status: $0, permissionGranted: true, issues: [])] } ?? [],
         appScans: []
+    )
+}
+
+private func recoveryWindow(id: String, bundleID: String, displayID: String?) -> NormalizedWindow {
+    NormalizedWindow(
+        id: id, pid: 1, appName: "Test", bundleID: bundleID, executablePath: "/Applications/Test.app/Test",
+        frame: .init(x: 0, y: 0, width: 100, height: 100), displayID: displayID,
+        classification: .normal, management: .managed, rejectionReasons: [], joinConfidence: .exact,
+        joinSignals: [], health: .healthy, healthIssues: []
     )
 }
