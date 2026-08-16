@@ -106,6 +106,17 @@ import Testing
   #expect(state[workspace: "destination"]?.displayID == "live-display")
 }
 
+@Test func transitionIdentifiesMovedWindowWithoutParkingIt() throws {
+  let before = sampleState()
+  var after = before
+  _ = try after.moveWindows(["a"], to: "destination")
+
+  let transition = WorkspaceTransitionPlan(before: before, after: after, destination: "destination")
+  #expect(transition.movedWindowIDs == ["a"])
+  #expect(transition.incomingWindowIDs == ["a"])
+  #expect(transition.outgoingWindowIDs == ["b", "c"])
+}
+
 @Test func singleWindowBSPUsesFullBounds() {
   let workspace = tiled("single", display: "d", windows: ["zen"])
 

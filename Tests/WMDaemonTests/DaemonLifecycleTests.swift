@@ -52,11 +52,37 @@ private struct StubCG: CoreGraphicsInventorySource {
     }
 }
 
+private struct WindowCG: CoreGraphicsInventorySource {
+    let titles: [String]
+    func windows() async -> SourceResult<[WMInventory.RawCGWindow]> {
+        .init(value: titles.enumerated().map { index, title in
+            .init(cgWindowID: UInt32(index + 1), pid: 1, ownerName: "Test", title: title,
+                  layer: 0, alpha: 1, onScreen: true,
+                  frame: .init(x: Double(index * 100), y: 0, width: 100, height: 100))
+        }, health: .init(source: .coreGraphics, status: .healthy, permissionGranted: true))
+    }
+}
+
 private struct StubAX: AccessibilityInventorySource {
     func applications() async -> SourceResult<[ApplicationObservation]> {
         .init(value: [], health: .init(source: .accessibility, status: .healthy, permissionGranted: true))
     }
     func windows(for application: ApplicationObservation) async throws -> [WMInventory.RawAXWindow] { [] }
+}
+
+private struct WindowAX: AccessibilityInventorySource {
+    let titles: [String]
+    func applications() async -> SourceResult<[ApplicationObservation]> {
+        .init(value: [.init(pid: 1, name: "Test")], health: .init(
+            source: .accessibility, status: .healthy, permissionGranted: true))
+    }
+    func windows(for application: ApplicationObservation) async throws -> [WMInventory.RawAXWindow] {
+        titles.enumerated().map { index, title in
+            .init(pid: 1, appName: "Test", title: title, role: "AXWindow",
+                  frame: .init(x: Double(index * 100), y: 0, width: 100, height: 100),
+                  cgWindowID: UInt32(index + 1))
+        }
+    }
 }
 
 private actor EventProbe {
@@ -66,9 +92,11 @@ private actor EventProbe {
 }
 
 private actor DirectionalGeometry: WindowGeometryEffects {
+    enum Operation: Equatable { case set(String), focus(String), park(String) }
     var frames: [String: InventoryRect]
     var focused: String?
     var failFocus = false
+    var operations: [Operation] = []
 
     init(frames: [String: InventoryRect]) { self.frames = frames }
     func setFailFocus(_ value: Bool) { failFocus = value }
@@ -79,6 +107,7 @@ private actor DirectionalGeometry: WindowGeometryEffects {
         return .init(windowID: window.id, frame: frame.protocolFrame, observedAt: .init())
     }
     func set(window: NormalizedWindow, params: WindowFrameSetParams) async throws -> WindowFrameSetResult {
+        operations.append(.set(window.id))
         frames[window.id] = .init(
             x: params.frame.x, y: params.frame.y,
             width: params.frame.width, height: params.frame.height)
@@ -86,16 +115,22 @@ private actor DirectionalGeometry: WindowGeometryEffects {
                      verified: true, attempts: 1, strategy: .positionThenSize, durationMilliseconds: 0)
     }
     func setGeometry(window: NormalizedWindow, request: WindowGeometrySetRequest) async throws -> WindowGeometrySetOutcome {
+        operations.append(.set(window.id))
         frames[window.id] = request.frame
         return .init(requestedFrame: request.frame, observedFrame: request.frame,
                      classification: .exact, attempts: 1, strategy: .positionThenSize)
     }
     func focus(window: NormalizedWindow) async throws {
         if failFocus { throw WindowGeometryFailure(code: .geometryVerificationFailed, message: "focus failed") }
+        operations.append(.focus(window.id))
         focused = window.id
     }
     func fit(window: NormalizedWindow, within frame: InventoryRect) async throws -> InventoryRect { frame }
-    func park(window: NormalizedWindow, frame: InventoryRect) async throws -> InventoryRect { frame }
+    func park(window: NormalizedWindow, frame: InventoryRect) async throws -> InventoryRect {
+        operations.append(.park(window.id))
+        frames[window.id] = frame
+        return frame
+    }
 }
 
 private func clientMessage(_ message: ClientMessage) throws -> String {
@@ -350,6 +385,67 @@ private func response(_ text: String) throws -> Response {
     }
     #expect(failure["code"] == .string("geometry_verification_failed"))
     #expect(await controller.snapshot() == committed)
+}
+
+@Test func moveWindowFollowsAndTilesWithoutParkingMovedWindow() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let controller = try WorkspaceController(
+        buildVersion: "test", stateURL: directory.appendingPathComponent("state.json"))
+    try await controller.commit(.init(
+        workspaces: [
+            .init(name: "source", origin: .configured, displayID: "display:1", visible: true, focused: true,
+                  windowIDs: ["window:cg:1", "window:cg:2"], focusedWindowID: "window:cg:1",
+                  bsp: .init(root: .split(axis: .vertical, ratio: 0.5,
+                      first: .leaf(windowID: "window:cg:1"), second: .leaf(windowID: "window:cg:2")))),
+            .init(name: "destination", origin: .configured, displayID: "display:1",
+                  windowIDs: ["window:cg:3"], focusedWindowID: "window:cg:3",
+                  bsp: .init(root: .leaf(windowID: "window:cg:3"))),
+        ], focusedWorkspaceName: "source",
+        displays: ["display:1": .init(visibleWorkspaceName: "source")]))
+    let geometry = DirectionalGeometry(frames: [
+        "window:cg:1": .init(x: 0, y: 0, width: 500, height: 800),
+        "window:cg:2": .init(x: 500, y: 0, width: 500, height: 800),
+        "window:cg:3": .init(x: 0, y: 0, width: 1000, height: 800),
+    ])
+    let state = DaemonHandler.State(provider: SystemInventoryProvider(scanner: .init(sources: .init(
+        displays: StubDisplays(), accessibility: WindowAX(titles: ["moving", "peer", "resident"]),
+        coreGraphics: WindowCG(titles: ["moving", "peer", "resident"])))))
+    let handler = DaemonHandler(state: state, workspaces: controller, geometryEffects: geometry)
+    _ = try await state.refresh()
+    let windows = ["window:cg:1", "window:cg:2", "window:cg:3"].map {
+        recoveryWindow(id: $0, bundleID: "test", displayID: "display:1")
+    }
+    try await handler.reconcileObservedWindows(lifecycleInventory(windows), displayID: "display:1")
+
+    let replies = await handler.handle(text: try clientMessage(.request(.init(
+        requestId: "move", method: .workspaceMoveWindow,
+        params: ["workspace": .string("destination"), "window_ids": .array([.string("window:cg:1")]),
+                 "return_mode": .string("completion")]
+    ))), clientID: UUID())
+
+    #expect(try response(replies[0]).error == nil)
+    let committed = await controller.snapshot()
+    #expect(committed.focusedWorkspaceName == "destination")
+    #expect(committed[workspace: "source"]?.windowIDs == ["window:cg:2"])
+    #expect(committed[workspace: "destination"]?.windowIDs == ["window:cg:3", "window:cg:1"])
+    let operations = await geometry.operations
+    #expect(operations == [
+        .park("window:cg:2"), .set("window:cg:1"), .set("window:cg:3"), .focus("window:cg:1"),
+    ])
+
+    let observed = await handler.handle(text: try clientMessage(.request(.init(
+        requestId: "observe", method: .observeWorkspace,
+        params: ["name": .string("destination")]
+    ))), clientID: UUID())
+    guard case .object(let result)? = try response(observed[0]).result,
+          case .array(let reports)? = result["windows"],
+          case .object(let moved)? = reports.last,
+          case .object(let expected)? = moved["expected"] else {
+        Issue.record("expected workspace observation")
+        return
+    }
+    #expect(expected["management"] == .string("managed"))
 }
 
 @Test func configurationResolvesDisplayAffinitySelectors() async throws {

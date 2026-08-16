@@ -1004,16 +1004,9 @@ actor DaemonHandler: WebSocketRequestHandler {
         }.first
         var mutation = try await workspaces.previewMoveWindows(
           ids, to: params.workspace, displayID: liveDisplayID)
-        if before.focusedWorkspaceName == params.workspace {
-          try await reconcileWorkspaceFocus(
-            before: before, after: &mutation.workspaceState, name: params.workspace,
-            inventory: currentSnapshot.inventory)
-        } else {
-          for source in Set(ids.compactMap { before.workspaceName(containing: $0) }) {
-            guard mutation.workspaceState[workspace: source]?.visible == true else { continue }
-            try await tileWorkspace(mutation.workspaceState, named: source, inventory: currentSnapshot.inventory)
-          }
-        }
+        try await reconcileWorkspaceFocus(
+          before: before, after: &mutation.workspaceState, name: params.workspace,
+          inventory: currentSnapshot.inventory)
         try await workspaces.commitFocus(mutation)
         await publishWorkspaceMutation(mutation, before: before, reason: .workspaceFocused)
         result = workspaceMutation(mutation)
@@ -1531,7 +1524,11 @@ actor DaemonHandler: WebSocketRequestHandler {
 
   private func retainSessionWindows(_ windows: [NormalizedWindow]) {
     for window in windows where window.classification == .normal {
-      sessionWindows[window.id] = window
+      var retained = window
+      if sessionWindows[window.id]?.management == .managed && retained.management == .unmanaged {
+        retained.management = .managed
+      }
+      sessionWindows[window.id] = retained
     }
   }
 
@@ -1743,6 +1740,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     let transition = WorkspaceTransitionPlan(before: before, after: after, destination: name)
     let incomingIDs = transition.incomingWindowIDs
     let outgoingIDs = transition.outgoingWindowIDs
+    let movedIDs = transition.movedWindowIDs
     retainSessionWindows(inventory.windows)
     let windowsByID = sessionWindows
     let previousParkedFrames = after.parkedWindowFrames
@@ -1845,7 +1843,7 @@ actor DaemonHandler: WebSocketRequestHandler {
       } else {
         try await tileWorkspace(
           after, named: name, inventory: inventory,
-          forceStack: false)
+          forceStack: false, priorityWindowIDs: movedIDs)
       }
       stage = "focus_incoming"
       try await focusWorkspaceWindow(after, named: name, inventory: inventory)
@@ -1889,7 +1887,8 @@ actor DaemonHandler: WebSocketRequestHandler {
     _ state: WMWorkspace.WorkspaceState,
     named name: String,
     inventory: InventorySnapshot,
-    forceStack: Bool = false
+    forceStack: Bool = false,
+    priorityWindowIDs: Set<String> = []
   ) async throws {
     guard let workspace = state.workspaces.first(where: { $0.name == name }),
       workspace.mode == .bsp,
@@ -1920,6 +1919,9 @@ actor DaemonHandler: WebSocketRequestHandler {
         )
         var shouldReplan = false
         let orderedWindows = windows.sorted {
+          let leftPriority = priorityWindowIDs.contains($0.id)
+          let rightPriority = priorityWindowIDs.contains($1.id)
+          if leftPriority != rightPriority { return leftPriority }
           guard let left = targets[$0.id], let right = targets[$1.id] else { return $0.id < $1.id }
           let leftArea = left.width * left.height
           let rightArea = right.width * right.height
