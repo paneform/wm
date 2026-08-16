@@ -14,11 +14,30 @@ public enum WorkspaceMode: String, Codable, CaseIterable, Sendable {
     case floating
 }
 
-public enum UncooperativeWindowPolicy: String, Codable, CaseIterable, Sendable {
+public enum LayoutPolicy: String, Codable, CaseIterable, Sendable {
     case greedy
-    case stack
     case overlap
+    case stack
+    case overflow
     case reject
+
+    public static let defaultChain: [Self] = [.greedy, .overlap, .stack, .overflow]
+
+    public static func validate(_ chain: [Self]) throws {
+        guard !chain.isEmpty else { throw LayoutPolicyValidationError.empty }
+        guard Set(chain.map(\.rawValue)).count == chain.count else {
+            throw LayoutPolicyValidationError.duplicate
+        }
+        if let reject = chain.firstIndex(of: .reject), reject != chain.index(before: chain.endIndex) {
+            throw LayoutPolicyValidationError.rejectMustBeTerminal
+        }
+    }
+}
+
+public enum LayoutPolicyValidationError: Error, Equatable, Sendable {
+    case empty
+    case duplicate
+    case rejectMustBeTerminal
 }
 
 public enum GeometryProfileMode: String, Codable, CaseIterable, Sendable { case store, infer, optimistic }
@@ -188,7 +207,7 @@ public struct Workspace: Codable, Equatable, Sendable {
     public var margin: WorkspaceMargin
     public var gap: Double
     public var resizeIncrement: Double
-    public var uncooperativeWindowPolicy: UncooperativeWindowPolicy
+    public var layoutPolicy: [LayoutPolicy]
     public var maxGeometryRetries: Int
     public var geometryProfileMode: GeometryProfileMode
     public var windowIDs: [WorkspaceWindowID]
@@ -206,7 +225,7 @@ public struct Workspace: Codable, Equatable, Sendable {
         margin: WorkspaceMargin = .init(),
         gap: Double = 8,
         resizeIncrement: Double = 0.05,
-        uncooperativeWindowPolicy: UncooperativeWindowPolicy = .greedy,
+        layoutPolicy: [LayoutPolicy] = LayoutPolicy.defaultChain,
         maxGeometryRetries: Int = 5,
         geometryProfileMode: GeometryProfileMode = .store,
         windowIDs: [WorkspaceWindowID] = [],
@@ -223,7 +242,7 @@ public struct Workspace: Codable, Equatable, Sendable {
         self.margin = margin
         self.gap = gap
         self.resizeIncrement = resizeIncrement
-        self.uncooperativeWindowPolicy = uncooperativeWindowPolicy
+        self.layoutPolicy = layoutPolicy
         self.maxGeometryRetries = maxGeometryRetries
         self.geometryProfileMode = geometryProfileMode
         self.windowIDs = windowIDs
@@ -236,7 +255,7 @@ public struct Workspace: Codable, Equatable, Sendable {
         case displayID = "display_id"
         case preferredDisplayID = "preferred_display_id"
         case resizeIncrement = "resize_increment"
-        case uncooperativeWindowPolicy = "uncooperative_window_policy"
+        case layoutPolicy = "layout_policy"
         case maxGeometryRetries = "max_geometry_retries"
         case geometryProfileMode = "geometry_profile_mode"
         case windowIDs = "window_ids"

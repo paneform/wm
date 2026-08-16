@@ -47,6 +47,23 @@ public enum WorkspaceLayoutPlan: Equatable, Sendable {
   case rejected
 }
 
+public struct WorkspaceLayoutResult: Equatable, Sendable {
+  public var requestedChain: [LayoutPolicy]
+  public var attemptedChain: [LayoutPolicy]
+  public var effectivePolicy: LayoutPolicy
+  public var plan: WorkspaceLayoutPlan
+  public var fallbackOccurred: Bool
+
+  public init(requestedChain: [LayoutPolicy], attemptedChain: [LayoutPolicy],
+    effectivePolicy: LayoutPolicy, plan: WorkspaceLayoutPlan, fallbackOccurred: Bool) {
+    self.requestedChain = requestedChain
+    self.attemptedChain = attemptedChain
+    self.effectivePolicy = effectivePolicy
+    self.plan = plan
+    self.fallbackOccurred = fallbackOccurred
+  }
+}
+
 extension Workspace {
   public func layout(in bounds: WorkspaceLayoutRect) -> [WorkspaceWindowID: WorkspaceLayoutRect] {
     layout(in: bounds, minimumSizes: [:])
@@ -80,13 +97,22 @@ extension Workspace {
     in bounds: WorkspaceLayoutRect,
     cooperation: [WorkspaceWindowID: WorkspaceWindowCooperation]
   ) -> WorkspaceLayoutPlan {
+    layoutResult(in: bounds, cooperation: cooperation).plan
+  }
+
+  public func layoutResult(
+    in bounds: WorkspaceLayoutRect,
+    cooperation: [WorkspaceWindowID: WorkspaceWindowCooperation]
+  ) -> WorkspaceLayoutResult {
     let minimumSizes = cooperation.mapValues(\.minimumSize)
     let maximumSizes = cooperation.mapValues(\.maximumSize)
     guard
       cooperation.values.contains(where: { !$0.isCooperative })
         || !canFit(in: bounds, minimumSizes: minimumSizes)
     else {
-      return .frames(layout(in: bounds, minimumSizes: minimumSizes, maximumSizes: maximumSizes))
+      return .init(requestedChain: layoutPolicy, attemptedChain: [.greedy], effectivePolicy: .greedy,
+        plan: .frames(layout(in: bounds, minimumSizes: minimumSizes, maximumSizes: maximumSizes)),
+        fallbackOccurred: false)
     }
     let content = WorkspaceLayoutRect(
       x: bounds.x + margin.left,
@@ -94,27 +120,53 @@ extension Workspace {
       width: max(0, bounds.width - margin.left - margin.right),
       height: max(0, bounds.height - margin.top - margin.bottom)
     )
-    switch uncooperativeWindowPolicy {
+    var attempted: [LayoutPolicy] = []
+    for policy in layoutPolicy {
+      attempted.append(policy)
+      if policy == .reject {
+        return .init(requestedChain: layoutPolicy, attemptedChain: attempted, effectivePolicy: .reject,
+          plan: .rejected, fallbackOccurred: attempted.count > 1)
+      }
+      if let frames = policyFrames(
+        policy, bounds: bounds, content: content, cooperation: cooperation,
+        minimumSizes: minimumSizes, maximumSizes: maximumSizes) {
+        return .init(requestedChain: layoutPolicy, attemptedChain: attempted, effectivePolicy: policy,
+          plan: .frames(frames), fallbackOccurred: attempted.count > 1)
+      }
+    }
+    preconditionFailure("validated layout policy chain produced no result")
+  }
+
+  public func policyFrames(
+    _ policy: LayoutPolicy, bounds: WorkspaceLayoutRect,
+    content: WorkspaceLayoutRect,
+    cooperation: [WorkspaceWindowID: WorkspaceWindowCooperation],
+    minimumSizes: [WorkspaceWindowID: WorkspaceMinimumSize],
+    maximumSizes: [WorkspaceWindowID: WorkspaceMaximumSize]
+  ) -> [WorkspaceWindowID: WorkspaceLayoutRect]? {
+    switch policy {
     case .greedy:
-      guard canFit(in: bounds, minimumSizes: minimumSizes) else { return .rejected }
-      return .frames(layout(in: bounds, minimumSizes: minimumSizes, maximumSizes: maximumSizes))
+      guard canFit(in: bounds, minimumSizes: minimumSizes) else { return nil }
+      return layout(in: bounds, minimumSizes: minimumSizes, maximumSizes: maximumSizes)
     case .stack:
+      guard cooperation.values.allSatisfy({
+        $0.minimumSize.width <= content.width && $0.minimumSize.height <= content.height
+      }) else { return nil }
       let order = windowIDs.filter { $0 != focusedWindowID } + [focusedWindowID].compactMap { $0 }
-      return .frames(Dictionary(uniqueKeysWithValues: order.map { id in
+      return Dictionary(uniqueKeysWithValues: order.map { id in
         let maximum = cooperation[id]?.maximumSize ?? .init()
         let width = min(content.width, maximum.width ?? content.width)
         let height = min(content.height, maximum.height ?? content.height)
         return (id, .init(x: content.x, y: content.y, width: width, height: height))
-      }))
+      })
     case .overlap:
       guard
         cooperation.values.allSatisfy({
           $0.minimumSize.width <= content.width && $0.minimumSize.height <= content.height
         })
-      else { return .rejected }
+       else { return nil }
       let tiled = layout(in: bounds)
-      return .frames(
-        Dictionary(
+      return Dictionary(
           uniqueKeysWithValues: windowIDs.compactMap { id in
             guard let tile = tiled[id] else { return nil }
             let minimum = cooperation[id]?.minimumSize ?? .init()
@@ -124,15 +176,31 @@ extension Workspace {
             return (
               id,
               WorkspaceLayoutRect(
-                x: min(max(tile.x, content.x), content.x + content.width - width),
-                y: min(max(tile.y, content.y), content.y + content.height - height),
+                x: max(content.x, min(tile.x, content.x + content.width - width)),
+                y: max(content.y, min(tile.y, content.y + content.height - height)),
                 width: width, height: height
               )
             )
-          }))
+          })
     case .reject:
-      return .rejected
+      return nil
+    case .overflow:
+      return overflowFrames(bounds, cooperation: cooperation)
     }
+  }
+
+  public func overflowFrames(
+    _ bounds: WorkspaceLayoutRect,
+    cooperation: [WorkspaceWindowID: WorkspaceWindowCooperation]
+  ) -> [WorkspaceWindowID: WorkspaceLayoutRect] {
+    let allocations = layout(in: bounds)
+    return Dictionary(uniqueKeysWithValues: windowIDs.compactMap { id in
+      guard let allocation = allocations[id] else { return nil }
+      let constraint = cooperation[id] ?? .init()
+      return (id, .init(x: allocation.x, y: allocation.y,
+        width: max(allocation.width, constraint.minimumSize.width),
+        height: max(allocation.height, constraint.minimumSize.height)))
+    })
   }
 }
 

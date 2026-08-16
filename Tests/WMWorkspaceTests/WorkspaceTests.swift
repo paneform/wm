@@ -494,7 +494,7 @@ import Testing
     "b": WorkspaceWindowCooperation(minimumSize: .init(width: 292)),
   ]
 
-  workspace.uncooperativeWindowPolicy = .greedy
+  workspace.layoutPolicy = [.greedy]
   guard case .frames(let greedy) = workspace.layoutPlan(in: bounds, cooperation: cooperation) else {
     Issue.record("expected greedy frames")
     return
@@ -502,14 +502,14 @@ import Testing
   #expect(greedy["a"]?.width == 700)
   #expect(greedy["b"]?.width == 292)
 
-  workspace.uncooperativeWindowPolicy = .stack
+  workspace.layoutPolicy = [.stack]
   #expect(
     workspace.layoutPlan(in: bounds, cooperation: cooperation)
       == .frames([
         "a": bounds, "b": bounds,
       ]))
 
-  workspace.uncooperativeWindowPolicy = .overlap
+  workspace.layoutPolicy = [.overlap]
   guard case .frames(let overlap) = workspace.layoutPlan(in: bounds, cooperation: cooperation)
   else {
     Issue.record("expected overlap frames")
@@ -518,7 +518,7 @@ import Testing
   #expect(overlap["a"] == .init(x: 0, y: 0, width: 700, height: 600))
   #expect(overlap["b"] == .init(x: 504, y: 0, width: 496, height: 600))
 
-  workspace.uncooperativeWindowPolicy = .reject
+  workspace.layoutPolicy = [.reject]
   #expect(workspace.layoutPlan(in: bounds, cooperation: cooperation) == .rejected)
 }
 
@@ -531,17 +531,20 @@ import Testing
     "b": WorkspaceWindowCooperation(minimumSize: .init(width: 500)),
   ]
 
-  workspace.uncooperativeWindowPolicy = .greedy
-  #expect(workspace.layoutPlan(in: bounds, cooperation: cooperation) == .rejected)
+  workspace.layoutPolicy = [.greedy, .overlap, .stack, .overflow]
+  #expect(workspace.layoutPlan(in: bounds, cooperation: cooperation) == .frames([
+    "a": .init(x: 0, y: 0, width: 700, height: 600),
+    "b": .init(x: 500, y: 0, width: 500, height: 600),
+  ]))
 
-  workspace.uncooperativeWindowPolicy = .stack
+  workspace.layoutPolicy = [.stack]
   #expect(
     workspace.layoutPlan(in: bounds, cooperation: cooperation)
       == .frames([
         "a": bounds, "b": bounds,
       ]))
 
-  workspace.uncooperativeWindowPolicy = .overlap
+  workspace.layoutPolicy = [.overlap, .overflow]
   #expect(
     workspace.layoutPlan(in: bounds, cooperation: cooperation)
       == .frames([
@@ -549,15 +552,37 @@ import Testing
         "b": .init(x: 500, y: 0, width: 500, height: 600),
       ]))
 
-  workspace.uncooperativeWindowPolicy = .reject
+  workspace.layoutPolicy = [.reject]
   #expect(workspace.layoutPlan(in: bounds, cooperation: cooperation) == .rejected)
 
   let oversized = [
     "a": WorkspaceWindowCooperation(minimumSize: .init(width: 1_100), isCooperative: false),
     "b": WorkspaceWindowCooperation(),
   ]
-  workspace.uncooperativeWindowPolicy = .overlap
-  #expect(workspace.layoutPlan(in: bounds, cooperation: oversized) == .rejected)
+  workspace.layoutPolicy = [.overlap, .overflow]
+  #expect(workspace.layoutPlan(in: bounds, cooperation: oversized) == .frames([
+    "a": .init(x: 0, y: 0, width: 1_100, height: 600),
+    "b": .init(x: 504, y: 0, width: 496, height: 600),
+  ]))
+}
+
+@Test func layoutPolicyOrchestrationReportsFallbackAndOverflowAllocation() {
+  var workspace = Workspace(name: "1", origin: .configured, displayID: "main")
+  workspace.windowIDs = ["a", "b"]
+  workspace.bsp.root = .split(axis: .vertical, ratio: 0.5, first: .leaf(windowID: "a"), second: .leaf(windowID: "b"))
+  workspace.layoutPolicy = [.greedy, .overlap, .overflow]
+  let result = workspace.layoutResult(in: .init(x: 0, y: 0, width: 1_000, height: 600), cooperation: [
+    "a": .init(minimumSize: .init(width: 1_100), isCooperative: false),
+    "b": .init(),
+  ])
+  #expect(result.requestedChain == [.greedy, .overlap, .overflow])
+  #expect(result.attemptedChain == [.greedy, .overlap, .overflow])
+  #expect(result.effectivePolicy == .overflow)
+  #expect(result.fallbackOccurred)
+  #expect(result.plan == .frames([
+    "a": .init(x: 0, y: 0, width: 1_100, height: 600),
+    "b": .init(x: 504, y: 0, width: 496, height: 600),
+  ]))
 }
 
 private func sampleState() -> WorkspaceState {

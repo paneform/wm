@@ -76,11 +76,11 @@ actor WorkspaceController {
         return try candidate.moveWindow(direction: direction, bounds: bounds)
     }
 
-    func previewSetUncooperativePolicy(
-        _ name: String, policy: WMWorkspace.UncooperativeWindowPolicy
+    func previewSetLayoutPolicy(
+        _ name: String, policy: [WMWorkspace.LayoutPolicy]
     ) throws -> WMWorkspace.WorkspaceMutationResult {
         var candidate = state
-        return try candidate.setUncooperativeWindowPolicy(of: name, to: policy)
+        return try candidate.setLayoutPolicy(of: name, to: policy)
     }
 
     func commitFocus(_ result: WMWorkspace.WorkspaceMutationResult) throws {
@@ -153,11 +153,8 @@ actor WorkspaceController {
             )
             candidate.workspaces[index].gap = settings.gap ?? 0
             candidate.workspaces[index].resizeIncrement = settings.resizeIncrement ?? 10
-            candidate.workspaces[index].uncooperativeWindowPolicy = switch settings.uncooperativeWindowPolicy ?? .greedy {
-            case .greedy: .greedy
-            case .stack: .stack
-            case .overlap: .overlap
-            case .reject: .reject
+            candidate.workspaces[index].layoutPolicy = (settings.layoutPolicy ?? [.greedy, .overlap, .stack, .overflow]).map {
+                WMWorkspace.LayoutPolicy(rawValue: $0.rawValue)!
             }
             candidate.workspaces[index].maxGeometryRetries = settings.maxGeometryRetries ?? 5
             candidate.workspaces[index].geometryProfileMode = switch settings.geometryProfileMode ?? .store {

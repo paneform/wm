@@ -29,7 +29,7 @@ extension WorkspaceState {
     private mutating func directionalMutation(
         direction: WindowDirection, bounds: WorkspaceLayoutRect, move: Bool
     ) throws -> DirectionalWindowMutation {
-        try mutate { state in
+        return try mutate { state in
             guard let name = state.focusedWorkspaceName,
                   let index = state.index(of: name) else {
                 throw WorkspaceMutationError.focusedWorkspaceRequired
@@ -69,7 +69,7 @@ extension WorkspaceState {
         named name: WorkspaceName,
         displayID: WorkspaceDisplayID? = nil
     ) throws -> WorkspaceMutationResult {
-        try mutate { state in
+        return try mutate { state in
             let created = state.index(of: name) == nil
             if created {
                 guard let displayID = displayID ?? state.focusedWorkspace?.displayID else {
@@ -189,16 +189,17 @@ extension WorkspaceState {
         }
     }
 
-    public mutating func setUncooperativeWindowPolicy(
+    public mutating func setLayoutPolicy(
         of name: WorkspaceName,
-        to policy: UncooperativeWindowPolicy
+        to policy: [LayoutPolicy]
     ) throws -> WorkspaceMutationResult {
-        try mutate { state in
+        try LayoutPolicy.validate(policy)
+        return try mutate { state in
             guard let index = state.index(of: name) else { throw WorkspaceMutationError.workspaceNotFound(name) }
-            guard state.workspaces[index].uncooperativeWindowPolicy != policy else {
+            guard state.workspaces[index].layoutPolicy != policy else {
                 return (WorkspaceMutationResult(workspaceState: state, modifiedWorkspaces: []), false)
             }
-            state.workspaces[index].uncooperativeWindowPolicy = policy
+            state.workspaces[index].layoutPolicy = policy
             return (WorkspaceMutationResult(workspaceState: state, modifiedWorkspaces: [name]), true)
         }
     }

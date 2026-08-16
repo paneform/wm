@@ -254,12 +254,12 @@ import WMConfiguration
     #expect(try parser.parse(["workspace", "mode", "T", "floating"]) == .request(
         method: "workspace.set_mode", params: ["workspace": .string("T"), "mode": .string("floating")], url: defaultWMWebSocketURL
     ))
-    #expect(try parser.parse(["uncooperative-window-policy", "stack"]) == .request(
-        method: "uncooperative_window_policy.set", params: ["policy": .string("stack")], url: defaultWMWebSocketURL
+    #expect(try parser.parse(["layout-policy", "stack,overflow"]) == .request(
+        method: "layout_policy.set", params: ["policy": .array([.string("stack"), .string("overflow")])], url: defaultWMWebSocketURL
     ))
-    #expect(try parser.parse(["workspace", "uncooperative-window-policy", "T", "reject"]) == .request(
-        method: "uncooperative_window_policy.set",
-        params: ["workspace": .string("T"), "policy": .string("reject")], url: defaultWMWebSocketURL
+    #expect(try parser.parse(["workspace", "layout-policy", "T", "reject"]) == .request(
+        method: "layout_policy.set",
+        params: ["workspace": .string("T"), "policy": .array([.string("reject")])], url: defaultWMWebSocketURL
     ))
     #expect(try parser.parse(["geometry-policy", "--max-retries", "4", "--profile-mode", "store"]) == .request(
         method: "geometry_policy.set", params: [
@@ -278,7 +278,7 @@ import WMConfiguration
         ["workspace"], ["workspace", "focus"], ["workspace", "move-window"],
         ["workspace", "move", "T"], ["workspace", "move-display", "T", "display:1"],
         ["workspace", "mode", "T", "stacked"],
-        ["uncooperative-window-policy", "float"],
+        ["layout-policy", "float"],
         ["geometry-policy"], ["geometry-policy", "--max-retries", "0"],
         ["geometry-policy", "--profile-mode", "cached"],
     ]

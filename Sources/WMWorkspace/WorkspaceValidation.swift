@@ -15,6 +15,7 @@ public enum WorkspaceValidationIssue: Equatable, Sendable {
     case previousWorkspaceInvalid(displayID: WorkspaceDisplayID, name: WorkspaceName)
     case runtimeAssignmentInvalid(workspace: WorkspaceName, displayID: WorkspaceDisplayID)
     case parkedWindowMissing(WorkspaceWindowID)
+    case invalidLayoutPolicy(WorkspaceName)
 }
 
 public struct WorkspaceValidationError: Error, Equatable, Sendable {
@@ -77,6 +78,9 @@ extension WorkspaceState {
 }
 
 private func validateWorkspace(_ workspace: Workspace, into issues: inout [WorkspaceValidationIssue]) {
+    if (try? LayoutPolicy.validate(workspace.layoutPolicy)) == nil {
+        issues.append(.invalidLayoutPolicy(workspace.name))
+    }
     let leaves = workspace.bsp.root?.windowIDs ?? []
     for (id, matches) in Dictionary(grouping: leaves, by: { $0 }) where matches.count > 1 {
         issues.append(.duplicateWindowID(id))

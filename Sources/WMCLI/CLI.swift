@@ -138,7 +138,7 @@ public struct CLIParser: Sendable {
         case "debug": return try parseDebug(rest)
         case "observe": return try parseObserve(rest)
         case "workspace": return try parseWorkspace(rest)
-        case "uncooperative-window-policy": return try parseUncooperativeWindowPolicy(rest)
+        case "layout-policy": return try parseLayoutPolicy(rest)
         case "geometry-policy": return try parseGeometryPolicy(rest)
         case "diagnostics": return try nestedRequest("diagnostics", child: "inventory", method: "diagnostics.inventory", rest)
         case "inventory": return try nestedRequest("inventory", child: "refresh", method: "inventory.refresh", rest)
@@ -389,26 +389,28 @@ public struct CLIParser: Sendable {
         case "move-window-bulk": return try parseWorkspaceMoveWindowBulk(values)
         case "move": return try parseWorkspaceMoveDisplay(values)
         case "mode": return try parseWorkspaceMode(values)
-        case "uncooperative-window-policy": return try parseUncooperativeWindowPolicy(values, workspace: true)
+        case "layout-policy": return try parseLayoutPolicy(values, workspace: true)
         default: throw CLIParseError("unknown workspace command: \(operation)")
         }
     }
 
-    private func parseUncooperativeWindowPolicy(
+    private func parseLayoutPolicy(
         _ arguments: [String], workspace: Bool = false
     ) throws -> CLICommand {
         let policyIndex = workspace ? 1 : 0
         guard arguments.count > policyIndex else {
             throw CLIParseError(workspace ? "expected workspace name and policy" : "expected policy")
         }
-        let policy = arguments[policyIndex]
-        guard ["greedy", "stack", "overlap", "reject"].contains(policy) else {
-            throw CLIParseError("invalid uncooperative-window policy: \(policy)")
+        let policy = arguments[policyIndex].split(separator: ",").map(String.init)
+        guard !policy.isEmpty, Set(policy).count == policy.count,
+              policy.allSatisfy({ ["greedy", "overlap", "stack", "overflow", "reject"].contains($0) }),
+              policy.firstIndex(of: "reject").map({ $0 == policy.count - 1 }) != false else {
+            throw CLIParseError("invalid layout policy chain")
         }
-        var params: [String: JSONValue] = ["policy": .string(policy)]
+        var params: [String: JSONValue] = ["policy": .array(policy.map(JSONValue.string))]
         if workspace { params["workspace"] = .string(arguments[0]) }
         return .request(
-            method: "uncooperative_window_policy.set", params: params,
+            method: "layout_policy.set", params: params,
             url: try parseURLOnly(Array(arguments.dropFirst(policyIndex + 1)))
         )
     }

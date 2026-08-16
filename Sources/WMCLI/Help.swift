@@ -112,7 +112,7 @@ COMMANDS
       --url URL                Connect to a WebSocket URL.
     mode NAME bsp|floating     Set a workspace's layout mode.
       --url URL                Connect to a WebSocket URL.
-    uncooperative-window-policy NAME POLICY
+    layout-policy NAME POLICY[,POLICY...]
                                 Override constrained-window behavior for a workspace.
       greedy                    Take space from peer tiles to satisfy minimum sizes.
       stack                     Give every window the workspace frame; focus controls the front.
@@ -120,7 +120,7 @@ COMMANDS
       reject                    Restore the previous layout and fail the action.
       --url URL                Connect to a WebSocket URL.
 
-  uncooperative-window-policy POLICY
+  layout-policy POLICY[,POLICY...]
                                 Set the global runtime constrained-window policy.
     greedy                     Take space from peer tiles to satisfy minimum sizes.
     stack                      Give every window the workspace frame; focus controls the front.

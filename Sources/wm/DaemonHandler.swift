@@ -28,14 +28,15 @@ actor DaemonHandler: WebSocketRequestHandler {
   private var stateSnapshotSubscriptions: [UUID: [String: SnapshotDetail]] = [:]
   private var workspaceSequence: UInt64 = 0
   private var windowMinimumSizes: [String: WorkspaceMinimumSize] = [:]
-  private var uncooperativeWindowPolicy: WMWorkspace.UncooperativeWindowPolicy = .greedy
-  private var workspaceUncooperativeWindowPolicies:
-    [String: WMWorkspace.UncooperativeWindowPolicy] = [:]
+  private var layoutPolicy = WMWorkspace.LayoutPolicy.defaultChain
+  private var workspaceLayoutPolicies: [String: [WMWorkspace.LayoutPolicy]] = [:]
+  private var workspaceLayoutResults: [String: WorkspaceLayoutResult] = [:]
   private var maxGeometryRetries = 5
   private var geometryProfileMode: WMWorkspace.GeometryProfileMode = .store
   private var workspaceGeometryPolicies:
     [String: (retries: Int?, mode: WMWorkspace.GeometryProfileMode?)] = [:]
   private var observerGeometryReliability = ObserverGeometryReliability()
+  private var expectedActivationPIDs: [Int32: Date] = [:]
   private var sessionWindows: [String: NormalizedWindow] = [:]
   private var lifecycle = ManagedWindowLifecycle()
   private var daemonLifecycle = DaemonLifecycle()
@@ -103,6 +104,9 @@ actor DaemonHandler: WebSocketRequestHandler {
     async throws
   {
     guard automaticReconciliationEnabled else { return }
+    let now = Date()
+    expectedActivationPIDs = expectedActivationPIDs.filter { $0.value > now }
+    if expectedActivationPIDs.removeValue(forKey: frontmostPID) != nil { return }
     let receipt = try await submitInternal(
       name: "observer.activation", idempotencyKey: "activation:\(frontmostPID)"
     ) { [weak self] in
@@ -243,8 +247,9 @@ actor DaemonHandler: WebSocketRequestHandler {
       throw WorkspaceRequestError.displayRequired
     }
     let before = await workspaces.snapshot()
-    uncooperativeWindowPolicy = workspacePolicy(
-      candidate.defaults.uncooperativeWindowPolicy ?? .greedy)
+    layoutPolicy = workspacePolicies(
+      candidate.defaults.layoutPolicy ?? [.greedy, .overlap, .stack, .overflow])
+    workspaceLayoutPolicies.removeAll()
     maxGeometryRetries = candidate.defaults.maxGeometryRetries ?? 5
     geometryProfileMode = workspaceProfileMode(candidate.defaults.geometryProfileMode ?? .store)
     var after = await workspaces.configuredState(
@@ -748,7 +753,7 @@ actor DaemonHandler: WebSocketRequestHandler {
           try await tileWorkspace(
             mutation.workspaceState, named: name, inventory: snapshot.inventory)
         }
-        try await geometry.focus(window: resolveWindow(target, in: snapshot.inventory.windows))
+        try await focusWindow(resolveWindow(target, in: snapshot.inventory.windows))
         mutation.effectStatus = .verified
         try await workspaces.commitFocus(mutation)
         await publishWorkspaceMutation(
@@ -850,7 +855,13 @@ actor DaemonHandler: WebSocketRequestHandler {
         }
         automaticReconciliationEnabled = enabled
         result = debugEngineState()
-      case .diagnosticsInventory: result = json(snapshot.inventory)
+      case .diagnosticsInventory:
+        result = .object([
+          "inventory": json(snapshot.inventory),
+          "layout": .object(Dictionary(uniqueKeysWithValues: workspaceLayoutResults.map {
+            ($0.key, layoutResultJSON($0.value))
+          })),
+        ])
       case .inventoryRefresh:
         let inventory = committed.snapshot.inventory
         if let displayID =
@@ -1086,19 +1097,20 @@ actor DaemonHandler: WebSocketRequestHandler {
         try await workspaces.commitFocus(mutation)
         await publishWorkspaceMutation(mutation, before: before, reason: .workspaceModeChanged)
         result = workspaceMutation(mutation)
-      case .uncooperativeWindowPolicySet:
+      case .layoutPolicySet:
         let params = try decodeParams(
-          UncooperativeWindowPolicySetParams.self, from: .object(request.params))
-        let policy = workspacePolicy(params.policy)
+          LayoutPolicySetParams.self, from: .object(request.params))
+        let policy = workspacePolicies(params.policy)
+        try WMWorkspace.LayoutPolicy.validate(policy)
         if let name = params.workspace {
           guard (await workspaces.snapshot())[workspace: name] != nil else {
             throw WorkspaceMutationError.workspaceNotFound(name)
           }
-          workspaceUncooperativeWindowPolicies[name] = policy
-          result = .object(["policy": .string(policy.rawValue), "workspace": .string(name)])
+          workspaceLayoutPolicies[name] = policy
+          result = .object(["layout_policy": json(policy.map(\.rawValue)), "workspace": .string(name)])
         } else {
-          uncooperativeWindowPolicy = policy
-          result = .object(["policy": .string(policy.rawValue), "workspace": .null])
+          layoutPolicy = policy
+          result = .object(["layout_policy": json(policy.map(\.rawValue)), "workspace": .null])
         }
       case .geometryPolicySet:
         let params = try decodeParams(GeometryPolicySetParams.self, from: .object(request.params))
@@ -1310,7 +1322,7 @@ actor DaemonHandler: WebSocketRequestHandler {
       "name": .string(workspace.name),
       "focused": .bool(workspace.focused),
       "visible": .bool(workspace.visible),
-      "health": healthyState,
+      "health": workspaceHealth(workspace.name),
       "windows": .array(
         workspace.windowIDs.map {
           windowSnapshot(
@@ -1355,12 +1367,34 @@ actor DaemonHandler: WebSocketRequestHandler {
   }
 
   private func protocolHealth(_ value: InventoryHealth) -> Health {
-    Health(
-      status: HealthStatus(rawValue: value.status.rawValue)!, issues: value.issues,
+    let fallbackIssues = workspaceLayoutResults.compactMap { name, result in
+      result.fallbackOccurred ? "workspace \(name) layout fallback: \(result.attemptedChain.map(\.rawValue).joined(separator: "->"))" : nil
+    }.sorted()
+    return Health(
+      status: fallbackIssues.isEmpty ? HealthStatus(rawValue: value.status.rawValue)! : .unhealthy,
+      issues: value.issues + fallbackIssues,
       capabilities: .init(
         accessibility: value.capabilities["accessibility"] as? Bool ?? false,
         screenRecording: value.capabilities["core_graphics"] as? Bool ?? false,
         windowInventory: true, pointerWarp: nil))
+  }
+
+  private func workspaceHealth(_ name: String) -> JSONValue {
+    guard let result = workspaceLayoutResults[name], result.fallbackOccurred else { return healthyState }
+    return .object([
+      "status": .string("unhealthy"),
+      "issues": .array([.string("layout fallback: \(result.attemptedChain.map(\.rawValue).joined(separator: "->"))")]),
+    ])
+  }
+
+  private func layoutResultJSON(_ result: WorkspaceLayoutResult) -> JSONValue {
+    .object([
+      "requested_chain": json(result.requestedChain.map(\.rawValue)),
+      "attempted_chain": json(result.attemptedChain.map(\.rawValue)),
+      "effective_policy": .string(result.effectivePolicy.rawValue),
+      "fallback_occurred": .bool(result.fallbackOccurred),
+      "rejected": .bool(result.plan == .rejected),
+    ])
   }
 
   private func currentVersion() async -> UInt64 { (try? await state.state().stateVersion) ?? 0 }
@@ -1565,6 +1599,8 @@ actor DaemonHandler: WebSocketRequestHandler {
     let liveByID = Dictionary(uniqueKeysWithValues: inventory.windows.map { ($0.id, $0) })
     return .object([
       "workspace": workspaceJSON(workspace),
+      "health": workspaceHealth(workspace.name),
+      "layout": workspaceLayoutResults[workspace.name].map(layoutResultJSON) ?? .null,
       "windows": .array(
         workspace.windowIDs.map { id in
           .object([
@@ -1677,7 +1713,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     var lastFailure: WindowGeometryFailure?
     for id in ids {
       do {
-        try await geometry.focus(window: resolveWindow(id, in: inventory.windows))
+        try await focusWindow(resolveWindow(id, in: inventory.windows))
         return
       } catch let failure as WindowGeometryFailure {
         lastFailure = failure
@@ -1685,6 +1721,16 @@ actor DaemonHandler: WebSocketRequestHandler {
     }
     throw lastFailure
       ?? WindowGeometryFailure(code: .windowNotFound, message: "workspace has no observed windows")
+  }
+
+  private func focusWindow(_ window: NormalizedWindow) async throws {
+    expectedActivationPIDs[window.pid] = Date().addingTimeInterval(1)
+    do {
+      try await geometry.focus(window: window)
+    } catch {
+      expectedActivationPIDs.removeValue(forKey: window.pid)
+      throw error
+    }
   }
 
   private func reconcileWorkspaceFocus(
@@ -1792,15 +1838,10 @@ actor DaemonHandler: WebSocketRequestHandler {
       }
       stage = "tile_incoming"
       if tolerateGeometryClamp {
-        let placed = await tileWorkspaceForObserver(
+        _ = await tileWorkspaceForObserver(
           after, named: name, inventory: inventory,
           forceStack: false
         )
-        guard placed else {
-          throw WindowGeometryFailure(
-            code: .geometryVerificationFailed,
-            message: "observer could not verify workspace placement")
-        }
       } else {
         try await tileWorkspace(
           after, named: name, inventory: inventory,
@@ -1909,6 +1950,13 @@ actor DaemonHandler: WebSocketRequestHandler {
             {
               continue
             }
+            let centerX = outcome.observedFrame.x + outcome.observedFrame.width / 2
+            let centerY = outcome.observedFrame.y + outcome.observedFrame.height / 2
+            if centerX >= content.x, centerX <= content.x + content.width,
+              centerY >= content.y, centerY <= content.y + content.height
+            {
+              continue
+            }
             guard minimum != .init() || maximum != .init() else { continue }
             if minimum != .init() { windowMinimumSizes[window.id] = minimum }
             let previous = cooperation[window.id] ?? .init()
@@ -1923,6 +1971,34 @@ actor DaemonHandler: WebSocketRequestHandler {
             shouldReplan = true
           case .progressing, .failed:
             let minimum = Self.constrainedMinimum(fitted: outcome.observedFrame, target: target)
+            let content = contentFrame(workspace, bounds)
+            let centerX = outcome.observedFrame.x + outcome.observedFrame.width / 2
+            let centerY = outcome.observedFrame.y + outcome.observedFrame.height / 2
+            let known = cooperation[window.id] ?? .init()
+            let widthBounded = known.maximumSize.width.map { abs($0 - outcome.observedFrame.width) <= 1 } ?? false
+            let heightBounded = known.maximumSize.height.map { abs($0 - outcome.observedFrame.height) <= 1 } ?? true
+            if widthBounded,
+              outcome.observedFrame.x + outcome.observedFrame.width > content.x + content.width + 1
+            {
+              var corrected = target
+              corrected.x = content.x + content.width - outcome.observedFrame.width
+              corrected.width = outcome.observedFrame.width
+              let correction = try await geometry.setGeometry(
+                window: window,
+                request: .init(frame: inventoryRect(corrected), policy: retryPolicy))
+              let correctedFrame = correction.observedFrame
+              if correctedFrame.x >= content.x - 1,
+                correctedFrame.x + correctedFrame.width <= content.x + content.width + 1
+              {
+                continue
+              }
+            }
+            if centerX >= content.x, centerX <= content.x + content.width,
+              centerY >= content.y, centerY <= content.y + content.height,
+              widthBounded, heightBounded
+            {
+              continue
+            }
             if minimum != .init() {
               windowMinimumSizes[window.id] = minimum
               cooperation[window.id] = .init(minimumSize: minimum, isCooperative: false)
@@ -2005,15 +2081,16 @@ actor DaemonHandler: WebSocketRequestHandler {
     _ workspace: WMWorkspace.Workspace, bounds: WorkspaceLayoutRect,
     cooperation: [String: WorkspaceWindowCooperation], forceStack: Bool
   ) throws -> [String: WorkspaceLayoutRect] {
-    let plan =
+    let result =
       forceStack
-      ? WorkspaceLayoutPlan.frames(
-        Dictionary(
-          uniqueKeysWithValues: workspace.windowIDs.map { ($0, contentFrame(workspace, bounds)) }))
+      ? WorkspaceLayoutResult(requestedChain: [.stack], attemptedChain: [.stack], effectivePolicy: .stack,
+        plan: .frames(Dictionary(uniqueKeysWithValues: workspace.windowIDs.map { ($0, contentFrame(workspace, bounds)) })),
+        fallbackOccurred: false)
       : workspaceWithPolicy(
-        workspace, policy: resolvedUncooperativeWindowPolicy(for: workspace)
-      ).layoutPlan(in: bounds, cooperation: cooperation)
-    guard case .frames(let targets) = plan else {
+        workspace, policy: resolvedLayoutPolicy(for: workspace)
+      ).layoutResult(in: bounds, cooperation: cooperation)
+    workspaceLayoutResults[workspace.name] = result
+    guard case .frames(let targets) = result.plan else {
       throw WindowGeometryFailure(
         code: .geometryVerificationFailed, message: "uncooperative window policy rejected layout"
       )
@@ -2037,17 +2114,17 @@ actor DaemonHandler: WebSocketRequestHandler {
     return .init(maximumAttempts: retries, mode: learningMode)
   }
 
-  private func resolvedUncooperativeWindowPolicy(
+  private func resolvedLayoutPolicy(
     for workspace: WMWorkspace.Workspace
-  ) -> WMWorkspace.UncooperativeWindowPolicy {
-    workspaceUncooperativeWindowPolicies[workspace.name] ?? uncooperativeWindowPolicy
+  ) -> [WMWorkspace.LayoutPolicy] {
+    workspaceLayoutPolicies[workspace.name] ?? layoutPolicy
   }
 
   private func workspaceWithPolicy(
-    _ workspace: WMWorkspace.Workspace, policy: WMWorkspace.UncooperativeWindowPolicy
+    _ workspace: WMWorkspace.Workspace, policy: [WMWorkspace.LayoutPolicy]
   ) -> WMWorkspace.Workspace {
     var result = workspace
-    result.uncooperativeWindowPolicy = policy
+    result.layoutPolicy = policy
     return result
   }
 
@@ -2078,26 +2155,12 @@ actor DaemonHandler: WebSocketRequestHandler {
       height: fitted.height < target.height ? fitted.height : nil)
   }
 
-  private func workspacePolicy(
-    _ policy: WMProtocol.UncooperativeWindowPolicy
-  ) -> WMWorkspace.UncooperativeWindowPolicy {
-    switch policy {
-    case .greedy: .greedy
-    case .stack: .stack
-    case .overlap: .overlap
-    case .reject: .reject
-    }
+  private func workspacePolicies(_ policies: [WMProtocol.LayoutPolicy]) -> [WMWorkspace.LayoutPolicy] {
+    policies.map { WMWorkspace.LayoutPolicy(rawValue: $0.rawValue)! }
   }
 
-  private func workspacePolicy(
-    _ policy: WMConfiguration.UncooperativeWindowPolicy
-  ) -> WMWorkspace.UncooperativeWindowPolicy {
-    switch policy {
-    case .greedy: .greedy
-    case .stack: .stack
-    case .overlap: .overlap
-    case .reject: .reject
-    }
+  private func workspacePolicies(_ policies: [WMConfiguration.LayoutPolicy]) -> [WMWorkspace.LayoutPolicy] {
+    policies.map { WMWorkspace.LayoutPolicy(rawValue: $0.rawValue)! }
   }
 
   private func restoreParkedWindows(
@@ -2160,7 +2223,7 @@ actor DaemonHandler: WebSocketRequestHandler {
 
   private func workspaceJSON(_ workspace: WMWorkspace.Workspace) -> JSONValue {
     var resolved = workspace
-    resolved.uncooperativeWindowPolicy = resolvedUncooperativeWindowPolicy(for: workspace)
+    resolved.layoutPolicy = resolvedLayoutPolicy(for: workspace)
     return json(resolved)
   }
 
@@ -2344,7 +2407,7 @@ extension WMProtocol.Method {
     switch self {
     case .windowManage, .windowUnmanage, .windowFocus, .windowMove, .windowFrameSet, .workspaceFocus, .workspaceMoveWindow,
       .workspaceMoveWindowBulk, .workspaceMoveDisplay, .workspaceSetMode,
-      .uncooperativeWindowPolicySet, .geometryPolicySet, .inventoryRefresh,
+      .layoutPolicySet, .geometryPolicySet, .inventoryRefresh,
       .configurationReload, .commandBatch, .daemonPause, .daemonResume, .debugAXFrameSet,
       .debugAXFocus,
       .debugEngineSet:
@@ -2363,7 +2426,7 @@ extension WMProtocol.Method {
   fileprivate var isIdempotent: Bool {
     switch self {
     case .windowManage, .windowUnmanage, .windowFrameSet, .workspaceFocus, .workspaceMoveDisplay,
-      .workspaceSetMode, .uncooperativeWindowPolicySet, .geometryPolicySet, .inventoryRefresh,
+      .workspaceSetMode, .layoutPolicySet, .geometryPolicySet, .inventoryRefresh,
       .configurationReload:
       true
     default: false

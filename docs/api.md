@@ -84,13 +84,13 @@ Statuses: `healthy`, `degraded`, `recovering`, `unhealthy`.
 Set the session-wide policy:
 
 ```json
-{"method":"uncooperative_window_policy.set","params":{"policy":"greedy"}}
+{"method":"layout_policy.set","params":{"policy":["greedy","overlap","stack","overflow"]}}
 ```
 
 Set a per-workspace runtime override:
 
 ```json
-{"method":"uncooperative_window_policy.set","params":{"workspace":"T","policy":"overlap"}}
+{"method":"layout_policy.set","params":{"workspace":"T","policy":["overlap","overflow"]}}
 ```
 
 Accepted policies are `greedy`, `stack`, `overlap`, and `reject`. Runtime values

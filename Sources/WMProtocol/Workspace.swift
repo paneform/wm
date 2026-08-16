@@ -10,10 +10,11 @@ public enum WorkspaceMode: String, Codable, CaseIterable, Sendable {
     case floating
 }
 
-public enum UncooperativeWindowPolicy: String, Codable, CaseIterable, Sendable {
+public enum LayoutPolicy: String, Codable, CaseIterable, Sendable {
     case greedy
-    case stack
     case overlap
+    case stack
+    case overflow
     case reject
 }
 
@@ -105,7 +106,7 @@ public struct WorkspaceState: Codable, Equatable, Sendable {
     public var margin: WorkspaceMargin
     public var gap: Double
     public var resizeIncrement: Double
-    public var uncooperativeWindowPolicy: UncooperativeWindowPolicy
+    public var layoutPolicy: [LayoutPolicy]
     public var maxGeometryRetries: Int
     public var geometryProfileMode: GeometryProfileMode
     public var windowIds: [String]
@@ -123,7 +124,7 @@ public struct WorkspaceState: Codable, Equatable, Sendable {
         margin: WorkspaceMargin,
         gap: Double,
         resizeIncrement: Double,
-        uncooperativeWindowPolicy: UncooperativeWindowPolicy = .greedy,
+        layoutPolicy: [LayoutPolicy] = [.greedy, .overlap, .stack, .overflow],
         maxGeometryRetries: Int = 5,
         geometryProfileMode: GeometryProfileMode = .store,
         windowIds: [String],
@@ -140,7 +141,7 @@ public struct WorkspaceState: Codable, Equatable, Sendable {
         self.margin = margin
         self.gap = gap
         self.resizeIncrement = resizeIncrement
-        self.uncooperativeWindowPolicy = uncooperativeWindowPolicy
+        self.layoutPolicy = layoutPolicy
         self.maxGeometryRetries = maxGeometryRetries
         self.geometryProfileMode = geometryProfileMode
         self.windowIds = windowIds
@@ -153,7 +154,7 @@ public struct WorkspaceState: Codable, Equatable, Sendable {
         case displayId = "display_id"
         case preferredDisplayId = "preferred_display_id"
         case resizeIncrement = "resize_increment"
-        case uncooperativeWindowPolicy = "uncooperative_window_policy"
+        case layoutPolicy = "layout_policy"
         case maxGeometryRetries = "max_geometry_retries"
         case geometryProfileMode = "geometry_profile_mode"
         case windowIds = "window_ids"
@@ -172,7 +173,7 @@ public struct WorkspaceState: Codable, Equatable, Sendable {
         try container.encode(margin, forKey: .margin)
         try container.encode(gap, forKey: .gap)
         try container.encode(resizeIncrement, forKey: .resizeIncrement)
-        try container.encode(uncooperativeWindowPolicy, forKey: .uncooperativeWindowPolicy)
+        try container.encode(layoutPolicy, forKey: .layoutPolicy)
         try container.encode(maxGeometryRetries, forKey: .maxGeometryRetries)
         try container.encode(geometryProfileMode, forKey: .geometryProfileMode)
         try container.encode(windowIds, forKey: .windowIds)
@@ -317,11 +318,11 @@ public struct WorkspaceSetModeParams: Codable, Equatable, Sendable {
     }
 }
 
-public struct UncooperativeWindowPolicySetParams: Codable, Equatable, Sendable {
-    public var policy: UncooperativeWindowPolicy
+public struct LayoutPolicySetParams: Codable, Equatable, Sendable {
+    public var policy: [LayoutPolicy]
     public var workspace: String?
 
-    public init(policy: UncooperativeWindowPolicy, workspace: String? = nil) {
+    public init(policy: [LayoutPolicy], workspace: String? = nil) {
         self.policy = policy
         self.workspace = workspace
     }

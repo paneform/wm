@@ -258,8 +258,6 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
           stableClamp: true
         )
         profile = await profiles?.profile(for: window, context: context)
-        profile = inferredProfile(
-          profile, window: window, context: context, requested: requested, observed: observed)
         lastClassification = classify(
           requested: requested, previous: previous, observed: observed,
           tolerance: request.tolerance, profile: profile
@@ -458,14 +456,6 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
     {
       return .constrained
     }
-    if observed.width <= requested.width + tolerance,
-      observed.height <= requested.height + tolerance,
-      abs(observed.x - requested.x) <= tolerance,
-      abs(observed.y - requested.y) <= tolerance,
-      (observed.width < requested.width - tolerance || observed.height < requested.height - tolerance)
-    {
-      return .constrained
-    }
     if observed.normalizedDistance(to: requested) < previous.normalizedDistance(to: requested) {
       return .progressing
     }
@@ -498,20 +488,6 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
       && abs(observed.y - requested.y) <= tolerance
   }
 
-  private func inferredProfile(
-    _ profile: WindowGeometryProfile?, window: NormalizedWindow,
-    context: WindowGeometryProfileContext, requested: InventoryRect, observed: InventoryRect
-  ) -> WindowGeometryProfile? {
-    guard let identity = WindowGeometryProfileIdentity(window: window) else { return profile }
-    var result = profile ?? .init(
-      identity: identity, context: context, correctiveAttemptCount: 1, sampleCount: 0,
-      successfulSampleCount: 0, lastObservedAt: now())
-    if observed.width > requested.width { result.minimumWidth = observed.width }
-    if observed.height > requested.height { result.minimumHeight = observed.height }
-    if observed.width < requested.width { result.maximumWidth = observed.width }
-    if observed.height < requested.height { result.maximumHeight = observed.height }
-    return result
-  }
 
   private func result(
     _ id: String, _ requested: InventoryRect, _ observed: InventoryRect, _ attempts: Int,

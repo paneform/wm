@@ -19,7 +19,7 @@ off-screen workspace parking.
   "visible": true,
   "focused": true,
   "mode": "bsp",
-  "uncooperative_window_policy": "greedy",
+  "layout_policy": ["greedy", "overlap", "stack", "overflow"],
   "margin": {"top": 0, "right": 0, "bottom": 0, "left": 0},
   "gap": 8,
   "resize_increment": 0.05,
@@ -249,8 +249,8 @@ wm workspace move next [NAME]
 wm workspace mode NAME bsp|floating
 wm window focus left|down|up|right
 wm window move left|down|up|right
-wm uncooperative-window-policy greedy|stack|overlap|reject
-wm workspace uncooperative-window-policy NAME greedy|stack|overlap|reject
+wm layout-policy greedy,overlap,stack,overflow
+wm workspace layout-policy NAME greedy,overlap,stack,overflow
 ```
 
 `move-window` with no IDs targets the currently observed focused window. The
@@ -275,8 +275,9 @@ workspace settings to every workspace currently assigned to the matching display
 ]
 ```
 
-`defaults.uncooperative_window_policy` defaults to `greedy`. A workspace's
-`uncooperative_window_policy` overrides that global value. Runtime global and
+`defaults.layout_policy` defaults to `["greedy", "overlap", "stack", "overflow"]`.
+A workspace's `layout_policy` overrides that global chain. Chains are non-empty,
+contain no duplicates, and may contain `reject` only as their terminal entry. Runtime global and
 workspace commands override configuration until daemon restart or configuration
 reload; they do not write durable cooperation profiles.
 

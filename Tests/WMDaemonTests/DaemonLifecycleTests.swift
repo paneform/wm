@@ -199,6 +199,28 @@ private func response(_ text: String) throws -> Response {
     #expect(workspace["margin"] as? [String: Double] == ["top": 1, "right": 2, "bottom": 3, "left": 4])
 }
 
+@Test func configurationReloadClearsWorkspaceLayoutPolicyOverride() async throws {
+    let (handler, state) = try daemonHandler()
+    let inventory = try await state.refresh().snapshot.inventory
+    _ = try await handler.loadConfiguration(source: #"{"defaults":{"layout_policy":["greedy","stack","overflow"]},"workspaces":[{"name":"T"}]}"#, inventory: inventory)
+
+    _ = await handler.handle(text: try clientMessage(.request(.init(
+        requestId: "override", method: .layoutPolicySet,
+        params: ["workspace": .string("T"), "policy": .array([.string("overlap")]), "return_mode": .string("completion")]
+    ))), clientID: UUID())
+    _ = try await handler.hotloadConfiguration(source: #"{"defaults":{"gap":1,"layout_policy":["greedy","stack","overflow"]},"workspaces":[{"name":"T"}]}"#, inventory: inventory)
+
+    let replies = await handler.handle(text: try clientMessage(.request(.init(
+        requestId: "list", method: .workspaceList
+    ))), clientID: UUID())
+    let result = try #require(try response(replies[0]).result)
+    let data = try ProtocolCodec.encode(result)
+    let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let workspaces = try #require(object["workspaces"] as? [[String: Any]])
+    let workspace = try #require(workspaces.first { $0["name"] as? String == "T" })
+    #expect(workspace["layout_policy"] as? [String] == ["greedy", "stack", "overflow"])
+}
+
 @Test func displayListIsConciseUnlessVerbose() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

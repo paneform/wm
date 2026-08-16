@@ -37,7 +37,7 @@ private let workspace = WorkspaceState(
         direction: .left, effectStatus: .verified
     )
     #expect(try ProtocolCodec.decode(WindowDirectionalResult.self, from: ProtocolCodec.encode(directionalResult)) == directionalResult)
-    #expect(throws: Never.self) { try ProtocolCodec.encode(UncooperativeWindowPolicySetParams(policy: .overlap, workspace: "T")) }
+    #expect(throws: Never.self) { try ProtocolCodec.encode(LayoutPolicySetParams(policy: [.overlap, .overflow], workspace: "T")) }
     let policy = GeometryPolicySetParams(workspace: "T", maxGeometryRetries: 5, geometryProfileMode: .optimistic)
     #expect(try ProtocolCodec.decode(GeometryPolicySetParams.self, from: ProtocolCodec.encode(policy)) == policy)
     #expect(throws: Never.self) { try ProtocolCodec.encode(WorkspaceListResult(workspaces: [workspace], focusedWorkspaceName: "T")) }
@@ -59,7 +59,7 @@ private let workspace = WorkspaceState(
     #expect(Method.workspaceMoveWindow.rawValue == "workspace.move_window")
     #expect(Method.workspaceMoveDisplay.rawValue == "workspace.move_display")
     #expect(Method.workspaceSetMode.rawValue == "workspace.set_mode")
-    #expect(Method.uncooperativeWindowPolicySet.rawValue == "uncooperative_window_policy.set")
+    #expect(Method.layoutPolicySet.rawValue == "layout_policy.set")
     #expect(Method.geometryPolicySet.rawValue == "geometry_policy.set")
     #expect(Method.observeWorkspace.rawValue == "observe.workspace")
     #expect(EventTopic.workspaceDisplayChanged.rawValue == "workspace.display_changed")
