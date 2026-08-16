@@ -121,8 +121,11 @@ public struct WorkspaceSettings: Codable, Equatable, Sendable {
 public struct WorkspaceConfiguration: Codable, Equatable, Sendable {
     public var name: String
     public var settings: WorkspaceSettings
+    public var initialAssignment: [RuleMatch]
 
-    public init(name: String, settings: WorkspaceSettings = .init()) { self.name = name; self.settings = settings }
+    public init(name: String, settings: WorkspaceSettings = .init(), initialAssignment: [RuleMatch] = []) {
+        self.name = name; self.settings = settings; self.initialAssignment = initialAssignment
+    }
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case name, preferredDisplay = "preferred_display", mode, margin, gap
@@ -130,6 +133,7 @@ public struct WorkspaceConfiguration: Codable, Equatable, Sendable {
         case uncooperativeWindowPolicy = "uncooperative_window_policy"
         case maxGeometryRetries = "max_geometry_retries"
         case geometryProfileMode = "geometry_profile_mode"
+        case initialAssignment = "initial_assignment"
     }
 
     public init(from decoder: Decoder) throws {
@@ -146,6 +150,7 @@ public struct WorkspaceConfiguration: Codable, Equatable, Sendable {
             maxGeometryRetries: try values.decodeIfPresent(Int.self, forKey: .maxGeometryRetries),
             geometryProfileMode: try values.decodeIfPresent(GeometryProfileMode.self, forKey: .geometryProfileMode)
         )
+        initialAssignment = try values.decodeIfPresent([RuleMatch].self, forKey: .initialAssignment) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -159,6 +164,7 @@ public struct WorkspaceConfiguration: Codable, Equatable, Sendable {
         try values.encodeIfPresent(settings.uncooperativeWindowPolicy, forKey: .uncooperativeWindowPolicy)
         try values.encodeIfPresent(settings.maxGeometryRetries, forKey: .maxGeometryRetries)
         try values.encodeIfPresent(settings.geometryProfileMode, forKey: .geometryProfileMode)
+        if !initialAssignment.isEmpty { try values.encode(initialAssignment, forKey: .initialAssignment) }
     }
 }
 
@@ -258,30 +264,12 @@ public indirect enum RuleMatch: Codable, Equatable, Sendable {
     }
 }
 
-public struct RuleActions: Codable, Equatable, Sendable {
-    public var manage: Bool?; public var workspace: String?; public var behavior: WindowBehavior?
-    public var floatingGeometry: String?; public var resistantFallback: ResistantWindowPolicy?; public var workspaceMode: WorkspaceMode?
-    enum CodingKeys: String, CodingKey, CaseIterable { case manage, workspace, behavior; case floatingGeometry = "floating_geometry"; case resistantFallback = "resistant_fallback"; case workspaceMode = "workspace_mode" }
-    public init(manage: Bool? = nil, workspace: String? = nil, behavior: WindowBehavior? = nil, floatingGeometry: String? = nil, resistantFallback: ResistantWindowPolicy? = nil, workspaceMode: WorkspaceMode? = nil) { self.manage = manage; self.workspace = workspace; self.behavior = behavior; self.floatingGeometry = floatingGeometry; self.resistantFallback = resistantFallback; self.workspaceMode = workspaceMode }
-    public init(from decoder: Decoder) throws {
-        try rejectUnknown(decoder, allowed: CodingKeys.allCases.map(\.rawValue)); let c = try decoder.container(keyedBy: CodingKeys.self)
-        manage = try c.decodeIfPresent(Bool.self, forKey: .manage); workspace = try c.decodeIfPresent(String.self, forKey: .workspace); behavior = try c.decodeIfPresent(WindowBehavior.self, forKey: .behavior); floatingGeometry = try c.decodeIfPresent(String.self, forKey: .floatingGeometry); resistantFallback = try c.decodeIfPresent(ResistantWindowPolicy.self, forKey: .resistantFallback); workspaceMode = try c.decodeIfPresent(WorkspaceMode.self, forKey: .workspaceMode)
-    }
-}
-
-public struct WindowRule: Codable, Equatable, Sendable {
-    public var match: RuleMatch; public var actions: RuleActions
-    enum CodingKeys: String, CodingKey, CaseIterable { case match, actions }
-    public init(match: RuleMatch, actions: RuleActions) { self.match = match; self.actions = actions }
-    public init(from decoder: Decoder) throws { try rejectUnknown(decoder, allowed: CodingKeys.allCases.map(\.rawValue)); let c = try decoder.container(keyedBy: CodingKeys.self); match = try c.decode(RuleMatch.self, forKey: .match); actions = try c.decode(RuleActions.self, forKey: .actions) }
-}
-
 public struct Configuration: Codable, Equatable, Sendable {
     public var defaults: WorkspaceSettings; public var displays: [DisplayConfiguration]
-    public var workspaces: [WorkspaceConfiguration]; public var rules: [WindowRule]
+    public var workspaces: [WorkspaceConfiguration]
     public var hotload: Bool; public var port: UInt16
-    enum CodingKeys: String, CodingKey, CaseIterable { case defaults, displays, workspaces, rules, hotload, port }
-    public init(defaults: WorkspaceSettings = .init(mode: .bsp, margin: .init(top: 0, right: 0, bottom: 0, left: 0), gap: 0, resizeIncrement: 10, uncooperativeWindowPolicy: .greedy, maxGeometryRetries: 5, geometryProfileMode: .store), displays: [DisplayConfiguration] = [], workspaces: [WorkspaceConfiguration] = [], rules: [WindowRule] = [], hotload: Bool = true, port: UInt16 = 17_832) { self.defaults = defaults; self.displays = displays; self.workspaces = workspaces; self.rules = rules; self.hotload = hotload; self.port = port }
+    enum CodingKeys: String, CodingKey, CaseIterable { case defaults, displays, workspaces, hotload, port }
+    public init(defaults: WorkspaceSettings = .init(mode: .bsp, margin: .init(top: 0, right: 0, bottom: 0, left: 0), gap: 0, resizeIncrement: 10, uncooperativeWindowPolicy: .greedy, maxGeometryRetries: 5, geometryProfileMode: .store), displays: [DisplayConfiguration] = [], workspaces: [WorkspaceConfiguration] = [], hotload: Bool = true, port: UInt16 = 17_832) { self.defaults = defaults; self.displays = displays; self.workspaces = workspaces; self.hotload = hotload; self.port = port }
     public init(from decoder: Decoder) throws {
         try rejectUnknown(decoder, allowed: CodingKeys.allCases.map(\.rawValue)); let c = try decoder.container(keyedBy: CodingKeys.self)
         defaults = try c.decodeIfPresent(WorkspaceSettings.self, forKey: .defaults) ?? .init(mode: .bsp, margin: .init(top: 0, right: 0, bottom: 0, left: 0), gap: 0, resizeIncrement: 10, uncooperativeWindowPolicy: .greedy, maxGeometryRetries: 5, geometryProfileMode: .store)
@@ -290,12 +278,15 @@ public struct Configuration: Codable, Equatable, Sendable {
         defaults.geometryProfileMode = defaults.geometryProfileMode ?? .store
         displays = try c.decodeIfPresent([DisplayConfiguration].self, forKey: .displays) ?? []
         workspaces = try c.decodeIfPresent([WorkspaceConfiguration].self, forKey: .workspaces) ?? []
-        rules = try c.decodeIfPresent([WindowRule].self, forKey: .rules) ?? []
         hotload = try c.decodeIfPresent(Bool.self, forKey: .hotload) ?? true; port = try c.decodeIfPresent(UInt16.self, forKey: .port) ?? 17_832
         try validate()
     }
-    public var resolvedWorkspaces: [WorkspaceConfiguration] { workspaces.map { .init(name: $0.name, settings: $0.settings.inheriting(defaults)) } }
-    public func actions(for window: WindowDescriptor) -> RuleActions? { rules.first { $0.match.matches(window) }?.actions }
+    public var resolvedWorkspaces: [WorkspaceConfiguration] {
+        workspaces.map { .init(name: $0.name, settings: $0.settings.inheriting(defaults), initialAssignment: $0.initialAssignment) }
+    }
+    public func initialWorkspace(for window: WindowDescriptor) -> String? {
+        workspaces.first { $0.initialAssignment.contains { $0.matches(window) } }?.name
+    }
     private func validate() throws {
         guard port > 0 else { throw ConfigurationError.invalid("port must be greater than zero") }
         guard Set(workspaces.map(\.name)).count == workspaces.count, workspaces.allSatisfy({ !$0.name.isEmpty }) else { throw ConfigurationError.invalid("workspace names must be non-empty and unique") }
@@ -332,7 +323,7 @@ public enum ConfigurationParser {
         catch { throw ConfigurationError.invalid(String(describing: error)) }
     }
 
-    public static let schema = ##"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"properties":{"defaults":{"$ref":"#/$defs/settings"},"displays":{"type":"array"},"workspaces":{"type":"array"},"rules":{"type":"array"},"hotload":{"type":"boolean","default":true},"port":{"type":"integer","minimum":1,"maximum":65535,"default":17832}},"$defs":{"settings":{"type":"object","additionalProperties":false,"properties":{"uncooperative_window_policy":{"enum":["greedy","stack","overlap","reject"],"default":"greedy"},"max_geometry_retries":{"type":"integer","minimum":1,"maximum":5,"default":5},"geometry_profile_mode":{"enum":["store","infer","optimistic"],"default":"store"}}}}}"##
+    public static let schema = ##"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"properties":{"defaults":{"$ref":"#/$defs/settings"},"displays":{"type":"array"},"workspaces":{"type":"array"},"hotload":{"type":"boolean","default":true},"port":{"type":"integer","minimum":1,"maximum":65535,"default":17832}},"$defs":{"settings":{"type":"object","additionalProperties":false,"properties":{"uncooperative_window_policy":{"enum":["greedy","stack","overlap","reject"],"default":"greedy"},"max_geometry_retries":{"type":"integer","minimum":1,"maximum":5,"default":5},"geometry_profile_mode":{"enum":["store","infer","optimistic"],"default":"store"}}}}}"##
 }
 
 public struct AdoptedWindow: Equatable, Sendable {
@@ -410,10 +401,16 @@ public enum ConfigurationFile {
           "displays": [
         \(displayOverrides)
           ],
-          // Explicit workspace definitions and per-workspace overrides.
-          "workspaces": [],
-          // First-match window rules for assignment and behavior.
-          "rules": [],
+          // Explicit workspace definitions, initial assignments, and per-workspace overrides.
+          "workspaces": [
+            // {
+            //   "name": "M",
+            //   // New matching windows start here; manual moves remain authoritative.
+            //   "initial_assignment": [
+            //     {"property": "bundle_id", "operator": "exact", "value": "com.apple.MobileSMS"}
+            //   ]
+            // }
+          ],
           // Reload this file automatically when it changes.
           "hotload": true,
           // Local WebSocket API port used by the daemon.
@@ -460,21 +457,33 @@ public enum ConfigurationFile {
             guard let first = values.sorted(by: { ($0.executableName, $0.workspace) < ($1.executableName, $1.workspace) }).first else { return nil }
             return first
         }.sorted { ($0.executableName.lowercased(), $0.workspace) < ($1.executableName.lowercased(), $1.workspace) }
-        let adoptedRules = assignments.map {
-            WindowRule(
-                match: .value(property: .executableName, operator: .exact, value: $0.executableName, caseSensitive: false),
-                actions: .init(workspace: $0.workspace)
+        let adoptedNames = Set(assignments.map { $0.executableName.lowercased() })
+        for index in result.workspaces.indices {
+            result.workspaces[index].initialAssignment.removeAll { match in
+                guard case let .value(property, .exact, value, _) = match,
+                      property == .executableName || property == .executablePath else { return false }
+                let executable = property == .executablePath ? URL(fileURLWithPath: value).lastPathComponent : value
+                return adoptedNames.contains(executable.lowercased())
+            }
+        }
+        for assignment in assignments {
+            guard let index = result.workspaces.firstIndex(where: { $0.name == assignment.workspace }) else { continue }
+            result.workspaces[index].initialAssignment.insert(
+                .value(property: .executableName, operator: .exact, value: assignment.executableName, caseSensitive: false),
+                at: 0
             )
         }
-        let adoptedNames = Set(assignments.map { $0.executableName.lowercased() })
-        result.rules.removeAll { rule in
-            guard rule.actions.workspace != nil,
-                  case let .value(property, .exact, value, _) = rule.match,
-                  property == .executableName || property == .executablePath else { return false }
-            let executable = property == .executablePath ? URL(fileURLWithPath: value).lastPathComponent : value
-            return adoptedNames.contains(executable.lowercased())
+        let adoptedWorkspaces = assignments.map(\.workspace)
+        result.workspaces.sort { left, right in
+            let leftIndex = adoptedWorkspaces.firstIndex(of: left.name)
+            let rightIndex = adoptedWorkspaces.firstIndex(of: right.name)
+            switch (leftIndex, rightIndex) {
+            case (.some(let left), .some(let right)): return left < right
+            case (.some, .none): return true
+            case (.none, .some): return false
+            case (.none, .none): return false
+            }
         }
-        result.rules.insert(contentsOf: adoptedRules, at: 0)
         return result
     }
 }

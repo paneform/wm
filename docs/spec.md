@@ -212,8 +212,8 @@ is drift and is retried with bounded backoff. Explicit user commands always
 override default assignment behavior.
 
 Unmatched normal windows are managed in the globally focused workspace.
-Relaunched applications produce new windows and use rules/current focus rather
-than restoring prior window-lifetime membership.
+Relaunched applications produce new windows and use workspace initial
+assignments/current focus rather than restoring prior window-lifetime membership.
 
 ## User Intent Attribution
 
@@ -475,8 +475,9 @@ Primary format: JSONC with a generated JSON Schema.
 - Environment interpolation is allowed only in schema-declared path fields.
 - Every workspace setting inherits field-by-field from global defaults.
 - Core workspace settings: name, preferred display, mode, margin, gap, resize
-  increment, and assignment rules.
-- Workspace and window rules may set workspace mode and individual
+  increment, and initial assignment matchers.
+- Workspace initial assignment matchers select the first workspace for a newly
+  managed window; later manual moves remain authoritative.
   tiled/floating behavior.
 
 Runtime state is a separate overlay; the daemon never rewrites config. New

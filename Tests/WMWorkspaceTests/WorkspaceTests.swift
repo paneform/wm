@@ -346,6 +346,24 @@ import Testing
   #expect(state.parkedWindowFrames["closed"] == nil)
 }
 
+@Test func initialAssignmentsOnlyPlaceUnassignedWindows() throws {
+  var state = WorkspaceState(workspaces: [
+    tiled("M", display: "d", windows: ["manually-moved"]),
+    tiled("other", display: "d", windows: []),
+  ])
+
+  let result = try state.reconcileObservedWindows(
+    ["manually-moved", "messages", "fallback"],
+    initialAssignments: ["manually-moved": "other", "messages": "M"],
+    defaultDisplayID: "d"
+  )
+
+  #expect(result.modifiedWorkspaces == ["1", "M"])
+  #expect(state[workspace: "M"]?.windowIDs == ["manually-moved", "messages"])
+  #expect(state[workspace: "other"]?.windowIDs.isEmpty == true)
+  #expect(state[workspace: "1"]?.windowIDs == ["fallback"])
+}
+
 @Test func sameIDReplacementIsRemovedThenFreshlyInserted() throws {
   var state = WorkspaceState(workspaces: [tiled("old", display: "d", windows: ["a", "sibling"])])
 

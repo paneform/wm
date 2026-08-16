@@ -203,7 +203,7 @@ actor DaemonHandler: WebSocketRequestHandler {
         bundleID: window.bundleID, executablePath: window.executablePath, processID: window.pid,
         title: window.title, role: window.role, subrole: window.subrole
       )
-      let workspace = configuration.actions(for: descriptor)?.workspace ?? "1"
+      let workspace = configuration.initialWorkspace(for: descriptor) ?? "1"
       _ = try candidate.adoptUnassignedWindows(
         [window.id], into: workspace, displayID: window.displayID ?? defaultDisplayID
       )
@@ -437,8 +437,19 @@ actor DaemonHandler: WebSocketRequestHandler {
     }
     await geometry.evict(lifetimes: update.verifiedClosedLifetimes)
     let before = await workspaces.snapshot()
+    let configured = await configuration.snapshot().configuration ?? Configuration()
+    let assignedIDs = Set(before.workspaces.flatMap(\.windowIDs))
+    let assignments: [String: String] = Dictionary(uniqueKeysWithValues: update.windows.compactMap { window in
+      guard !assignedIDs.contains(window.id) else { return nil }
+      let descriptor = WindowDescriptor(
+        bundleID: window.bundleID, executablePath: window.executablePath, processID: window.pid,
+        title: window.title, role: window.role, subrole: window.subrole
+      )
+      return configured.initialWorkspace(for: descriptor).map { (window.id, $0) }
+    })
     let mutation = try await workspaces.reconcileObservedWindows(
       update.windows.map(\.id),
+      assignments: assignments,
       removedIDs: closedIDs.union(update.newlyUnmanagedWindowIDs),
       displayID: displayID
     )

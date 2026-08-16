@@ -71,8 +71,8 @@ func rejectsInvalidGeometryRetryCount(value: Int) {
     #"{"unknown":true}"#,
     #"{"defaults":{"unknown":true}}"#,
     #"{"workspaces":[{"name":"x","unknown":true}]}"#,
-    #"{"rules":[{"match":{"property":"title","operator":"exact","value":"x","unknown":true},"actions":{}}]}"#,
-    #"{"rules":[{"match":{"property":"title","operator":"exact","value":"x"},"actions":{"unknown":true}}]}"#,
+    #"{"workspaces":[{"name":"x","initial_assignment":[{"property":"title","operator":"exact","value":"x","unknown":true}]}]}"#,
+    #"{"rules":[]}"#,
 ])
 func rejectsUnknownFieldsAtEverySchemaLevel(source: String) {
     #expect(throws: ConfigurationError.self) { try ConfigurationParser.parse(source) }
@@ -102,7 +102,7 @@ func rejectsUnknownFieldsAtEverySchemaLevel(source: String) {
     #"{"displays":[{"display":{"name":"A"}},{"display":{"name":"A"}}]}"#,
     #"{"displays":[{"display":{"name":"A","ns_screen_number":"1"}}]}"#,
     #"{"workspaces":[{"name":"x"},{"name":"x"}]}"#,
-    #"{"rules":[{"match":{"property":"title","operator":"regex","value":"["},"actions":{}}]}"#,
+    #"{"workspaces":[{"name":"x","initial_assignment":[{"property":"title","operator":"regex","value":"["}]}]}"#,
 ])
 func rejectsSemanticErrors(source: String) {
     #expect(throws: Error.self) { try ConfigurationParser.parse(source) }
@@ -111,8 +111,8 @@ func rejectsSemanticErrors(source: String) {
 @Test func matcherSupportsPropertiesOperatorsCaseAndComposition() throws {
     let window = WindowDescriptor(bundleID: "com.Example.Editor", executablePath: "/Applications/Code.app/Code", processID: 42, title: "README.md", role: "AXWindow", subrole: "AXStandardWindow")
     let source = #"""
-    {"rules":[
-      {"match":{"all":[
+    {"workspaces":[{"name":"code","initial_assignment":[
+      {"all":[
         {"property":"bundle_id","operator":"exact","value":"com.example.editor"},
         {"property":"executable_name","operator":"contains","value":"cod"},
         {"not":{"property":"title","operator":"regex","value":"^Settings$"}},
@@ -120,33 +120,33 @@ func rejectsSemanticErrors(source: String) {
           {"property":"process_id","operator":"exact","value":"42"},
           {"property":"role","operator":"exact","value":"other"}
         ]}
-      ]},"actions":{"workspace":"code","behavior":"tiled"}}
-    ]}
+      ]}
+    ]}]}
     """#
     let config = try ConfigurationParser.parse(source)
-    #expect(config.actions(for: window) == .init(workspace: "code", behavior: .tiled))
+    #expect(config.initialWorkspace(for: window) == "code")
 }
 
 @Test func caseSensitivityAndMissingPropertiesDoNotMatch() throws {
     let source = #"""
-    {"rules":[
-      {"match":{"property":"title","operator":"exact","value":"readme","case_sensitive":true},"actions":{"manage":false}},
-      {"match":{"property":"subrole","operator":"contains","value":"dialog"},"actions":{"manage":false}}
-    ]}
+    {"workspaces":[{"name":"ignored","initial_assignment":[
+      {"property":"title","operator":"exact","value":"readme","case_sensitive":true},
+      {"property":"subrole","operator":"contains","value":"dialog"}
+    ]}]}
     """#
     let config = try ConfigurationParser.parse(source)
-    #expect(config.actions(for: .init(processID: 1, title: "README")) == nil)
+    #expect(config.initialWorkspace(for: .init(processID: 1, title: "README")) == nil)
 }
 
-@Test func firstMatchingRuleWinsWithCompleteInitialActions() throws {
+@Test func firstMatchingWorkspaceWins() throws {
     let source = #"""
-    {"rules":[
-      {"match":{"property":"title","operator":"contains","value":"term"},"actions":{"manage":false,"workspace":"one","behavior":"floating","floating_geometry":"centered","resistant_fallback":"ignore","workspace_mode":"floating"}},
-      {"match":{"property":"title","operator":"contains","value":"term"},"actions":{"workspace":"two"}}
+    {"workspaces":[
+      {"name":"one","initial_assignment":[{"property":"title","operator":"contains","value":"term"}]},
+      {"name":"two","initial_assignment":[{"property":"title","operator":"contains","value":"term"}]}
     ]}
     """#
-    let actions = try ConfigurationParser.parse(source).actions(for: .init(processID: 1, title: "Terminal"))
-    #expect(actions == .init(manage: false, workspace: "one", behavior: .floating, floatingGeometry: "centered", resistantFallback: .ignore, workspaceMode: .floating))
+    let workspace = try ConfigurationParser.parse(source).initialWorkspace(for: .init(processID: 1, title: "Terminal"))
+    #expect(workspace == "one")
 }
 
 @Test func schemaDeclaresStrictRootAndDefaults() {
@@ -225,13 +225,15 @@ func rejectsSemanticErrors(source: String) {
     #expect(source.contains("// Space along the left edge."))
     #expect(source.contains("// Space between adjacent tiled windows, in points."))
     #expect(source.contains("// Keyboard resize step, in points."))
-    #expect(source.contains("// Explicit workspace definitions and per-workspace overrides."))
+    #expect(source.contains("// Explicit workspace definitions, initial assignments, and per-workspace overrides."))
+    #expect(source.contains("// New matching windows start here; manual moves remain authoritative."))
+    #expect(source.contains(#"//   "initial_assignment": ["#))
+    #expect(source.contains(#""property": "bundle_id", "operator": "exact""#))
     #expect(source.contains("// Per-display layout overrides"))
     #expect(source.contains("// Studio Display"))
     #expect(source.contains(#"//   "display": "display:12345678-abcd""#))
     #expect(source.contains(#"//   "margin": {"top": 0, "right": 0, "bottom": 0, "left": 0}"#))
     #expect(source.contains(#"//   "gap": 0"#))
-    #expect(source.contains("// First-match window rules for assignment and behavior."))
     #expect(source.contains("// Reload this file automatically when it changes."))
     #expect(source.contains("// Local WebSocket API port used by the daemon."))
     #expect(source.hasSuffix("\n"))
@@ -247,18 +249,15 @@ func rejectsSemanticErrors(source: String) {
     #expect(try String(contentsOf: path, encoding: .utf8) == initial)
 }
 
-@Test func adoptionPreservesSettingsAndReplacesConflictingExecutableRules() throws {
+@Test func adoptionPreservesSettingsAndReplacesConflictingExecutableAssignments() throws {
     let original = try ConfigurationParser.parse(#"""
     {
       "defaults": {"gap": 8},
       "workspaces": [
-        {"name":"T","mode":"floating","preferred_display":"old"},
-        {"name":"Other","gap":3}
-      ],
-      "rules": [
-        {"match":{"property":"executable_name","operator":"exact","value":"Ghostty"},"actions":{"workspace":"GhosttyOnly","behavior":"floating"}},
-        {"match":{"property":"title","operator":"contains","value":"docs"},"actions":{"workspace":"Docs"}},
-        {"match":{"any":[{"property":"executable_name","operator":"exact","value":"Ghostty"},{"property":"title","operator":"contains","value":"term"}]},"actions":{"workspace":"Compound"}}
+        {"name":"Compound","initial_assignment":[{"any":[{"property":"executable_name","operator":"exact","value":"Ghostty"},{"property":"title","operator":"contains","value":"term"}]}]},
+        {"name":"T","mode":"floating","preferred_display":"old","initial_assignment":[{"property":"role","operator":"exact","value":"AXWindow"}]},
+        {"name":"Other","gap":3,"initial_assignment":[{"property":"title","operator":"contains","value":"docs"}]},
+        {"name":"ExactPath","initial_assignment":[{"property":"executable_path","operator":"exact","value":"/bin/Ghostty"}]}
       ]
     }
     """#)
@@ -271,10 +270,13 @@ func rejectsSemanticErrors(source: String) {
     #expect(adopted.workspaces.first(where: { $0.name == "T" })?.settings == .init(preferredDisplay: .init(id: "display:2"), mode: .floating))
     #expect(adopted.workspaces.first(where: { $0.name == "Other" })?.settings.gap == 3)
     #expect(adopted.workspaces.first(where: { $0.name == "New" })?.settings.preferredDisplay == .init(id: "display:1"))
-    #expect(adopted.rules.count == 3)
-    #expect(adopted.actions(for: .init(executablePath: "/bin/Ghostty", processID: 1))?.workspace == "T")
-    #expect(adopted.actions(for: .init(processID: 2, title: "docs"))?.workspace == "Docs")
-    #expect(adopted.rules.contains { $0.actions.workspace == "Compound" })
+    #expect(adopted.initialWorkspace(for: .init(executablePath: "/bin/Ghostty", processID: 1)) == "T")
+    #expect(adopted.initialWorkspace(for: .init(processID: 2, title: "docs")) == "Other")
+    #expect(adopted.workspaces.first(where: { $0.name == "Compound" })?.initialAssignment.count == 1)
+    #expect(adopted.workspaces.first(where: { $0.name == "T" })?.initialAssignment.contains(
+        .value(property: .role, operator: .exact, value: "AXWindow", caseSensitive: false)
+    ) == true)
+    #expect(adopted.workspaces.first(where: { $0.name == "ExactPath" })?.initialAssignment.isEmpty == true)
     #expect(try ConfigurationParser.parse(ConfigurationFile.encode(adopted)) == adopted)
 }
 

@@ -188,7 +188,7 @@ private final class MockClient: CLIWebSocketClient, @unchecked Sendable {
     #expect(try await runner.run(.configAdoptState(defaultWMWebSocketURL)) == .success)
     let config = try ConfigurationFile.load(at: path)
     #expect(config.workspaces.first?.settings.preferredDisplay == .init(id: "display:2"))
-    #expect(config.actions(for: .init(executablePath: "/bin/ghostty", processID: 1))?.workspace == "T")
+    #expect(config.initialWorkspace(for: .init(executablePath: "/bin/ghostty", processID: 1)) == "T")
     let request = try #require(client.capturedRequests().first)
     #expect(String(decoding: request.0, as: UTF8.self).contains("state.get"))
 }

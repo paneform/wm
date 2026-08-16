@@ -611,7 +611,7 @@ private func response(_ text: String) throws -> Response {
     #expect(await epochs.activationCause() == .unlock)
 }
 
-@Test func invalidPersistedStateIsQuarantinedAndRecoversByRulesThenFallback() async throws {
+@Test func invalidPersistedStateIsQuarantinedAndRecoversByInitialAssignmentThenFallback() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let stateURL = directory.appendingPathComponent("state.json")
@@ -627,11 +627,10 @@ private func response(_ text: String) throws -> Response {
     {
       "defaults":{"gap":3},
       "workspaces":[
-        {"name":"rules","preferred_display":"display:external","gap":11},
+        {"name":"assigned","preferred_display":"display:external","gap":11,"initial_assignment":[
+          {"property":"bundle_id","operator":"exact","value":"com.example.match"}
+        ]},
         {"name":"missing","preferred_display":"unavailable"}
-      ],
-      "rules":[
-        {"match":{"property":"bundle_id","operator":"exact","value":"com.example.match"},"actions":{"workspace":"rules"}}
       ]
     }
     """#)
@@ -656,15 +655,48 @@ private func response(_ text: String) throws -> Response {
     )
 
     let recovered = await controller.snapshot()
-    #expect(recovered[workspace: "rules"]?.windowIDs == ["window:matched"])
+    #expect(recovered[workspace: "assigned"]?.windowIDs == ["window:matched"])
     #expect(recovered[workspace: "1"]?.windowIDs == ["window:unmatched"])
-    #expect(recovered[workspace: "rules"]?.gap == 11)
-    #expect(recovered[workspace: "rules"]?.displayID == "display:external")
-    #expect(recovered[workspace: "rules"]?.preferredDisplayID == "display:external")
+    #expect(recovered[workspace: "assigned"]?.gap == 11)
+    #expect(recovered[workspace: "assigned"]?.displayID == "display:external")
+    #expect(recovered[workspace: "assigned"]?.preferredDisplayID == "display:external")
     #expect(recovered[workspace: "missing"]?.displayID == "display:built-in")
     #expect(recovered[workspace: "missing"]?.preferredDisplayID == nil)
     #expect(recovered.workspaces.flatMap(\.windowIDs).sorted() == ["window:matched", "window:unmatched"])
     #expect(Set(recovered.workspaces.flatMap(\.windowIDs)).count == 2)
+    try? FileManager.default.removeItem(at: directory)
+}
+
+@Test func newWindowUsesInitialAssignmentWithoutReassigningManuallyMovedWindow() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let controller = try WorkspaceController(
+        buildVersion: "test", stateURL: directory.appendingPathComponent("state.json")
+    )
+    let handler = DaemonHandler(
+        state: .init(provider: SystemInventoryProvider(scanner: .init(sources: .init(
+            displays: StubDisplays(), accessibility: StubAX(), coreGraphics: StubCG()
+        )))), workspaces: controller
+    )
+    let configuration = #"{"workspaces":[{"name":"matched","initial_assignment":[{"property":"bundle_id","operator":"exact","value":"com.example.match"}]},{"name":"manual"}]}"#
+    _ = try await handler.loadConfiguration(
+        source: configuration,
+        inventory: InventorySnapshot(
+            timestamp: .init(), durationMilliseconds: 0, displays: await StubDisplays().displays().value,
+            rawAXWindows: [], rawCGWindows: [], windows: [], rejectedAXWindows: [], joinDecisions: [],
+            sourceHealth: [], appScans: []
+        )
+    )
+    let window = recoveryWindow(id: "window:new", bundleID: "com.example.match", displayID: "display:1")
+    let observed = lifecycleInventory(window)
+
+    try await handler.reconcileObservedWindows(observed, displayID: "display:1")
+    #expect(await controller.snapshot()[workspace: "matched"]?.windowIDs == ["window:new"])
+
+    _ = try await controller.moveWindows(["window:new"], to: "manual")
+    try await handler.reconcileObservedWindows(observed, displayID: "display:1")
+    #expect(await controller.snapshot()[workspace: "matched"]?.windowIDs.isEmpty == true)
+    #expect(await controller.snapshot()[workspace: "manual"]?.windowIDs == ["window:new"])
     try? FileManager.default.removeItem(at: directory)
 }
 
@@ -875,5 +907,16 @@ private func recoveryWindow(id: String, bundleID: String, displayID: String?) ->
         frame: .init(x: 0, y: 0, width: 100, height: 100), displayID: displayID,
         classification: .normal, management: .managed, rejectionReasons: [], joinConfidence: .exact,
         joinSignals: [], health: .healthy, healthIssues: []
+    )
+}
+
+private func lifecycleInventory(_ window: NormalizedWindow) -> InventorySnapshot {
+    InventorySnapshot(
+        timestamp: .init(), durationMilliseconds: 0, displays: [], rawAXWindows: [], rawCGWindows: [],
+        windows: [window], rejectedAXWindows: [], joinDecisions: [], sourceHealth: [],
+        appScans: [.init(
+            application: .init(pid: window.pid, name: window.appName), status: .succeeded,
+            durationMilliseconds: 0, windowCount: 1, issues: []
+        )]
     )
 }

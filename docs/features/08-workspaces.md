@@ -40,6 +40,30 @@ Uncooperative-window policies: `greedy`, `stack`, `overlap`, `reject`.
 Exactly one workspace may be globally focused. At most one workspace per
 display may be visible. Every workspace has a display assignment.
 
+Configured workspaces may include `initial_assignment` matchers. These choose a
+workspace only when a window first becomes managed or startup state must be
+rebuilt. Moving that window later is persisted and does not cause the matcher to
+move it back. Workspace order defines precedence when multiple workspaces match.
+Each workspace's matcher array is ORed, and matchers retain `exact`, `contains`,
+`regex`, `all`, `any`, and `not` support.
+
+```jsonc
+{
+  "workspaces": [
+    {
+      "name": "M",
+      "initial_assignment": [
+        {
+          "property": "bundle_id",
+          "operator": "exact",
+          "value": "com.apple.MobileSMS"
+        }
+      ]
+    }
+  ]
+}
+```
+
 ## BSP Tree
 
 Leaf:
