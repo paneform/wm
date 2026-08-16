@@ -26,12 +26,20 @@ public struct WorkspaceMinimumSize: Equatable, Sendable {
 
 public struct WorkspaceWindowCooperation: Equatable, Sendable {
   public var minimumSize: WorkspaceMinimumSize
+  public var maximumSize: WorkspaceMaximumSize
   public var isCooperative: Bool
 
-  public init(minimumSize: WorkspaceMinimumSize = .init(), isCooperative: Bool = true) {
+  public init(minimumSize: WorkspaceMinimumSize = .init(), maximumSize: WorkspaceMaximumSize = .init(), isCooperative: Bool = true) {
     self.minimumSize = minimumSize
+    self.maximumSize = maximumSize
     self.isCooperative = isCooperative
   }
+}
+
+public struct WorkspaceMaximumSize: Equatable, Sendable {
+  public var width: Double?
+  public var height: Double?
+  public init(width: Double? = nil, height: Double? = nil) { self.width = width; self.height = height }
 }
 
 public enum WorkspaceLayoutPlan: Equatable, Sendable {
@@ -73,11 +81,12 @@ extension Workspace {
     cooperation: [WorkspaceWindowID: WorkspaceWindowCooperation]
   ) -> WorkspaceLayoutPlan {
     let minimumSizes = cooperation.mapValues(\.minimumSize)
+    let maximumSizes = cooperation.mapValues(\.maximumSize)
     guard
       cooperation.values.contains(where: { !$0.isCooperative })
         || !canFit(in: bounds, minimumSizes: minimumSizes)
     else {
-      return .frames(layout(in: bounds, minimumSizes: minimumSizes))
+      return .frames(layout(in: bounds, minimumSizes: minimumSizes, maximumSizes: maximumSizes))
     }
     let content = WorkspaceLayoutRect(
       x: bounds.x + margin.left,
@@ -88,10 +97,15 @@ extension Workspace {
     switch uncooperativeWindowPolicy {
     case .greedy:
       guard canFit(in: bounds, minimumSizes: minimumSizes) else { return .rejected }
-      return .frames(layout(in: bounds, minimumSizes: minimumSizes))
+      return .frames(layout(in: bounds, minimumSizes: minimumSizes, maximumSizes: maximumSizes))
     case .stack:
       let order = windowIDs.filter { $0 != focusedWindowID } + [focusedWindowID].compactMap { $0 }
-      return .frames(Dictionary(uniqueKeysWithValues: order.map { ($0, content) }))
+      return .frames(Dictionary(uniqueKeysWithValues: order.map { id in
+        let maximum = cooperation[id]?.maximumSize ?? .init()
+        let width = min(content.width, maximum.width ?? content.width)
+        let height = min(content.height, maximum.height ?? content.height)
+        return (id, .init(x: content.x, y: content.y, width: width, height: height))
+      }))
     case .overlap:
       guard
         cooperation.values.allSatisfy({
@@ -104,8 +118,9 @@ extension Workspace {
           uniqueKeysWithValues: windowIDs.compactMap { id in
             guard let tile = tiled[id] else { return nil }
             let minimum = cooperation[id]?.minimumSize ?? .init()
-            let width = min(content.width, max(tile.width, minimum.width))
-            let height = min(content.height, max(tile.height, minimum.height))
+            let maximum = cooperation[id]?.maximumSize ?? .init()
+            let width = min(content.width, maximum.width ?? content.width, max(tile.width, minimum.width))
+            let height = min(content.height, maximum.height ?? content.height, max(tile.height, minimum.height))
             return (
               id,
               WorkspaceLayoutRect(
@@ -121,11 +136,34 @@ extension Workspace {
   }
 }
 
+extension Workspace {
+  private func layout(
+    in bounds: WorkspaceLayoutRect,
+    minimumSizes: [WorkspaceWindowID: WorkspaceMinimumSize],
+    maximumSizes: [WorkspaceWindowID: WorkspaceMaximumSize]
+  ) -> [WorkspaceWindowID: WorkspaceLayoutRect] {
+    guard mode == .bsp, let root = bsp.root else { return [:] }
+    let content = WorkspaceLayoutRect(
+      x: bounds.x + margin.left, y: bounds.y + margin.top,
+      width: max(0, bounds.width - margin.left - margin.right),
+      height: max(0, bounds.height - margin.top - margin.bottom))
+    return root.layout(in: content, gap: max(0, gap), minimumSizes: minimumSizes, maximumSizes: maximumSizes)
+  }
+}
+
 extension BSPNode {
   fileprivate func layout(
     in frame: WorkspaceLayoutRect,
     gap: Double,
     minimumSizes: [WorkspaceWindowID: WorkspaceMinimumSize]
+  ) -> [WorkspaceWindowID: WorkspaceLayoutRect] {
+    layout(in: frame, gap: gap, minimumSizes: minimumSizes, maximumSizes: [:])
+  }
+
+  fileprivate func layout(
+    in frame: WorkspaceLayoutRect, gap: Double,
+    minimumSizes: [WorkspaceWindowID: WorkspaceMinimumSize],
+    maximumSizes: [WorkspaceWindowID: WorkspaceMaximumSize]
   ) -> [WorkspaceWindowID: WorkspaceLayoutRect] {
     switch self {
     case .leaf(let windowID):
@@ -136,8 +174,14 @@ extension BSPNode {
       let secondMinimum = second.minimumSize(gap: gap, minimumSizes: minimumSizes)
       let firstBound = axis == .vertical ? firstMinimum.width : firstMinimum.height
       let secondBound = axis == .vertical ? secondMinimum.width : secondMinimum.height
+      let firstMaximum = first.maximumSize(gap: gap, maximumSizes: maximumSizes)
+      let secondMaximum = second.maximumSize(gap: gap, maximumSizes: maximumSizes)
+      let firstMax = axis == .vertical ? firstMaximum.width : firstMaximum.height
+      let secondMax = axis == .vertical ? secondMaximum.width : secondMaximum.height
       let preferred = floor(available * ratio)
-      let firstLength = min(max(preferred, firstBound), max(firstBound, available - secondBound))
+      let lower = max(firstBound, secondMax.map { available - $0 } ?? firstBound)
+      let upper = min(firstMax ?? available, available - secondBound)
+      let firstLength = min(max(preferred, lower), max(lower, upper))
       let secondLength = max(0, available - firstLength)
       let firstFrame: WorkspaceLayoutRect
       let secondFrame: WorkspaceLayoutRect
@@ -150,10 +194,29 @@ extension BSPNode {
         secondFrame = .init(
           x: frame.x, y: frame.y + firstLength + gap, width: frame.width, height: secondLength)
       }
-      return first.layout(in: firstFrame, gap: gap, minimumSizes: minimumSizes)
-        .merging(second.layout(in: secondFrame, gap: gap, minimumSizes: minimumSizes)) { first, _ in
+      return first.layout(in: firstFrame, gap: gap, minimumSizes: minimumSizes, maximumSizes: maximumSizes)
+        .merging(second.layout(in: secondFrame, gap: gap, minimumSizes: minimumSizes, maximumSizes: maximumSizes)) { first, _ in
           first
         }
+    }
+  }
+
+  fileprivate func maximumSize(
+    gap: Double, maximumSizes: [WorkspaceWindowID: WorkspaceMaximumSize]
+  ) -> WorkspaceMaximumSize {
+    switch self {
+    case .leaf(let id): return maximumSizes[id] ?? .init()
+    case .split(let axis, _, let first, let second):
+      let a = first.maximumSize(gap: gap, maximumSizes: maximumSizes)
+      let b = second.maximumSize(gap: gap, maximumSizes: maximumSizes)
+      if axis == .vertical {
+        let width = a.width.flatMap { av in b.width.map { av + gap + $0 } }
+        let height = [a.height, b.height].compactMap { $0 }.min()
+        return .init(width: width, height: height)
+      }
+      let width = [a.width, b.width].compactMap { $0 }.min()
+      let height = a.height.flatMap { av in b.height.map { av + gap + $0 } }
+      return .init(width: width, height: height)
     }
   }
 

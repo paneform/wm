@@ -452,6 +452,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     let mutation = try await workspaces.reconcileObservedWindows(
       update.windows.map(\.id),
       assignments: assignments,
+      replacements: update.replacements,
       removedIDs: closedIDs.union(update.newlyUnmanagedWindowIDs),
       displayID: displayID
     )
@@ -992,9 +993,16 @@ actor DaemonHandler: WebSocketRequestHandler {
         }.first
         var mutation = try await workspaces.previewMoveWindows(
           ids, to: params.workspace, displayID: liveDisplayID)
-        try await reconcileWorkspaceFocus(
-          before: before, after: &mutation.workspaceState, name: params.workspace,
-          inventory: currentSnapshot.inventory)
+        if before.focusedWorkspaceName == params.workspace {
+          try await reconcileWorkspaceFocus(
+            before: before, after: &mutation.workspaceState, name: params.workspace,
+            inventory: currentSnapshot.inventory)
+        } else {
+          for source in Set(ids.compactMap { before.workspaceName(containing: $0) }) {
+            guard mutation.workspaceState[workspace: source]?.visible == true else { continue }
+            try await tileWorkspace(mutation.workspaceState, named: source, inventory: currentSnapshot.inventory)
+          }
+        }
         try await workspaces.commitFocus(mutation)
         await publishWorkspaceMutation(mutation, before: before, reason: .workspaceFocused)
         result = workspaceMutation(mutation)
@@ -1715,6 +1723,12 @@ actor DaemonHandler: WebSocketRequestHandler {
       }
       let topology = DisplayTopologySnapshot(displays: inventory.displays)
       let displayFrames = topology.axFrames
+      for id in incomingIDs {
+        guard let restore = after.parkedWindowFrames[id]?.inventoryRect,
+          !isCenteredOnDisplay(restore, displays: Array(displayFrames.values))
+        else { continue }
+        after.parkedWindowFrames.removeValue(forKey: id)
+      }
       let incomingDisplayID = after[workspace: name]?.displayID
       let incomingDisplay = incomingDisplayID.flatMap { displayFrames[$0] }
       func parkOutgoingWindows() async throws {
@@ -1753,8 +1767,10 @@ actor DaemonHandler: WebSocketRequestHandler {
       stage = "park_outgoing"
       try await parkOutgoingWindows()
       let incomingIsBSP = after[workspace: name]?.mode == .bsp
-      stage = "activate_incoming"
-      try await focusWorkspaceWindow(after, named: name, inventory: inventory)
+      if !incomingIsBSP {
+        stage = "activate_incoming"
+        try await focusWorkspaceWindow(after, named: name, inventory: inventory)
+      }
       for id in incomingIDs where !incomingIsBSP {
         guard let window = windowsByID[id], let restore = after.parkedWindowFrames[id] else {
           continue
@@ -1884,9 +1900,26 @@ actor DaemonHandler: WebSocketRequestHandler {
             continue
           case .constrained:
             let minimum = Self.constrainedMinimum(fitted: outcome.observedFrame, target: target)
-            guard minimum != .init() else { continue }
-            windowMinimumSizes[window.id] = minimum
-            cooperation[window.id] = .init(minimumSize: minimum, isCooperative: false)
+            let maximum = Self.constrainedMaximum(fitted: outcome.observedFrame, target: target)
+            let content = contentFrame(workspace, bounds)
+            if outcome.observedFrame.x >= content.x - 1,
+              outcome.observedFrame.y >= content.y - 1,
+              outcome.observedFrame.x + outcome.observedFrame.width <= content.x + content.width + 1,
+              outcome.observedFrame.y + outcome.observedFrame.height <= content.y + content.height + 1
+            {
+              continue
+            }
+            guard minimum != .init() || maximum != .init() else { continue }
+            if minimum != .init() { windowMinimumSizes[window.id] = minimum }
+            let previous = cooperation[window.id] ?? .init()
+            cooperation[window.id] = .init(
+              minimumSize: .init(
+                width: max(previous.minimumSize.width, minimum.width),
+                height: max(previous.minimumSize.height, minimum.height)),
+              maximumSize: .init(
+                width: maximum.width ?? previous.maximumSize.width,
+                height: maximum.height ?? previous.maximumSize.height),
+              isCooperative: false)
             shouldReplan = true
           case .progressing, .failed:
             let minimum = Self.constrainedMinimum(fitted: outcome.observedFrame, target: target)
@@ -1957,9 +1990,12 @@ actor DaemonHandler: WebSocketRequestHandler {
         width: max(sessionMinimum.width, learned.width),
         height: max(sessionMinimum.height, learned.height)
       )
+      let maximum = WorkspaceMaximumSize(
+        width: profile.maximumWidth, height: profile.maximumHeight)
       result[id] = .init(
         minimumSize: minimum,
-        isCooperative: minimum == .init()
+        maximumSize: maximum,
+        isCooperative: minimum == .init() && maximum == .init()
       )
     }
     return result
@@ -2032,6 +2068,14 @@ actor DaemonHandler: WebSocketRequestHandler {
       width: fitted.width > target.width ? fitted.width : 0,
       height: fitted.height > target.height ? fitted.height : 0
     )
+  }
+
+  static func constrainedMaximum(
+    fitted: InventoryRect, target: WorkspaceLayoutRect
+  ) -> WorkspaceMaximumSize {
+    .init(
+      width: fitted.width < target.width ? fitted.width : nil,
+      height: fitted.height < target.height ? fitted.height : nil)
   }
 
   private func workspacePolicy(

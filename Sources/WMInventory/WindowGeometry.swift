@@ -258,6 +258,8 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
           stableClamp: true
         )
         profile = await profiles?.profile(for: window, context: context)
+        profile = inferredProfile(
+          profile, window: window, context: context, requested: requested, observed: observed)
         lastClassification = classify(
           requested: requested, previous: previous, observed: observed,
           tolerance: request.tolerance, profile: profile
@@ -303,6 +305,7 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
     } catch let failure as WindowGeometryFailure {
       throw failure
     } catch {
+      if (try? await adapter.isFocused(handle)) == true { return }
       throw mapAdapter(error, defaultCode: .geometryRejected)
     }
   }
@@ -437,10 +440,10 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
       abs(observed.y - requested.y) <= tolerance
     else { return false }
     let widthClamped =
-      observed.width > requested.width + tolerance
+      abs(observed.width - requested.width) > tolerance
       && abs(observed.width - initial.width) > tolerance
     let heightClamped =
-      observed.height > requested.height + tolerance
+      abs(observed.height - requested.height) > tolerance
       && abs(observed.height - initial.height) > tolerance
     return widthClamped || heightClamped
   }
@@ -452,6 +455,14 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
     if observed.approximatelyEquals(requested, tolerance: tolerance) { return .exact }
     if matchesKnownConstraint(
       observed, requested: requested, profile: profile, tolerance: tolerance)
+    {
+      return .constrained
+    }
+    if observed.width <= requested.width + tolerance,
+      observed.height <= requested.height + tolerance,
+      abs(observed.x - requested.x) <= tolerance,
+      abs(observed.y - requested.y) <= tolerance,
+      (observed.width < requested.width - tolerance || observed.height < requested.height - tolerance)
     {
       return .constrained
     }
@@ -467,20 +478,39 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
   ) -> Bool {
     guard let profile else { return false }
     let widthMatches: Bool
-    if let minimum = profile.minimumWidth {
-      widthMatches = requested.width < minimum && abs(observed.width - minimum) <= tolerance
+    if let minimum = profile.minimumWidth, requested.width < minimum {
+      widthMatches = abs(observed.width - minimum) <= tolerance
+    } else if let maximum = profile.maximumWidth, requested.width > maximum {
+      widthMatches = abs(observed.width - maximum) <= tolerance
     } else {
       widthMatches = abs(observed.width - requested.width) <= tolerance
     }
     let heightMatches: Bool
-    if let minimum = profile.minimumHeight {
-      heightMatches = requested.height < minimum && abs(observed.height - minimum) <= tolerance
+    if let minimum = profile.minimumHeight, requested.height < minimum {
+      heightMatches = abs(observed.height - minimum) <= tolerance
+    } else if let maximum = profile.maximumHeight, requested.height > maximum {
+      heightMatches = abs(observed.height - maximum) <= tolerance
     } else {
       heightMatches = abs(observed.height - requested.height) <= tolerance
     }
     return widthMatches && heightMatches
       && abs(observed.x - requested.x) <= tolerance
       && abs(observed.y - requested.y) <= tolerance
+  }
+
+  private func inferredProfile(
+    _ profile: WindowGeometryProfile?, window: NormalizedWindow,
+    context: WindowGeometryProfileContext, requested: InventoryRect, observed: InventoryRect
+  ) -> WindowGeometryProfile? {
+    guard let identity = WindowGeometryProfileIdentity(window: window) else { return profile }
+    var result = profile ?? .init(
+      identity: identity, context: context, correctiveAttemptCount: 1, sampleCount: 0,
+      successfulSampleCount: 0, lastObservedAt: now())
+    if observed.width > requested.width { result.minimumWidth = observed.width }
+    if observed.height > requested.height { result.minimumHeight = observed.height }
+    if observed.width < requested.width { result.maximumWidth = observed.width }
+    if observed.height < requested.height { result.maximumHeight = observed.height }
+    return result
   }
 
   private func result(

@@ -5,7 +5,7 @@ status: in-progress
 type: feature
 priority: high
 created_at: 2026-08-14T18:58:47Z
-updated_at: 2026-08-15T05:05:29Z
+updated_at: 2026-08-16T06:53:04Z
 ---
 
 Scope: `docs/spec.md` Configuration and Window Rules.
@@ -156,3 +156,22 @@ Remaining bean scope is window-rule lifecycle application and build-generated sc
 - Changed every generated monitor override to margin 0 on all sides and gap 0, matching global defaults.
 - WMConfigurationTests, `swift build`, and `git diff --check` passed.
 - Relaunched the rebuilt daemon as PID 77165 and verified display listing and live example output.
+
+## Workspace-Local Initial Assignment Update
+
+The configuration model no longer exposes top-level `rules` or general rule actions. Initial placement now belongs to each workspace through an ordered `initial_assignment` matcher array. Matchers preserve `bundle_id`, `executable_path`, `executable_name`, `process_id`, `title`, `role`, and `subrole`, with `exact`, `contains`, `regex`, `all`, `any`, `not`, and case-sensitivity support.
+
+Workspace order defines first-match precedence. These matchers apply only when a managed window is initially unassigned, including normal new-window discovery and invalid persisted-state recovery. Persisted membership and later manual moves remain authoritative and are not overridden by configuration reload or reconciliation. Unmatched windows still default to workspace `1`.
+
+`wm config example`, `init`, `validate`, and `adopt-state` use the new workspace-local model. The live config was migrated and validated, and daemon relaunch retained the intended assignments. Full validation passed with 69 XCTest and 151 Swift Testing cases before the subsequent directional-window feature.
+
+## Revised Remaining Scope
+
+- [x] Apply workspace-local initial assignments during normal managed-window lifecycle discovery.
+- [x] Apply the same assignment semantics during invalid persisted-state recovery.
+- [x] Preserve manual moves and existing persisted membership.
+- [x] Update config adoption, examples, documentation, and deterministic tests.
+- [ ] Replace the hand-maintained schema string with build-generated schema support, if that remains a project requirement.
+- [ ] Complete any broader full drift-reconciliation behavior not covered by initial assignment or existing workspace hotload reconciliation.
+
+Earlier sections describing modeled `RuleActions`, top-level rules, or lifecycle rule application as unfinished are historical and superseded by this update. The bean remains `in-progress` only for generated-schema and broader drift-reconciliation scope.

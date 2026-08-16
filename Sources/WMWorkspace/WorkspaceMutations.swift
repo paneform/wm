@@ -228,12 +228,21 @@ extension WorkspaceState {
     public mutating func reconcileObservedWindows(
         _ observedWindowIDs: [WorkspaceWindowID],
         initialAssignments: [WorkspaceWindowID: WorkspaceName] = [:],
+        replacements: [WorkspaceWindowID: WorkspaceWindowID] = [:],
         removedWindowIDs: Set<WorkspaceWindowID> = [],
         defaultDisplayID: WorkspaceDisplayID
     ) throws -> WorkspaceMutationResult {
         try mutate { state in
             let observed = Set(observedWindowIDs)
             var modified: Set<WorkspaceName> = []
+
+            for oldID in replacements.keys.sorted() {
+                guard let newID = replacements[oldID],
+                      let workspace = state.workspaces.first(where: { $0.windowIDs.contains(oldID) }) else { continue }
+                state.remove(windowID: oldID, from: workspace.name)
+                state.insert(windowID: newID, into: workspace.name)
+                modified.insert(workspace.name)
+            }
 
             for id in removedWindowIDs.sorted() {
                 guard let workspace = state.workspaces.first(where: { $0.windowIDs.contains(id) }) else { continue }

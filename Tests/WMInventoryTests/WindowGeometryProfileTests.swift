@@ -59,6 +59,21 @@ final class WindowGeometryProfileTests: XCTestCase {
         XCTAssertEqual(learned?.minimumWidth, 480)
     }
 
+    func testMaximumRequiresThreeConsistentClampSamples() async throws {
+        let recorder = WindowGeometryProfileRecorder()
+        for _ in 0..<3 {
+            try await recorder.record(.init(
+                window: profileWindow(), context: .init(),
+                requested: .init(x: 0, y: 0, width: 1_000, height: 900),
+                observed: .init(x: 0, y: 0, width: 723, height: 900), attempts: 1,
+                outcome: .constrained, observedAt: .distantPast
+            ))
+        }
+        let profile = await recorder.profile(for: profileWindow())
+        XCTAssertEqual(profile?.maximumWidth, 723)
+        XCTAssertNil(profile?.maximumHeight)
+    }
+
     func testFailedStableClampsPromoteMinimumWithoutLearningRetryCount() async throws {
         let recorder = WindowGeometryProfileRecorder()
         for attempt in 2...4 {

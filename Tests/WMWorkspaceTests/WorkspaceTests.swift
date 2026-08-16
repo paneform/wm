@@ -421,6 +421,15 @@ import Testing
   #expect(state[workspace: "1"]?.bsp.root == .leaf(windowID: "a"))
 }
 
+@Test func identifiedReplacementPreservesWorkspaceMembership() throws {
+  var state = WorkspaceState(workspaces: [tiled("C", display: "d", windows: ["settings-old"])])
+  _ = try state.reconcileObservedWindows(
+    ["settings-new"], replacements: ["settings-old": "settings-new"],
+    removedWindowIDs: ["settings-old"], defaultDisplayID: "d")
+  #expect(state[workspace: "C"]?.windowIDs == ["settings-new"])
+  #expect(state[workspace: "1"] == nil)
+}
+
 @Test func bspLayoutAdaptsToObservedMinimumWidths() {
   let workspace = Workspace(
     name: "tile", origin: .runtime, displayID: "d",
@@ -440,6 +449,22 @@ import Testing
 
   #expect(layout["spotify"] == .init(x: 0, y: 32, width: 800, height: 950))
   #expect(layout["ghostty"] == .init(x: 808, y: 32, width: 704, height: 950))
+}
+
+@Test func greedyGivesSurplusToPeerOfMaximumWidthWindow() {
+  var workspace = tiled("settings", display: "d", windows: ["settings", "peer"])
+  workspace.bsp.root = .split(
+    axis: .vertical, ratio: 0.5,
+    first: .leaf(windowID: "settings"), second: .leaf(windowID: "peer"))
+  let plan = workspace.layoutPlan(
+    in: .init(x: 0, y: 0, width: 1_512, height: 950),
+    cooperation: [
+      "settings": .init(maximumSize: .init(width: 723), isCooperative: false),
+      "peer": .init(),
+    ])
+  guard case .frames(let frames) = plan else { Issue.record("expected frames"); return }
+  #expect(frames["settings"]?.width == 723)
+  #expect(frames["peer"]?.width == 781)
 }
 
 @Test func bspLayoutReportsWhenMinimumSizesCannotFit() {

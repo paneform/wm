@@ -18,15 +18,17 @@ public struct WindowLifecycleUpdate: Sendable {
     public var windows: [NormalizedWindow]
     public var verifiedClosedLifetimes: Set<WindowLifetime>
     public var newlyUnmanagedWindowIDs: Set<String>
+    public var replacements: [String: String]
 
     public init(
         windows: [NormalizedWindow],
         verifiedClosedLifetimes: Set<WindowLifetime>,
-        newlyUnmanagedWindowIDs: Set<String> = []
+        newlyUnmanagedWindowIDs: Set<String> = [], replacements: [String: String] = [:]
     ) {
         self.windows = windows
         self.verifiedClosedLifetimes = verifiedClosedLifetimes
         self.newlyUnmanagedWindowIDs = newlyUnmanagedWindowIDs
+        self.replacements = replacements
     }
 }
 
@@ -54,12 +56,15 @@ public struct ManagedWindowLifecycle: Sendable {
         let successfulPIDs = Set(inventory.appScans.filter { $0.status == .succeeded }.map(\.application.pid))
         let observedByID = Dictionary(uniqueKeysWithValues: inventory.windows.map { ($0.id, $0) })
         var verifiedClosed: Set<WindowLifetime> = []
+        var replacements: [String: String] = [:]
+        var closedWindows: [NormalizedWindow] = []
 
         for (id, previous) in retained where observedByID[id] == nil {
             if (inventory.applicationEnumerationSucceeded && !livePIDs.contains(previous.window.pid))
                 || successfulPIDs.contains(previous.window.pid) {
                 retained.removeValue(forKey: id)
                 verifiedClosed.insert(.init(windowID: id, pid: previous.window.pid))
+                closedWindows.append(previous.window)
             }
         }
 
@@ -68,6 +73,7 @@ public struct ManagedWindowLifecycle: Sendable {
             if let previous, previous.window.pid != window.pid {
                 retained.removeValue(forKey: window.id)
                 verifiedClosed.insert(.init(windowID: window.id, pid: previous.window.pid))
+                closedWindows.append(previous.window)
             }
             retained[window.id] = RetainedWindow(
                 window: applying(previous?.window.pid == window.pid ? previous?.override : nil, to: window),
@@ -75,17 +81,27 @@ public struct ManagedWindowLifecycle: Sendable {
             )
         }
 
-        return update(verifiedClosed: verifiedClosed)
+        for previous in closedWindows {
+            let candidates = inventory.windows.filter {
+                $0.id != previous.id && $0.pid == previous.pid
+                    && $0.bundleID == previous.bundleID && $0.role == previous.role && $0.subrole == previous.subrole
+            }
+            if candidates.count == 1 { replacements[previous.id] = candidates[0].id }
+        }
+
+        return update(verifiedClosed: verifiedClosed, replacements: replacements)
     }
 
     private func update(
         verifiedClosed: Set<WindowLifetime> = [],
         newlyUnmanaged: Set<String> = []
+        , replacements: [String: String] = [:]
     ) -> WindowLifecycleUpdate {
         WindowLifecycleUpdate(
             windows: retained.values.map(\.window).filter { $0.management == .managed }.sorted { $0.id < $1.id },
             verifiedClosedLifetimes: verifiedClosed,
             newlyUnmanagedWindowIDs: newlyUnmanaged
+            , replacements: replacements
         )
     }
 

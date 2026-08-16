@@ -46,6 +46,8 @@ public struct WindowGeometryProfile: Codable, Equatable, Sendable {
     public var context: WindowGeometryProfileContext
     public var minimumWidth: Double?
     public var minimumHeight: Double?
+    public var maximumWidth: Double?
+    public var maximumHeight: Double?
     public var correctiveAttemptCount: Int
     public var sampleCount: Int
     public var successfulSampleCount: Int
@@ -54,18 +56,34 @@ public struct WindowGeometryProfile: Codable, Equatable, Sendable {
     public var pendingMinimumWidthSamples: Int
     public var pendingMinimumHeight: Double?
     public var pendingMinimumHeightSamples: Int
+    public var pendingMaximumWidth: Double?
+    public var pendingMaximumWidthSamples: Int
+    public var pendingMaximumHeight: Double?
+    public var pendingMaximumHeightSamples: Int
+
+    enum CodingKeys: String, CodingKey {
+        case identity, context, minimumWidth, minimumHeight, maximumWidth, maximumHeight
+        case correctiveAttemptCount, sampleCount, successfulSampleCount, lastObservedAt
+        case pendingMinimumWidth, pendingMinimumWidthSamples, pendingMinimumHeight, pendingMinimumHeightSamples
+        case pendingMaximumWidth, pendingMaximumWidthSamples, pendingMaximumHeight, pendingMaximumHeightSamples
+    }
 
     public init(
         identity: WindowGeometryProfileIdentity, context: WindowGeometryProfileContext,
         minimumWidth: Double? = nil, minimumHeight: Double? = nil,
+        maximumWidth: Double? = nil, maximumHeight: Double? = nil,
         correctiveAttemptCount: Int, sampleCount: Int, successfulSampleCount: Int,
         lastObservedAt: Date, pendingMinimumWidth: Double? = nil, pendingMinimumWidthSamples: Int = 0,
-        pendingMinimumHeight: Double? = nil, pendingMinimumHeightSamples: Int = 0
+        pendingMinimumHeight: Double? = nil, pendingMinimumHeightSamples: Int = 0,
+        pendingMaximumWidth: Double? = nil, pendingMaximumWidthSamples: Int = 0,
+        pendingMaximumHeight: Double? = nil, pendingMaximumHeightSamples: Int = 0
     ) {
         self.identity = identity
         self.context = context
         self.minimumWidth = minimumWidth
         self.minimumHeight = minimumHeight
+        self.maximumWidth = maximumWidth
+        self.maximumHeight = maximumHeight
         self.correctiveAttemptCount = correctiveAttemptCount
         self.sampleCount = sampleCount
         self.successfulSampleCount = successfulSampleCount
@@ -74,6 +92,33 @@ public struct WindowGeometryProfile: Codable, Equatable, Sendable {
         self.pendingMinimumWidthSamples = pendingMinimumWidthSamples
         self.pendingMinimumHeight = pendingMinimumHeight
         self.pendingMinimumHeightSamples = pendingMinimumHeightSamples
+        self.pendingMaximumWidth = pendingMaximumWidth
+        self.pendingMaximumWidthSamples = pendingMaximumWidthSamples
+        self.pendingMaximumHeight = pendingMaximumHeight
+        self.pendingMaximumHeightSamples = pendingMaximumHeightSamples
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            identity: try values.decode(WindowGeometryProfileIdentity.self, forKey: .identity),
+            context: try values.decode(WindowGeometryProfileContext.self, forKey: .context),
+            minimumWidth: try values.decodeIfPresent(Double.self, forKey: .minimumWidth),
+            minimumHeight: try values.decodeIfPresent(Double.self, forKey: .minimumHeight),
+            maximumWidth: try values.decodeIfPresent(Double.self, forKey: .maximumWidth),
+            maximumHeight: try values.decodeIfPresent(Double.self, forKey: .maximumHeight),
+            correctiveAttemptCount: try values.decode(Int.self, forKey: .correctiveAttemptCount),
+            sampleCount: try values.decode(Int.self, forKey: .sampleCount),
+            successfulSampleCount: try values.decode(Int.self, forKey: .successfulSampleCount),
+            lastObservedAt: try values.decode(Date.self, forKey: .lastObservedAt),
+            pendingMinimumWidth: try values.decodeIfPresent(Double.self, forKey: .pendingMinimumWidth),
+            pendingMinimumWidthSamples: try values.decodeIfPresent(Int.self, forKey: .pendingMinimumWidthSamples) ?? 0,
+            pendingMinimumHeight: try values.decodeIfPresent(Double.self, forKey: .pendingMinimumHeight),
+            pendingMinimumHeightSamples: try values.decodeIfPresent(Int.self, forKey: .pendingMinimumHeightSamples) ?? 0,
+            pendingMaximumWidth: try values.decodeIfPresent(Double.self, forKey: .pendingMaximumWidth),
+            pendingMaximumWidthSamples: try values.decodeIfPresent(Int.self, forKey: .pendingMaximumWidthSamples) ?? 0,
+            pendingMaximumHeight: try values.decodeIfPresent(Double.self, forKey: .pendingMaximumHeight),
+            pendingMaximumHeightSamples: try values.decodeIfPresent(Int.self, forKey: .pendingMaximumHeightSamples) ?? 0)
     }
 
     public var confidence: WindowGeometryProfileConfidence {
@@ -166,6 +211,18 @@ public actor WindowGeometryProfileRecorder {
                     samples: &profile.pendingMinimumHeightSamples, learned: &profile.minimumHeight
                 )
             }
+            if observation.observed.width < observation.requested.width {
+                updateMaximum(
+                    observation.observed.width, pending: &profile.pendingMaximumWidth,
+                    samples: &profile.pendingMaximumWidthSamples, learned: &profile.maximumWidth
+                )
+            }
+            if observation.observed.height < observation.requested.height {
+                updateMaximum(
+                    observation.observed.height, pending: &profile.pendingMaximumHeight,
+                    samples: &profile.pendingMaximumHeightSamples, learned: &profile.maximumHeight
+                )
+            }
         }
         if let index { catalog.profiles[index] = profile } else { catalog.profiles.append(profile) }
         try persistence?.save(catalog)
@@ -190,5 +247,12 @@ public actor WindowGeometryProfileRecorder {
             samples = 1
         }
         if samples >= 3 { learned = max(learned ?? 0, value) }
+    }
+
+    private func updateMaximum(
+        _ value: Double, pending: inout Double?, samples: inout Int, learned: inout Double?
+    ) {
+        if let pending, abs(pending - value) <= 1 { samples += 1 } else { pending = value; samples = 1 }
+        if samples >= 3 { learned = min(learned ?? value, value) }
     }
 }
