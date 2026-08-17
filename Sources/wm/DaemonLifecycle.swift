@@ -228,7 +228,8 @@ struct WorkspaceIntentAudit: Equatable {
 
 struct StartupIntentAudit {
     static func candidate(
-        state: WMWorkspace.WorkspaceState, inventory: InventorySnapshot
+        state: WMWorkspace.WorkspaceState, inventory: InventorySnapshot,
+        replacements: [String: String] = [:]
     ) -> WMWorkspace.WorkspaceState {
         guard inventory.sourceHealth.first(where: { $0.source == .coreGraphics })?.status == .healthy else {
             return state
@@ -236,9 +237,30 @@ struct StartupIntentAudit {
         let liveIDs = Set(inventory.windows.map(\.id)).union(inventory.rawCGWindows.compactMap { window in
             window.cgWindowID.flatMap { $0 == 0 ? nil : "window:cg:\($0)" }
         })
+        var replacements = replacements
+        let assigned = state.workspaces.flatMap(\.windowIDs)
+        let legacyGroups = Dictionary(grouping: assigned.filter {
+            $0.hasPrefix("window:ax:") && !liveIDs.contains($0)
+        }) { $0.split(separator: ":").dropLast().joined(separator: ":") }
+        for (prefix, oldIDs) in legacyGroups {
+            let matches = inventory.windows.map(\.id).filter { $0.hasPrefix(prefix + ":") }.sorted()
+            for (oldID, newID) in zip(oldIDs.sorted(), matches) { replacements[oldID] = newID }
+        }
         var candidate = state
+        if let displayID = inventory.displays.first(where: \.isPrimary)?.id
+            ?? inventory.displays.first?.id {
+            do {
+                let result = try candidate.reconcileObservedWindows(
+                    inventory.windows.filter { $0.classification == .normal }.map(\.id),
+                    replacements: replacements, defaultDisplayID: displayID)
+                candidate = result.workspaceState
+            } catch {
+                return state
+            }
+        }
         for workspace in state.workspaces {
-            for id in workspace.windowIDs where id.hasPrefix("window:cg:") && !liveIDs.contains(id) {
+            for id in workspace.windowIDs where id.hasPrefix("window:cg:")
+                && replacements[id] == nil && !liveIDs.contains(id) {
                 candidate.removeWindow(id, from: workspace.name)
             }
         }

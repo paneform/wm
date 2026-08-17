@@ -236,6 +236,17 @@ extension Workspace {
 }
 
 extension BSPNode {
+  func replacing(_ oldID: WorkspaceWindowID, with newID: WorkspaceWindowID) -> BSPNode {
+    switch self {
+    case .leaf(let id): return .leaf(windowID: id == oldID ? newID : id)
+    case .split(let axis, let ratio, let first, let second):
+      return .split(
+        axis: axis, ratio: ratio,
+        first: first.replacing(oldID, with: newID),
+        second: second.replacing(oldID, with: newID))
+    }
+  }
+
   fileprivate func layout(
     in frame: WorkspaceLayoutRect,
     gap: Double,

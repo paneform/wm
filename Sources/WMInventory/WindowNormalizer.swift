@@ -22,6 +22,7 @@ public enum WindowNormalizer {
         var decisions: [JoinDecision] = []
         var windows: [NormalizedWindow] = []
         var rejected: [RejectedAXWindow] = []
+        var axIdentityOccurrences: [String: Int] = [:]
 
         for (axIndex, observation) in ax.enumerated() {
             let match = bestMatch(for: observation, in: cg, available: availableCG)
@@ -52,7 +53,7 @@ public enum WindowNormalizer {
                 effectiveClassification = classification
             }
             windows.append(makeWindow(
-                index: axIndex,
+                index: stableAXIndex(observation, occurrences: &axIdentityOccurrences),
                 ax: observation,
                 cg: cgObservation,
                 match: match,
@@ -71,6 +72,15 @@ public enum WindowNormalizer {
             ))
         }
         return NormalizationResult(windows: windows, rejected: rejected, decisions: decisions)
+    }
+
+    private static func stableAXIndex(
+        _ window: RawAXWindow, occurrences: inout [String: Int]
+    ) -> Int {
+        let key = "\(window.pid):\(window.role ?? ""):\(window.subrole ?? ""):\(window.title ?? "")"
+        let occurrence = occurrences[key, default: 0]
+        occurrences[key] = occurrence + 1
+        return occurrence
     }
 
     private static func bestMatch(for ax: RawAXWindow, in cg: [RawCGWindow], available: Set<Int>) -> Match {

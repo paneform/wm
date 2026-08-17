@@ -224,6 +224,28 @@ public actor WindowGeometryProfileRecorder {
                 )
             }
         }
+        if observation.outcome == .exact {
+            if let minimum = profile.minimumWidth, observation.observed.width < minimum {
+                profile.minimumWidth = observation.observed.width
+                profile.pendingMinimumWidth = nil
+                profile.pendingMinimumWidthSamples = 0
+            }
+            if let minimum = profile.minimumHeight, observation.observed.height < minimum {
+                profile.minimumHeight = observation.observed.height
+                profile.pendingMinimumHeight = nil
+                profile.pendingMinimumHeightSamples = 0
+            }
+            if let maximum = profile.maximumWidth, observation.observed.width > maximum {
+                profile.maximumWidth = observation.observed.width
+                profile.pendingMaximumWidth = nil
+                profile.pendingMaximumWidthSamples = 0
+            }
+            if let maximum = profile.maximumHeight, observation.observed.height > maximum {
+                profile.maximumHeight = observation.observed.height
+                profile.pendingMaximumHeight = nil
+                profile.pendingMaximumHeightSamples = 0
+            }
+        }
         if let index { catalog.profiles[index] = profile } else { catalog.profiles.append(profile) }
         try persistence?.save(catalog)
     }

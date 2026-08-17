@@ -69,6 +69,16 @@ final class ManagedWindowLifecycleTests: XCTestCase {
         workspace.reconcile(managed)
         XCTAssertTrue(workspace.contains("a"))
     }
+
+    func testUncertainPendingWindowIsNotAdopted() {
+        var lifecycle = ManagedWindowLifecycle()
+        var pending = window("pending", pid: 7, classification: .uncertain)
+        pending.management = .pending
+
+        let update = lifecycle.reconcile(snapshot(windows: [pending], pids: [7]))
+
+        XCTAssertTrue(update.windows.isEmpty)
+    }
 }
 
 private struct WorkspaceStateForLifecycle {

@@ -240,8 +240,14 @@ extension WorkspaceState {
             for oldID in replacements.keys.sorted() {
                 guard let newID = replacements[oldID],
                       let workspace = state.workspaces.first(where: { $0.windowIDs.contains(oldID) }) else { continue }
-                state.remove(windowID: oldID, from: workspace.name)
-                state.insert(windowID: newID, into: workspace.name)
+                let focused = workspace.focusedWindowID == oldID
+                let parkedFrame = state.parkedWindowFrames[oldID]
+                let index = state.index(of: workspace.name)!
+                state.workspaces[index].windowIDs = workspace.windowIDs.map { $0 == oldID ? newID : $0 }
+                state.workspaces[index].bsp.root = workspace.bsp.root?.replacing(oldID, with: newID)
+                if focused { state.workspaces[index].focusedWindowID = newID }
+                state.parkedWindowFrames.removeValue(forKey: oldID)
+                if let parkedFrame { state.parkedWindowFrames[newID] = parkedFrame }
                 modified.insert(workspace.name)
             }
 

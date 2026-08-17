@@ -67,16 +67,31 @@ public struct AXWindowGeometryAdapter: WindowGeometryAdapter, @unchecked Sendabl
         }
         let app = AXUIElementCreateApplication(window.pid)
         let elements: [AXUIElement] = try copy(app, kAXWindowsAttribute)
+        if let index = axWindowIndex(window.id) {
+            let candidates = elements.filter { matches($0, window) }
+            if candidates.indices.contains(index) {
+                return store(candidates[index], for: window)
+            }
+        }
         let candidates = elements.filter { matches($0, window) }
         guard !candidates.isEmpty else { throw WindowGeometryAdapterError.notFound }
         guard candidates.count == 1 else { throw WindowGeometryAdapterError.ambiguous }
+        return store(candidates[0], for: window)
+    }
+
+    private func store(_ element: AXUIElement, for window: NormalizedWindow) -> WindowGeometryHandle {
         let handle = WindowGeometryHandle(rawValue: UUID().uuidString)
         storage.lock.withLock {
-            storage.elements[handle.rawValue] = candidates[0]
+            storage.elements[handle.rawValue] = element
             storage.handlesByWindowID[window.id] = handle
             storage.lifetimesByWindowID[window.id] = .init(windowID: window.id, pid: window.pid)
         }
         return handle
+    }
+
+    private func axWindowIndex(_ id: String) -> Int? {
+        guard id.hasPrefix("window:ax:") else { return nil }
+        return id.split(separator: ":").last.flatMap { Int($0) }
     }
 
     public func validateControllability(of handle: WindowGeometryHandle) async throws {

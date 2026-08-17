@@ -81,7 +81,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     windowID: String?, frontmostPID: Int32?, inventory: InventorySnapshot,
     tolerateGeometryClamp: Bool = false
   ) async throws {
-    retainSessionWindows(inventory.windows)
+    retainSessionWindows(inventory.windows.filter { $0.classification == .normal })
     let windowID = resolveRetainedFocusedWindowID(
       windows: Array(sessionWindows.values), focusedWindowID: windowID, frontmostPID: frontmostPID
     )
@@ -173,6 +173,9 @@ actor DaemonHandler: WebSocketRequestHandler {
           params: frameParams(step.windowOrWorkspaceID, frame)
         )
       case .park:
+        guard inventory.windows.contains(where: {
+          $0.id == step.windowOrWorkspaceID && $0.classification == .normal
+        }) else { continue }
         try await parkCommittedWindow(
           step.windowOrWorkspaceID, state: committed, inventory: inventory)
       case .retile:
@@ -388,13 +391,14 @@ actor DaemonHandler: WebSocketRequestHandler {
       throw WorkspaceRequestError.displayRequired
     }
     let committed = await workspaces.snapshot()
-    var candidate = StartupIntentAudit.candidate(state: committed, inventory: inventory)
+    let update = lifecycle.reconcile(inventory)
+    var candidate = StartupIntentAudit.candidate(
+      state: committed, inventory: inventory, replacements: update.replacements)
     _ = try candidate.reconcileDisplayTopology(
       connectedDisplayIDs: Set(inventory.displays.map(\.id)), fallbackDisplayID: displayID
     )
     try await auditCommittedIntent(inventory, state: candidate)
     try await workspaces.commit(candidate)
-    let update = lifecycle.reconcile(inventory)
     try await applyLifecycleUpdate(update, inventory: inventory, displayID: displayID)
   }
 
@@ -977,16 +981,28 @@ actor DaemonHandler: WebSocketRequestHandler {
       case .workspaceFocus:
         let params = try decodeParams(WorkspaceFocusParams.self, from: .object(request.params))
         let before = await workspaces.snapshot()
-        let displayID = try resolveDisplay(
-          params.displayId, selector: params.displaySelector,
-          inventory: snapshot.inventory, workspaceState: before
-        )
-        var reconciled = try await workspaces.previewFocus(name: params.name, displayID: displayID)
-        reconciled.workspaceState = StartupIntentAudit.candidate(
-          state: reconciled.workspaceState, inventory: snapshot.inventory)
-        try await reconcileWorkspaceFocus(
-          before: before, after: &reconciled.workspaceState,
-          name: params.name, inventory: snapshot.inventory)
+        func reconcileFocus(_ inventory: InventorySnapshot) async throws
+          -> WMWorkspace.WorkspaceMutationResult
+        {
+          let displayID = try resolveDisplay(
+            params.displayId, selector: params.displaySelector,
+            inventory: inventory, workspaceState: before
+          )
+          var reconciled = try await workspaces.previewFocus(name: params.name, displayID: displayID)
+          reconciled.workspaceState = StartupIntentAudit.candidate(
+            state: reconciled.workspaceState, inventory: inventory)
+          try await reconcileWorkspaceFocus(
+            before: before, after: &reconciled.workspaceState,
+            name: params.name, inventory: inventory)
+          return reconciled
+        }
+        let reconciled: WMWorkspace.WorkspaceMutationResult
+        do {
+          reconciled = try await reconcileFocus(snapshot.inventory)
+        } catch let failure as WindowGeometryFailure where failure.code == .inventoryStale {
+          committed = try await state.refresh()
+          reconciled = try await reconcileFocus(committed.snapshot.inventory)
+        }
         try await workspaces.commitFocus(reconciled)
         await publishWorkspaceMutation(reconciled, before: before, reason: .workspaceFocused)
         result = workspaceMutation(reconciled)
@@ -1004,9 +1020,17 @@ actor DaemonHandler: WebSocketRequestHandler {
         }.first
         var mutation = try await workspaces.previewMoveWindows(
           ids, to: params.workspace, displayID: liveDisplayID)
-        try await reconcileWorkspaceFocus(
-          before: before, after: &mutation.workspaceState, name: params.workspace,
-          inventory: currentSnapshot.inventory)
+        let pendingIDs = Set(ids.filter { id in
+          currentSnapshot.inventory.windows.first(where: { $0.id == id })?.management == .pending
+        })
+        if pendingIDs.isEmpty {
+          try await reconcileWorkspaceFocus(
+            before: before, after: &mutation.workspaceState, name: params.workspace,
+            inventory: currentSnapshot.inventory)
+          mutation.effectStatus = .verified
+        } else {
+          mutation.effectStatus = .simulated
+        }
         try await workspaces.commitFocus(mutation)
         await publishWorkspaceMutation(mutation, before: before, reason: .workspaceFocused)
         result = workspaceMutation(mutation)

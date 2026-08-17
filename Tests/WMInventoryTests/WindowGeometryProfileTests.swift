@@ -110,6 +110,26 @@ final class WindowGeometryProfileTests: XCTestCase {
         XCTAssertNil(profile?.minimumWidth)
         XCTAssertEqual(profile?.correctiveAttemptCount, 1)
     }
+
+    func testExactObservationCorrectsContradictedMinimum() async throws {
+        let window = profileWindow()
+        let recorder = WindowGeometryProfileRecorder(catalog: .init(profiles: [.init(
+            identity: WindowGeometryProfileIdentity(window: window)!, context: .init(),
+            minimumWidth: 1_496, correctiveAttemptCount: 4, sampleCount: 10,
+            successfulSampleCount: 8, lastObservedAt: .init()
+        )]))
+
+        try await recorder.record(.init(
+            window: window, context: .init(),
+            requested: .init(x: 0, y: 0, width: 712, height: 950),
+            observed: .init(x: 0, y: 0, width: 712, height: 950),
+            attempts: 1, outcome: .exact, observedAt: .init()
+        ))
+
+        let profile = await recorder.profile(for: window)
+        XCTAssertEqual(profile?.minimumWidth, 712)
+        XCTAssertEqual(profile?.pendingMinimumWidthSamples, 0)
+    }
 }
 
 private func profileWindow() -> NormalizedWindow {

@@ -62,6 +62,22 @@ final class InventoryTests: XCTestCase {
         XCTAssertEqual(result.decisions.filter { $0.confidence == .cgOnly }.count, 2)
     }
 
+    func testAXOnlyIdentityIgnoresUnrelatedInventoryOrdering() throws {
+        let ghostty = RawAXWindow(
+            pid: 7, appName: "Ghostty", title: "tmux", role: "AXWindow",
+            subrole: "AXStandardWindow", frame: .init(x: 0, y: 0, width: 100, height: 100))
+        let unrelated = RawAXWindow(
+            pid: 8, appName: "Other", title: "Other", role: "AXWindow",
+            subrole: "AXStandardWindow", frame: .init(x: 0, y: 0, width: 100, height: 100))
+
+        let first = WindowNormalizer.normalize(ax: [ghostty, ghostty], cg: []).windows.map(\.id)
+        let reordered = WindowNormalizer.normalize(ax: [unrelated, ghostty, ghostty], cg: []).windows
+            .filter { $0.pid == 7 }.map(\.id)
+
+        XCTAssertEqual(first, reordered)
+        XCTAssertEqual(Set(first).count, 2)
+    }
+
     func testClassificationRetainsUncertainAndTransientRecords() {
         let uncertain = RawAXWindow(pid: 1, appName: "Broken", role: nil, frame: nil, readErrors: ["AXRole:-25205"])
         let dialog = RawAXWindow(pid: 2, appName: "App", role: "AXWindow", subrole: "AXDialog", frame: .init(x: 0, y: 0, width: 200, height: 100))

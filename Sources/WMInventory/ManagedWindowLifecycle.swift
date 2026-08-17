@@ -68,7 +68,8 @@ public struct ManagedWindowLifecycle: Sendable {
             }
         }
 
-        for window in inventory.windows {
+        for window in inventory.windows where window.classification == .normal
+            || window.classification == .transient || retained[window.id]?.override != nil {
             let previous = retained[window.id]
             if let previous, previous.window.pid != window.pid {
                 retained.removeValue(forKey: window.id)
