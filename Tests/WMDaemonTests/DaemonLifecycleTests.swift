@@ -953,6 +953,32 @@ private func response(_ text: String) throws -> Response {
     try candidate.validate()
 }
 
+@Test func healthyStartupAuditPrunesPersistedIneligibleSystemUIMember() throws {
+    let state = startupState(staleID: "window:cg:155", liveID: "window:cg:200")
+    var inventory = completeInventory(["window:cg:155", "window:cg:200"])
+    inventory.windows[0].classification = .systemUI
+    inventory.windows[0].management = .ineligible
+
+    let candidate = StartupIntentAudit.candidate(state: state, inventory: inventory)
+
+    #expect(candidate[workspace: "visible"]?.windowIDs == ["window:cg:200"])
+    #expect(candidate[workspace: "visible"]?.focusedWindowID == "window:cg:200")
+    #expect(candidate[workspace: "visible"]?.bsp.root == .leaf(windowID: "window:cg:200"))
+    #expect(candidate.parkedWindowFrames["window:cg:155"] == nil)
+    try candidate.validate()
+}
+
+@Test func healthyStartupAuditDoesNotAdoptNewIneligibleSystemUIWindow() {
+    let state = startupState(staleID: "window:cg:155", liveID: "window:cg:200")
+    var inventory = completeInventory(["window:cg:155", "window:cg:200", "window:cg:300"])
+    inventory.windows[2].classification = .systemUI
+    inventory.windows[2].management = .ineligible
+
+    let candidate = StartupIntentAudit.candidate(state: state, inventory: inventory)
+
+    #expect(candidate.workspaces.flatMap(\.windowIDs).contains("window:cg:300") == false)
+}
+
 @Test func resumeAuditPreservesMembershipAcrossWindowIDReplacement() throws {
     let state = startupState(staleID: "window:cg:155", liveID: "window:cg:200")
     var inventory = completeInventory(["window:cg:200", "window:cg:300"])

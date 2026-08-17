@@ -257,8 +257,9 @@ struct StartupIntentAudit {
             }
         }
         for workspace in state.workspaces {
-            for id in workspace.windowIDs where id.hasPrefix("window:cg:")
-                && replacements[id] == nil && !liveIDs.contains(id) {
+            for id in workspace.windowIDs where replacements[id] == nil
+                && (inventory.windows.contains { $0.id == id && $0.management == .ineligible }
+                    || (id.hasPrefix("window:cg:") && !liveIDs.contains(id))) {
                 candidate.removeWindow(id, from: workspace.name)
             }
         }
