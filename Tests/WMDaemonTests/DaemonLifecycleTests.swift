@@ -1001,6 +1001,57 @@ private func response(_ text: String) throws -> Response {
     try candidate.validate()
 }
 
+@Test func unrelatedFailedAppScanDoesNotBlockStaleAXExpiration() throws {
+    let staleID = "window:ax:1:AXWindow:AXStandardWindow:old:0"
+    let state = startupState(staleID: staleID, liveID: "window:cg:200")
+    var inventory = completeInventory(["window:cg:200"])
+    inventory.appScans.append(.init(
+        application: .init(pid: 2, name: "Helper"), status: .failed,
+        durationMilliseconds: 1, windowCount: 0, issues: ["failed"]
+    ))
+    let candidate = StartupIntentAudit.candidate(
+        state: state, inventory: inventory
+    )
+
+    #expect(candidate[workspace: "visible"]?.windowIDs == ["window:cg:200"])
+    #expect(candidate[workspace: "visible"]?.focusedWindowID == "window:cg:200")
+    #expect(candidate[workspace: "visible"]?.bsp.root == .leaf(windowID: "window:cg:200"))
+    #expect(candidate.parkedWindowFrames[staleID] == nil)
+    try candidate.validate()
+}
+
+@Test func completeStartupAuditPreservesStaleAXIdentityThroughReplacement() throws {
+    let staleID = "window:ax:1:AXWindow:AXStandardWindow:old:0"
+    let replacementID = "window:ax:1:AXWindow:AXStandardWindow:new:0"
+    let state = startupState(staleID: staleID, liveID: "window:cg:200")
+    var inventory = completeInventory([replacementID, "window:cg:200"])
+    inventory.displays = [.init(
+        id: "display:1", name: "Display", isBuiltin: true, isPrimary: true,
+        frame: .init(x: 0, y: 0, width: 1_000, height: 800),
+        visibleFrame: .init(x: 0, y: 0, width: 1_000, height: 800),
+        backingScale: 1, identifiers: .init())]
+    let candidate = StartupIntentAudit.candidate(
+        state: state, inventory: inventory,
+        replacements: [staleID: replacementID]
+    )
+
+    #expect(candidate[workspace: "visible"]?.windowIDs == [replacementID, "window:cg:200"])
+    #expect(candidate[workspace: "visible"]?.focusedWindowID == replacementID)
+    #expect(candidate[workspace: "visible"]?.bsp.root?.contains(replacementID) == true)
+    try candidate.validate()
+}
+
+@Test func owningPIDTimedOutScanPreservesUnmatchedStaleAXIdentity() {
+    let staleID = "window:ax:1:AXWindow:AXStandardWindow:old:0"
+    let state = startupState(staleID: staleID, liveID: "window:cg:200")
+    let candidate = StartupIntentAudit.candidate(
+        state: state,
+        inventory: completeInventory(["window:cg:200"], appStatus: .timedOut)
+    )
+
+    #expect(candidate == state)
+}
+
 @Test func unrelatedFailedAXScanStillPrunesStaleCGMember() {
     let state = startupState(staleID: "window:cg:155", liveID: "window:cg:200")
     let candidate = StartupIntentAudit.candidate(

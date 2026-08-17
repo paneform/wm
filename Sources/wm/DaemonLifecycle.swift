@@ -256,10 +256,19 @@ struct StartupIntentAudit {
                 return state
             }
         }
+        let livePIDs = Set(inventory.appScans.map(\.application.pid))
+        let successfulPIDs = Set(inventory.appScans.filter { $0.status == .succeeded }.map(\.application.pid))
+        func isDefinitivelyAbsentAXIdentity(_ id: String) -> Bool {
+            guard id.hasPrefix("window:ax:"),
+                let pid = Int32(id.split(separator: ":", maxSplits: 3)[2]) else { return false }
+            return inventory.applicationEnumerationSucceeded && !livePIDs.contains(pid)
+                || successfulPIDs.contains(pid)
+        }
         for workspace in state.workspaces {
             for id in workspace.windowIDs where replacements[id] == nil
                 && (inventory.windows.contains { $0.id == id && $0.management == .ineligible }
-                    || (id.hasPrefix("window:cg:") && !liveIDs.contains(id))) {
+                    || ((id.hasPrefix("window:cg:") || isDefinitivelyAbsentAXIdentity(id))
+                        && !liveIDs.contains(id))) {
                 candidate.removeWindow(id, from: workspace.name)
             }
         }
