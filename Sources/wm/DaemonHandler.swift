@@ -153,11 +153,8 @@ actor DaemonHandler: WebSocketRequestHandler {
   private func reconcileObservedWindowsAuthorized(_ inventory: InventorySnapshot, displayID: String)
     async throws
   {
-    let committed = await workspaces.snapshot()
-    try await workspaces.commit(
-      StartupIntentAudit.candidate(state: committed, inventory: inventory))
     let update = lifecycle.reconcile(inventory)
-    try await applyLifecycleUpdate(update, displayID: displayID)
+    try await applyLifecycleUpdate(update, inventory: inventory, displayID: displayID)
   }
 
   func auditCommittedIntent(
@@ -398,7 +395,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     try await auditCommittedIntent(inventory, state: candidate)
     try await workspaces.commit(candidate)
     let update = lifecycle.reconcile(inventory)
-    try await applyLifecycleUpdate(update, displayID: displayID)
+    try await applyLifecycleUpdate(update, inventory: inventory, displayID: displayID)
   }
 
   private func resumeAfterSessionTransition() async {
@@ -432,7 +429,9 @@ actor DaemonHandler: WebSocketRequestHandler {
     }
   }
 
-  private func applyLifecycleUpdate(_ update: WindowLifecycleUpdate, displayID: String) async throws
+  private func applyLifecycleUpdate(
+    _ update: WindowLifecycleUpdate, inventory: InventorySnapshot, displayID: String
+  ) async throws
   {
     let closedIDs = Set(update.verifiedClosedLifetimes.map(\.windowID))
     for lifetime in update.verifiedClosedLifetimes {
@@ -462,6 +461,10 @@ actor DaemonHandler: WebSocketRequestHandler {
       displayID: displayID
     )
     retainSessionWindows(update.windows)
+    for name in mutation.modifiedWorkspaces where mutation.workspaceState[workspace: name]?.visible == true {
+      _ = await tileWorkspaceForObserver(
+        mutation.workspaceState, named: name, inventory: inventory, forceStack: false)
+    }
     await publishWorkspaceMutation(mutation, before: before, reason: .workspaceChanged)
   }
 
@@ -779,7 +782,8 @@ actor DaemonHandler: WebSocketRequestHandler {
         }
         let displayID = try resolveDisplay(
           nil, inventory: snapshot.inventory, workspaceState: await workspaces.snapshot())
-        try await applyLifecycleUpdate(update, displayID: displayID)
+        try await applyLifecycleUpdate(
+          update, inventory: snapshot.inventory, displayID: displayID)
         result = .object([
           "window_id": .string(params.windowID),
           "management": .string(request.method == .windowManage ? "managed" : "unmanaged"),
@@ -924,7 +928,7 @@ actor DaemonHandler: WebSocketRequestHandler {
             throw WorkspaceRequestError.displayRequired
           }
           let update = lifecycle.reconcile(inventory)
-          try await applyLifecycleUpdate(update, displayID: displayID)
+          try await applyLifecycleUpdate(update, inventory: inventory, displayID: displayID)
           try await reconcileExternalFocus(
             windowID: committed.snapshot.focusedWindowID, frontmostPID: nil, inventory: inventory,
             allowWhilePaused: true
@@ -977,16 +981,12 @@ actor DaemonHandler: WebSocketRequestHandler {
           params.displayId, selector: params.displaySelector,
           inventory: snapshot.inventory, workspaceState: before
         )
-        let mutation = try await workspaces.previewFocus(name: params.name, displayID: displayID)
-        var reconciled = mutation
+        var reconciled = try await workspaces.previewFocus(name: params.name, displayID: displayID)
         reconciled.workspaceState = StartupIntentAudit.candidate(
           state: reconciled.workspaceState, inventory: snapshot.inventory)
         try await reconcileWorkspaceFocus(
-          before: before,
-          after: &reconciled.workspaceState,
-          name: params.name,
-          inventory: snapshot.inventory
-        )
+          before: before, after: &reconciled.workspaceState,
+          name: params.name, inventory: snapshot.inventory)
         try await workspaces.commitFocus(reconciled)
         await publishWorkspaceMutation(reconciled, before: before, reason: .workspaceFocused)
         result = workspaceMutation(reconciled)

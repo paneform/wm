@@ -953,6 +953,28 @@ private func response(_ text: String) throws -> Response {
     try candidate.validate()
 }
 
+@Test func resumeAuditPreservesMembershipAcrossWindowIDReplacement() throws {
+    let state = startupState(staleID: "window:cg:155", liveID: "window:cg:200")
+    var inventory = completeInventory(["window:cg:200", "window:cg:300"])
+    inventory.windows = [
+        recoveryWindow(id: "window:cg:200", bundleID: "test", displayID: "display:1"),
+        recoveryWindow(id: "window:cg:300", bundleID: "test", displayID: "display:1"),
+    ]
+    inventory.displays = [.init(
+        id: "display:1", name: "Display", isBuiltin: true, isPrimary: true,
+        frame: .init(x: 0, y: 0, width: 1_000, height: 800),
+        visibleFrame: .init(x: 0, y: 0, width: 1_000, height: 800),
+        backingScale: 1, identifiers: .init())]
+    let candidate = StartupIntentAudit.candidate(
+        state: state, inventory: inventory,
+        replacements: ["window:cg:155": "window:cg:300"]
+    )
+
+    #expect(candidate[workspace: "visible"]?.windowIDs == ["window:cg:300", "window:cg:200"])
+    #expect(candidate[workspace: "visible"]?.bsp.root?.contains("window:cg:300") == true)
+    try candidate.validate()
+}
+
 @Test func unrelatedFailedAXScanStillPrunesStaleCGMember() {
     let state = startupState(staleID: "window:cg:155", liveID: "window:cg:200")
     let candidate = StartupIntentAudit.candidate(
@@ -981,6 +1003,83 @@ private func response(_ text: String) throws -> Response {
     #expect(WorkspaceIntentAudit(state: reconciled, inventory: completeInventory(["window:cg:200"]))
         .orderedSteps.allSatisfy { $0.windowOrWorkspaceID != "window:cg:13547" })
     try reconciled.validate()
+}
+
+@Test func lifecycleCloseRemovesMemberAndRetilesVisibleWorkspace() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    var state = startupState(staleID: "window:cg:155", liveID: "window:cg:200")
+    state.parkedWindowFrames = [:]
+    let controller = WorkspaceController(
+        store: WorkspaceStateStore(
+            stateURL: directory.appendingPathComponent("state.json"), buildVersion: "test"
+        ) { try $0.validate() },
+        state: state
+    )
+    let geometry = DirectionalGeometry(frames: [
+        "window:cg:155": .init(x: 0, y: 0, width: 500, height: 800),
+        "window:cg:200": .init(x: 500, y: 0, width: 500, height: 800),
+    ])
+    let handler = DaemonHandler(
+        state: .init(provider: SystemInventoryProvider(scanner: .init(sources: .init(
+            displays: StubDisplays(), accessibility: StubAX(), coreGraphics: StubCG()
+        )))),
+        workspaces: controller, geometryEffects: geometry
+    )
+
+    try await handler.reconcileObservedWindows(
+        lifecycleInventory([
+            recoveryWindow(id: "window:cg:155", bundleID: "test", displayID: "display:1"),
+            recoveryWindow(id: "window:cg:200", bundleID: "test", displayID: "display:1"),
+        ]), displayID: "display:1")
+    try await handler.reconcileObservedWindows(
+        completeInventory(["window:cg:200"]), displayID: "display:1")
+
+    let workspace = await controller.snapshot()[workspace: "visible"]
+    #expect(workspace?.windowIDs == ["window:cg:200"])
+    #expect(workspace?.bsp.root == .leaf(windowID: "window:cg:200"))
+    try? FileManager.default.removeItem(at: directory)
+}
+
+@Test func lifecycleCloseUpdatesHiddenLayoutWithoutRendering() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    var state = startupState(staleID: "window:cg:155", liveID: "window:cg:200")
+    state.parkedWindowFrames = [:]
+    state.workspaces[0].visible = false
+    state.workspaces[0].focused = false
+    state.focusedWorkspaceName = nil
+    state.displays["display:1"]?.visibleWorkspaceName = nil
+    let controller = WorkspaceController(
+        store: WorkspaceStateStore(
+            stateURL: directory.appendingPathComponent("state.json"), buildVersion: "test"
+        ) { try $0.validate() },
+        state: state
+    )
+    let geometry = DirectionalGeometry(frames: [
+        "window:cg:155": .init(x: 0, y: 0, width: 500, height: 800),
+        "window:cg:200": .init(x: 500, y: 0, width: 500, height: 800),
+    ])
+    let handler = DaemonHandler(
+        state: .init(provider: SystemInventoryProvider(scanner: .init(sources: .init(
+            displays: StubDisplays(), accessibility: StubAX(), coreGraphics: StubCG()
+        )))),
+        workspaces: controller, geometryEffects: geometry
+    )
+
+    try await handler.reconcileObservedWindows(
+        lifecycleInventory([
+            recoveryWindow(id: "window:cg:155", bundleID: "test", displayID: "display:1"),
+            recoveryWindow(id: "window:cg:200", bundleID: "test", displayID: "display:1"),
+        ]), displayID: "display:1")
+    try await handler.reconcileObservedWindows(
+        completeInventory(["window:cg:200"]), displayID: "display:1")
+
+    let workspace = await controller.snapshot()[workspace: "visible"]
+    #expect(workspace?.windowIDs == ["window:cg:200"])
+    #expect(workspace?.bsp.root == .leaf(windowID: "window:cg:200"))
+    #expect(await geometry.operations.isEmpty)
+    try? FileManager.default.removeItem(at: directory)
 }
 
 @Test func periodicUnhealthyCGRetainsStaleMembersConservatively() {

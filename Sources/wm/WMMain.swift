@@ -159,6 +159,28 @@ import WMWorkspace
                 }
             }
         }
+        let terminationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didTerminateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task {
+                do {
+                    guard await !handler.isPaused() else { return }
+                    let committed = try await state.refresh()
+                    let inventory = committed.snapshot.inventory
+                    guard let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id else { return }
+                    try await handler.reconcilePeriodicObservation(
+                        inventory, displayID: displayID,
+                        focusedWindowID: committed.snapshot.focusedWindowID,
+                        frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier
+                    )
+                    await handler.publishStateSnapshot()
+                } catch {
+                    FileHandle.standardError.write(Data("application termination reconciliation failed: \(error)\n".utf8))
+                }
+            }
+        }
         let workspaceCenter = NSWorkspace.shared.notificationCenter
         let sessionObservers: [NSObjectProtocol] = [
             workspaceCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { _ in
@@ -193,6 +215,7 @@ import WMWorkspace
         await observationTask.value
         await configTask.value
         NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
+        NSWorkspace.shared.notificationCenter.removeObserver(terminationObserver)
         sessionObservers.forEach { workspaceCenter.removeObserver($0) }
         NotificationCenter.default.removeObserver(screenObserver)
         await handler.beginTermination()
