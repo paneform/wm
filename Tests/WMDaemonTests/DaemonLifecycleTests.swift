@@ -995,14 +995,40 @@ private func response(_ text: String) throws -> Response {
 
 @Test func periodicHealthyCGReconciliationPrunesStaleMembersBeforeEffects() throws {
     let state = startupState(staleID: "window:cg:13547", liveID: "window:cg:200")
-    let reconciled = StartupIntentAudit.candidate(
-        state: state, inventory: completeInventory(["window:cg:200"], appStatus: .failed)
-    )
+    var inventory = completeInventory(["window:cg:200"], appStatus: .failed)
+    inventory.rawCGWindows.append(.init(cgWindowID: 13_547, pid: 99))
+    let reconciled = StartupIntentAudit.candidate(state: state, inventory: inventory)
 
     #expect(reconciled[workspace: "visible"]?.windowIDs == ["window:cg:200"])
     #expect(WorkspaceIntentAudit(state: reconciled, inventory: completeInventory(["window:cg:200"]))
         .orderedSteps.allSatisfy { $0.windowOrWorkspaceID != "window:cg:13547" })
     try reconciled.validate()
+}
+
+@Test func periodicHandlerPrunesPersistedStaleCGMember() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let controller = WorkspaceController(
+        store: WorkspaceStateStore(
+            stateURL: directory.appendingPathComponent("state.json"), buildVersion: "test"
+        ) { try $0.validate() },
+        state: startupState(staleID: "window:cg:155", liveID: "window:cg:200")
+    )
+    let handler = DaemonHandler(
+        state: .init(provider: SystemInventoryProvider(scanner: .init(sources: .init(
+            displays: StubDisplays(), accessibility: StubAX(), coreGraphics: StubCG()
+        )))),
+        workspaces: controller, geometryEffects: DirectionalGeometry(frames: [:])
+    )
+
+    try await handler.reconcileObservedWindows(
+        completeInventory(["window:cg:200"]), displayID: "display:1")
+
+    let workspace = await controller.snapshot()[workspace: "visible"]
+    #expect(workspace?.windowIDs == ["window:cg:200"])
+    #expect(workspace?.focusedWindowID == "window:cg:200")
+    #expect(workspace?.bsp.root == .leaf(windowID: "window:cg:200"))
+    try? FileManager.default.removeItem(at: directory)
 }
 
 @Test func lifecycleCloseRemovesMemberAndRetilesVisibleWorkspace() async throws {
@@ -1026,6 +1052,15 @@ private func response(_ text: String) throws -> Response {
         )))),
         workspaces: controller, geometryEffects: geometry
     )
+    let client = UUID()
+    let events = EventProbe()
+    await handler.installSender { text, _ in
+        guard case .event(let event) = try? ProtocolCodec.decode(ServerMessage.self, from: Data(text.utf8)) else { return }
+        Task { await events.record(event.topic) }
+    }
+    _ = await handler.handle(text: try clientMessage(.subscribe(.init(
+        requestId: "closed", subscriptionId: "closed", topics: [.windowClosed]
+    ))), clientID: client)
 
     try await handler.reconcileObservedWindows(
         lifecycleInventory([
@@ -1038,6 +1073,8 @@ private func response(_ text: String) throws -> Response {
     let workspace = await controller.snapshot()[workspace: "visible"]
     #expect(workspace?.windowIDs == ["window:cg:200"])
     #expect(workspace?.bsp.root == .leaf(windowID: "window:cg:200"))
+    for _ in 0..<100 where !(await events.contains(.windowClosed)) { await Task.yield() }
+    #expect(await events.contains(.windowClosed))
     try? FileManager.default.removeItem(at: directory)
 }
 

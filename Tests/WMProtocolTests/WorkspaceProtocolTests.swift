@@ -65,6 +65,7 @@ private let workspace = WorkspaceState(
     #expect(EventTopic.workspaceDisplayChanged.rawValue == "workspace.display_changed")
     #expect(EventTopic.workspaceModeChanged.rawValue == "workspace.mode_changed")
     #expect(EventTopic.stateSnapshot.rawValue == "state.snapshot")
+    #expect(EventTopic.windowClosed.rawValue == "window.closed")
     #expect(EventTopic.daemonPaused.rawValue == "daemon.paused")
     #expect(EventTopic.daemonResumed.rawValue == "daemon.resumed")
     #expect(EventTopic.sessionResynchronized.rawValue == "session.resynchronized")

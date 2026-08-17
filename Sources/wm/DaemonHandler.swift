@@ -154,6 +154,10 @@ actor DaemonHandler: WebSocketRequestHandler {
     async throws
   {
     let update = lifecycle.reconcile(inventory)
+    let committed = await workspaces.snapshot()
+    let candidate = StartupIntentAudit.candidate(
+      state: committed, inventory: inventory, replacements: update.replacements)
+    if candidate != committed { try await workspaces.commit(candidate) }
     try await applyLifecycleUpdate(update, inventory: inventory, displayID: displayID)
   }
 
@@ -465,6 +469,11 @@ actor DaemonHandler: WebSocketRequestHandler {
       displayID: displayID
     )
     retainSessionWindows(update.windows)
+    if !closedIDs.isEmpty {
+      await publishSessionEvent(
+        .windowClosed,
+        data: .object(["window_ids": .array(closedIDs.sorted().map(JSONValue.string))]))
+    }
     for name in mutation.modifiedWorkspaces where mutation.workspaceState[workspace: name]?.visible == true {
       _ = await tileWorkspaceForObserver(
         mutation.workspaceState, named: name, inventory: inventory, forceStack: false)
@@ -2477,7 +2486,7 @@ extension ParkedWindowFrame {
 extension EventTopic {
   fileprivate var isDaemonEvent: Bool {
     switch self {
-    case .workspaceChanged, .workspaceFocused, .workspaceCreated, .workspaceDeleted,
+    case .windowClosed, .workspaceChanged, .workspaceFocused, .workspaceCreated, .workspaceDeleted,
       .workspaceDisplayChanged, .workspaceModeChanged, .daemonPaused, .daemonResumed,
       .sessionResynchronized, .configurationChanged, .healthChanged:
       true

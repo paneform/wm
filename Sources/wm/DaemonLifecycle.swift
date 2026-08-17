@@ -234,9 +234,7 @@ struct StartupIntentAudit {
         guard inventory.sourceHealth.first(where: { $0.source == .coreGraphics })?.status == .healthy else {
             return state
         }
-        let liveIDs = Set(inventory.windows.map(\.id)).union(inventory.rawCGWindows.compactMap { window in
-            window.cgWindowID.flatMap { $0 == 0 ? nil : "window:cg:\($0)" }
-        })
+        let liveIDs = Set(inventory.windows.map(\.id))
         var replacements = replacements
         let assigned = state.workspaces.flatMap(\.windowIDs)
         let legacyGroups = Dictionary(grouping: assigned.filter {
