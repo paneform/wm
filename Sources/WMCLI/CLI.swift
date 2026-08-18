@@ -66,8 +66,8 @@ public enum LifecycleCommand: String, Sendable, Equatable {
     case start
     case stop
     case restart
-    case installService = "install-service"
-    case uninstallService = "uninstall-service"
+    case install
+    case uninstall
 }
 
 public enum CLICommand: Sendable, Equatable {
@@ -77,10 +77,11 @@ public enum CLICommand: Sendable, Equatable {
     case configInit
     case configValidate
     case configAdoptState(URL)
+    case permissions(request: Bool)
     case daemon(DaemonConfiguration)
     case request(method: String, params: [String: JSONValue] = [:], url: URL)
     case subscribe(SubscriptionConfiguration)
-    case lifecycle(LifecycleCommand, force: Bool)
+    case lifecycle(LifecycleCommand, force: Bool, manual: Bool = false)
     case benchmark(BenchmarkConfiguration)
     case verify(URL)
 }
@@ -128,10 +129,11 @@ public struct CLIParser: Sendable {
             return .help
         case "daemon": return .daemon(try parseDaemon(rest))
         case "ping": return try request("daemon.ping", rest)
-        case "pause": return try request("daemon.pause", rest)
+        case "pause": return try parsePause(rest)
         case "resume": return try request("daemon.resume", rest)
         case "state": return try parseState(rest)
         case "health": return try request("health.get", rest)
+        case "permissions": return try parsePermissions(rest)
         case "display": return try parseDisplay(rest, command: "display")
         case "monitor": return try parseDisplay(rest, command: "monitor")
         case "window": return try parseWindow(rest)
@@ -146,9 +148,10 @@ public struct CLIParser: Sendable {
         case "transaction": return try parseTransaction(rest)
         case "batch": return try parseBatch(rest)
         case "subscribe": return .subscribe(try parseSubscription(rest))
-        case "start", "restart", "install-service", "uninstall-service":
-            return try lifecycle(command, rest, allowsForce: false)
+        case "start": return try lifecycle(command, rest, allowsForce: false, allowsManual: true)
+        case "install", "uninstall": return try lifecycle(command, rest, allowsForce: false)
         case "stop": return try lifecycle(command, rest, allowsForce: true)
+        case "restart": return try lifecycle(command, rest, allowsForce: true, allowsManual: true)
         case "benchmark": return .benchmark(try parseBenchmark(rest))
         case "verify": return .verify(try parseURLOnly(rest))
         default: throw CLIParseError("unknown command: \(command)")
@@ -159,6 +162,31 @@ public struct CLIParser: Sendable {
         guard arguments.first == "get", arguments.count >= 2 else { throw CLIParseError("expected 'transaction get ID'") }
         return .request(method: "transaction.get", params: ["transaction_id": .string(arguments[1])],
                         url: try parseURLOnly(Array(arguments.dropFirst(2))))
+    }
+
+    private func parsePermissions(_ arguments: [String]) throws -> CLICommand {
+        switch arguments {
+        case []: .permissions(request: false)
+        case ["request"]: .permissions(request: true)
+        default: throw CLIParseError("expected 'permissions' or 'permissions request'")
+        }
+    }
+
+    private func parsePause(_ arguments: [String]) throws -> CLICommand {
+        var toggle = false
+        var url = defaultWMWebSocketURL
+        var index = 0
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--toggle":
+                guard !toggle else { throw CLIParseError("duplicate --toggle flag") }
+                toggle = true
+            case "--url": url = try webSocketURL(try value(after: &index, in: arguments))
+            default: throw CLIParseError("unexpected pause argument: \(arguments[index])")
+            }
+            index += 1
+        }
+        return .request(method: "daemon.pause", params: toggle ? ["toggle": .bool(true)] : [:], url: url)
     }
 
     private func parseConfiguration(_ arguments: [String]) throws -> CLICommand {
@@ -688,11 +716,16 @@ public struct CLIParser: Sendable {
         return SubscriptionConfiguration(topics: topics, projection: projection, detail: detail, afterSequence: afterSequence, url: url)
     }
 
-    private func lifecycle(_ raw: String, _ arguments: [String], allowsForce: Bool) throws -> CLICommand {
+    private func lifecycle(
+        _ raw: String, _ arguments: [String], allowsForce: Bool, allowsManual: Bool = false
+    ) throws -> CLICommand {
         guard let command = LifecycleCommand(rawValue: raw) else { throw CLIParseError("unknown lifecycle command: \(raw)") }
-        let force = arguments == ["--force"]
-        guard arguments.isEmpty || (allowsForce && force) else { throw CLIParseError("unexpected argument for \(raw)") }
-        return .lifecycle(command, force: force)
+        let force = arguments.contains("--force")
+        let manual = arguments.contains("--manual")
+        guard arguments.count == Set(arguments).count,
+              arguments.allSatisfy({ ($0 == "--force" && allowsForce) || ($0 == "--manual" && allowsManual) })
+        else { throw CLIParseError("unexpected argument for \(raw)") }
+        return .lifecycle(command, force: force, manual: manual)
     }
 
     private func parseBenchmark(_ arguments: [String]) throws -> BenchmarkConfiguration {

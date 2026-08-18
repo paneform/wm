@@ -524,8 +524,8 @@ Lifecycle commands are CLI-only and operate through a direct lifecycle layer:
 - `wm start`
 - `wm stop [--force]`
 - `wm restart`
-- `wm install-service`
-- `wm uninstall-service`
+- `wm install`
+- `wm uninstall`
 
 Command targets default to the focused window and support explicit IDs and
 structured selectors. Selectors apply to all matches.

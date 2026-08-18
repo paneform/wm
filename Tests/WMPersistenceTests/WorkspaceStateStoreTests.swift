@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import WMLifecycle
 @testable import WMPersistence
 
 final class WorkspaceStateStoreTests: XCTestCase {

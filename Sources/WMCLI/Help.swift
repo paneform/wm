@@ -20,6 +20,7 @@ COMMANDS
     --url URL                  Connect to a WebSocket URL.
 
   pause                        Pause automatic window management.
+    --toggle                   Toggle pause; resuming performs reconciliation.
     --url URL                  Connect to a WebSocket URL.
 
   resume                       Resume automatic window management.
@@ -31,6 +32,9 @@ COMMANDS
 
   health                       Get daemon health and capabilities.
     --url URL                  Connect to a WebSocket URL.
+
+  permissions                  Report required macOS permissions and setup instructions.
+    request                    Request each missing permission and show checklist progress.
 
   display                      Inspect connected displays.
     list                       List connected displays.
@@ -169,12 +173,15 @@ COMMANDS
     --after-sequence NUMBER    Resume after an event sequence number.
     --url URL                  Connect to a WebSocket URL.
 
-  start                        Start the installed daemon service (reserved).
-  stop                         Stop the installed daemon service (reserved).
+  start                        Start the installed daemon service.
+    --manual                   Start the invoking wm executable outside launchd.
+  stop                         Stop the running daemon.
     --force                    Force the daemon to stop.
-  restart                      Restart the installed daemon service (reserved).
-  install-service              Install the daemon service (reserved).
-  uninstall-service            Uninstall the daemon service (reserved).
+  restart                      Restart under daemon service ownership.
+    --force                    Force the daemon to stop before restarting.
+    --manual                   Restart outside launchd using the invoking executable.
+  install                      Install and register the daemon service.
+  uninstall                    Unregister and remove a stopped daemon service.
 
   benchmark                    Measure daemon ping latency.
     --iterations COUNT         Set the number of requests (default: 10).

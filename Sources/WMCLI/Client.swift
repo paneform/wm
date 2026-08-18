@@ -1,6 +1,8 @@
 import Foundation
 import WMConfiguration
 import WMInventory
+import WMLifecycle
+import WMPermissions
 import WMProtocol
 import WMWebSocket
 
@@ -165,7 +167,7 @@ public struct CLIOutput: Sendable {
 
     public func processing(pretty: Bool) -> CLIOutput {
         guard pretty else { return self }
-        return CLIOutput(stdout: { data in stdout(prettyJSON(data)) }, stderr: stderr)
+        return CLIOutput(stdout: { data in stdout(prettyJSON(data)) }, stderr: { data in stderr(prettyJSON(data)) })
     }
 }
 
@@ -184,6 +186,9 @@ public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
     private let encoder: JSONEncoder
     private let configPath: URL
     private let displays: @Sendable () async -> [ConfigurationFile.ExampleDisplay]
+    private let lifecycle: LifecycleController?
+    private let serviceInstaller: ServiceInstaller?
+    private let permissions: PermissionController
 
     public init(
         client: Client,
@@ -193,13 +198,19 @@ public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
         displays: @escaping @Sendable () async -> [ConfigurationFile.ExampleDisplay] = {
             let result = await AppKitDisplayInventorySource().displays()
             return result.value.map { .init(id: $0.id, name: $0.name) }
-        }
+        },
+        lifecycle: LifecycleController? = nil,
+        serviceInstaller: ServiceInstaller? = nil,
+        permissions: PermissionController = .init()
     ) {
         self.client = client
         self.output = output
         self.id = id
         self.configPath = configPath
         self.displays = displays
+        self.lifecycle = lifecycle
+        self.serviceInstaller = serviceInstaller
+        self.permissions = permissions
         encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
     }
@@ -208,7 +219,9 @@ public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
         do {
             let invocation = try CLIParser().parseInvocation(arguments)
             return try await CLIRunner(
-                client: client, output: output.processing(pretty: invocation.pretty), id: id, configPath: configPath
+                client: client, output: output.processing(pretty: invocation.pretty), id: id,
+                configPath: configPath, displays: displays, lifecycle: lifecycle,
+                serviceInstaller: serviceInstaller, permissions: permissions
             )
                 .run(invocation.command)
         } catch let error as CLIParseError {
@@ -237,6 +250,8 @@ public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
             return runConfigValidate()
         case .configAdoptState(let url):
             return try await runConfigAdoptState(url: url)
+        case .permissions(let request):
+            return await runPermissions(request: request)
         case .request(let method, let params, let url):
             let response = try await client.request(try encoder.encode(CLIRequest(requestID: id(), method: method, params: params)), at: url)
             writeLine(response.json, to: output.stdout)
@@ -251,9 +266,8 @@ public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
                 writeLine(message, to: output.stdout)
             }
             return .success
-        case .lifecycle(let command, _):
-            writeError(code: "not_implemented", message: "lifecycle command is reserved: \(command.rawValue)")
-            return .commandFailed
+        case .lifecycle(let command, let force, let manual):
+            return await runLifecycle(command, force: force, manual: manual)
         case .daemon:
             writeError(code: "wiring_required", message: "daemon command requires executable wiring")
             return .unavailable
@@ -273,6 +287,80 @@ public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
             return .success
         } catch {
             writeError(code: "config_init_failed", message: String(describing: error))
+            return .commandFailed
+        }
+    }
+
+    private func runPermissions(request: Bool) async -> CLIExitCode {
+        if request {
+            let granted = await permissions.requestMissing { statuses, waitingFor in
+                self.writePermissionChecklist(statuses, waitingFor: waitingFor)
+            }
+            return granted ? .success : .commandFailed
+        }
+        let statuses = permissions.statuses()
+        let value: JSONValue = .object([
+            "ok": .bool(statuses.allSatisfy(\.granted)),
+            "permissions": .array(statuses.map(permissionJSON)),
+        ])
+        if let data = try? encoder.encode(value) { writeLine(data, to: output.stdout) }
+        return statuses.allSatisfy(\.granted) ? .success : .commandFailed
+    }
+
+    private func permissionJSON(_ status: WMPermissionStatus) -> JSONValue {
+        .object([
+            "id": .string(status.permission.rawValue), "name": .string(status.permission.name),
+            "granted": .bool(status.granted), "reason": .string(status.permission.reason),
+            "instructions": .string(status.permission.instructions),
+        ])
+    }
+
+    private func writePermissionChecklist(_ statuses: [WMPermissionStatus], waitingFor: WMPermission?) {
+        var lines = ["wm permissions"]
+        lines += statuses.map { status in
+            let marker = status.granted ? "[x]" : "[ ]"
+            let waiting = waitingFor == status.permission ? " - waiting for approval" : ""
+            return "\(marker) \(status.permission.name)\(waiting)\n    \(status.permission.reason)\n    \(status.permission.instructions)"
+        }
+        writeLine(Data(lines.joined(separator: "\n").utf8), to: output.stdout)
+    }
+
+    private func runLifecycle(_ command: LifecycleCommand, force: Bool, manual: Bool) async -> CLIExitCode {
+        guard let lifecycle else {
+            writeError(code: "wiring_required", message: "lifecycle command requires executable wiring")
+            return .unavailable
+        }
+        do {
+            let result: LifecycleResult
+            switch command {
+            case .start: result = try await lifecycle.start(manual: manual)
+            case .stop: result = try await lifecycle.stop(force: force)
+            case .restart: result = try await lifecycle.restart(force: force, manual: manual)
+            case .install:
+                guard let serviceInstaller else {
+                    writeError(code: "wiring_required", message: "service installation requires executable wiring")
+                    return .unavailable
+                }
+                result = try await serviceInstaller.install()
+            case .uninstall:
+                guard let serviceInstaller else {
+                    writeError(code: "wiring_required", message: "service installation requires executable wiring")
+                    return .unavailable
+                }
+                result = try await serviceInstaller.uninstall()
+            }
+            let value: JSONValue = .object([
+                "ok": .bool(true), "action": .string(result.action), "changed": .bool(result.changed),
+                "forced": .bool(result.forced), "escalation": .array(result.escalation.map(JSONValue.string)),
+                "warnings": .array(result.warnings.map(JSONValue.string)),
+            ])
+            writeLine(try encoder.encode(value), to: output.stdout)
+            return .success
+        } catch let failure as LifecycleFailure {
+            writeError(code: failure.code, message: failure.message)
+            return failure == .serviceNotInstalled ? .unavailable : .commandFailed
+        } catch {
+            writeError(code: "lifecycle_failed", message: String(describing: error))
             return .commandFailed
         }
     }

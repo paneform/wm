@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import WMConfiguration
+import WMPermissions
 @testable import WMCLI
 
 private actor Capture {
@@ -250,4 +251,33 @@ private final class MockClient: CLIWebSocketClient, @unchecked Sendable {
     output.stdout(data)
     try await Task.sleep(for: .milliseconds(10))
     #expect(await capture.stdout == [data])
+}
+
+@Test func prettyFlagFormatsStderrAndPreservesEscapedMultilineMessage() async throws {
+    let capture = Capture()
+    let output = CLIOutput(
+        stdout: { data in Task { await capture.out(data) } },
+        stderr: { data in Task { await capture.err(data) } }
+    ).processing(pretty: true)
+    let data = Data(#"{"ok":false,"error":{"message":"line one\n\tline two"}}"#.utf8)
+    output.stderr(data)
+    try await Task.sleep(for: .milliseconds(10))
+    let rendered = String(decoding: try #require(await capture.stderr.first), as: UTF8.self)
+    #expect(rendered.contains("\n  \"error\""))
+    #expect(rendered.contains(#"line one\n\tline two"#))
+}
+
+@Test func permissionsStatusIncludesReasonsAndInstructions() async throws {
+    let capture = Capture()
+    let controller = PermissionController(isGranted: { $0 == .accessibility })
+    let runner = CLIRunner(client: MockClient(), output: .init(
+        stdout: { data in Task { await capture.out(data) } }, stderr: { _ in }
+    ), permissions: controller)
+    #expect(try await runner.run(.permissions(request: false)) == .commandFailed)
+    try await Task.sleep(for: .milliseconds(10))
+    let output = try #require(await capture.stdout.first)
+    let json = try #require(JSONSerialization.jsonObject(with: output) as? [String: Any])
+    let permissions = try #require(json["permissions"] as? [[String: Any]])
+    #expect(permissions.count == 2)
+    #expect(permissions.allSatisfy { ($0["instructions"] as? String)?.contains("System Settings") == true })
 }

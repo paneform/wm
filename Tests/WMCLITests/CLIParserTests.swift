@@ -67,6 +67,22 @@ import WMConfiguration
     #expect(throws: CLIParseError.self) { try CLIParser().parse(["window", "move"]) }
 }
 
+@Test func parsesPauseToggle() throws {
+    #expect(try CLIParser().parse(["pause"]) == .request(
+        method: "daemon.pause", params: [:], url: defaultWMWebSocketURL
+    ))
+    #expect(try CLIParser().parse(["pause", "--toggle", "--url", "ws://localhost:9000/v1"]) == .request(
+        method: "daemon.pause", params: ["toggle": .bool(true)], url: URL(string: "ws://localhost:9000/v1")!
+    ))
+    #expect(throws: CLIParseError.self) { try CLIParser().parse(["pause", "--toggle", "--toggle"]) }
+}
+
+@Test func parsesPermissionsCommands() throws {
+    #expect(try CLIParser().parse(["permissions"]) == .permissions(request: false))
+    #expect(try CLIParser().parse(["permissions", "request"]) == .permissions(request: true))
+    #expect(throws: CLIParseError.self) { try CLIParser().parse(["permissions", "unknown"]) }
+}
+
 @Test func parsesConfigurationCommandsWithWebSocketParity() throws {
     #expect(try CLIParser().parse(["config"]) == .configHelp)
     #expect(try CLIParser().parse(["config", "help"]) == .configHelp)
@@ -197,7 +213,14 @@ import WMConfiguration
 @Test func parsesLifecycleAndBenchmark() throws {
     let parser = CLIParser()
     #expect(try parser.parse(["stop", "--force"]) == .lifecycle(.stop, force: true))
+    #expect(try parser.parse(["restart", "--force"]) == .lifecycle(.restart, force: true))
     #expect(try parser.parse(["start"]) == .lifecycle(.start, force: false))
+    #expect(try parser.parse(["start", "--manual"]) == .lifecycle(.start, force: false, manual: true))
+    #expect(try parser.parse(["restart", "--manual", "--force"]) == .lifecycle(.restart, force: true, manual: true))
+    #expect(try parser.parse(["install"]) == .lifecycle(.install, force: false))
+    #expect(try parser.parse(["uninstall"]) == .lifecycle(.uninstall, force: false))
+    #expect(throws: CLIParseError.self) { try parser.parse(["install-service"]) }
+    #expect(throws: CLIParseError.self) { try parser.parse(["uninstall-service"]) }
     #expect(try parser.parse(["benchmark", "--iterations", "5"]) == .benchmark(.init(iterations: 5)))
 }
 

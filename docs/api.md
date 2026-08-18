@@ -502,9 +502,13 @@ All output is JSON. Exit code is zero only when the response is `ok: true`.
 ```text
 wm daemon [--host 127.0.0.1] [--port 17832] [--allow-origin ORIGIN ...]
 wm ping [--url URL]
+wm pause [--toggle] [--url URL]
+wm resume [--url URL]
 wm state [--url URL]
 wm state observed [--url URL]
 wm health [--url URL]
+wm permissions
+wm permissions request
 wm display list [--verbose] [--url URL]
 wm monitor list [--verbose] [--url URL] # CLI alias
 wm window list [--url URL]
@@ -514,11 +518,11 @@ wm diagnostics inventory [--url URL]
 wm inventory refresh [--url URL]
 wm subscribe [TOPIC ...] [--projection delta|snapshot|invalidation]
              [--after-sequence N] [--url URL]
-wm start                               # reserved lifecycle command
+wm start [--manual]
 wm stop [--force]                      # reserved lifecycle command
-wm restart                             # reserved lifecycle command
-wm install-service                     # reserved lifecycle command
-wm uninstall-service                   # reserved lifecycle command
+wm restart [--force] [--manual]
+wm install                             # install and register the daemon service
+wm uninstall                           # unregister and remove a stopped service
 ```
 
 `wm subscribe` prints one JSON server message per line until interrupted.
