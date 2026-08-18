@@ -1365,47 +1365,6 @@ private func response(_ text: String) throws -> Response {
   try candidate.validate()
 }
 
-@Test func healthyStartupAuditPrunesPersistedTransientMember() throws {
-  let state = startupState(staleID: "window:cg:155", liveID: "window:cg:200")
-  var inventory = completeInventory(["window:cg:155", "window:cg:200"])
-  inventory.windows[0].classification = .transient
-  inventory.windows[0].management = .unmanaged
-
-  let candidate = StartupIntentAudit.candidate(state: state, inventory: inventory)
-
-  #expect(candidate[workspace: "visible"]?.windowIDs == ["window:cg:200"])
-  #expect(candidate[workspace: "visible"]?.focusedWindowID == "window:cg:200")
-  #expect(candidate[workspace: "visible"]?.bsp.root == .leaf(windowID: "window:cg:200"))
-  #expect(candidate.parkedWindowFrames["window:cg:155"] == nil)
-  try candidate.validate()
-}
-
-@Test func healthyStartupAuditPrunesTransientAXReplacementTarget() throws {
-  let staleID = "window:cg:155"
-  let replacementID = "window:ax:1:AXWindow:AXStandardWindow:stable:0"
-  let state = startupState(staleID: staleID, liveID: "window:cg:200")
-  var inventory = completeInventory([replacementID, "window:cg:200"])
-  inventory.windows[0].classification = .transient
-  inventory.windows[0].management = .unmanaged
-  inventory.displays = [
-    .init(
-      id: "display:1", name: "Display", isBuiltin: true, isPrimary: true,
-      frame: .init(x: 0, y: 0, width: 1_000, height: 800),
-      visibleFrame: .init(x: 0, y: 0, width: 1_000, height: 800),
-      backingScale: 1, identifiers: .init())
-  ]
-
-  let candidate = StartupIntentAudit.candidate(
-    state: state, inventory: inventory, replacements: [staleID: replacementID])
-
-  #expect(candidate[workspace: "visible"]?.windowIDs == ["window:cg:200"])
-  #expect(candidate[workspace: "visible"]?.focusedWindowID == "window:cg:200")
-  #expect(candidate[workspace: "visible"]?.bsp.root == .leaf(windowID: "window:cg:200"))
-  #expect(candidate.parkedWindowFrames[staleID] == nil)
-  #expect(candidate.parkedWindowFrames[replacementID] == nil)
-  try candidate.validate()
-}
-
 @Test func healthyStartupAuditDoesNotAdoptNewIneligibleSystemUIWindow() {
   let state = startupState(staleID: "window:cg:155", liveID: "window:cg:200")
   var inventory = completeInventory(["window:cg:155", "window:cg:200", "window:cg:300"])

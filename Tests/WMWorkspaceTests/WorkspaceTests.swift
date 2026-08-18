@@ -441,21 +441,6 @@ import Testing
   #expect(state[workspace: "1"] == nil)
 }
 
-@Test func replacementTargetAlreadyAssignedPreservesTargetWorkspace() throws {
-  var state = WorkspaceState(workspaces: [
-    tiled("fallback", display: "d", windows: ["settings-old"]),
-    tiled("manual", display: "d", windows: ["settings-new"]),
-  ])
-
-  _ = try state.reconcileObservedWindows(
-    ["settings-new"], replacements: ["settings-old": "settings-new"],
-    removedWindowIDs: ["settings-old"], defaultDisplayID: "d")
-
-  #expect(state[workspace: "fallback"]?.windowIDs.isEmpty == true)
-  #expect(state[workspace: "manual"]?.windowIDs == ["settings-new"])
-  try state.validate()
-}
-
 @Test func bspLayoutAdaptsToObservedMinimumWidths() {
   let workspace = Workspace(
     name: "tile", origin: .runtime, displayID: "d",

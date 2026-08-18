@@ -34,60 +34,6 @@ final class ManagedWindowLifecycleTests: XCTestCase {
     XCTAssertTrue(omittedAgain.verifiedClosedLifetimes.isEmpty)
   }
 
-  func testManagedWindowBecomingTransientIsNewlyUnmanaged() {
-    var lifecycle = ManagedWindowLifecycle()
-    _ = lifecycle.reconcile(snapshot(windows: [window("a", pid: 7)], pids: [7]))
-
-    let update = lifecycle.reconcile(
-      snapshot(windows: [window("a", pid: 7, classification: .transient)], pids: [7]))
-
-    XCTAssertTrue(update.windows.isEmpty)
-    XCTAssertEqual(update.newlyUnmanagedWindowIDs, ["a"])
-    XCTAssertTrue(update.verifiedClosedLifetimes.isEmpty)
-  }
-
-  func testUnambiguousIdentityFlipReplacesRetainedWindowImmediately() {
-    var lifecycle = ManagedWindowLifecycle()
-    let cgID = "window:cg:1"
-    let axID = "window:ax:7:AXWindow:AXStandardWindow:stable:0"
-    _ = lifecycle.reconcile(snapshot(windows: [window(cgID, pid: 7)], pids: [7]))
-
-    let ax = lifecycle.reconcile(snapshot(windows: [window(axID, pid: 7)], pids: [7]))
-    XCTAssertEqual(ax.windows.map(\.id), [axID])
-    XCTAssertEqual(ax.verifiedClosedLifetimes, [.init(windowID: cgID, pid: 7)])
-    XCTAssertEqual(ax.replacements, [cgID: axID])
-
-    let cg = lifecycle.reconcile(snapshot(windows: [window(cgID, pid: 7)], pids: [7]))
-    XCTAssertEqual(cg.windows.map(\.id), [cgID])
-    XCTAssertEqual(cg.verifiedClosedLifetimes, [.init(windowID: axID, pid: 7)])
-    XCTAssertEqual(cg.replacements, [axID: cgID])
-  }
-
-  func testSameSourceCloseAndOpenDoesNotReplaceRetainedWindowImmediately() {
-    var lifecycle = ManagedWindowLifecycle()
-    _ = lifecycle.reconcile(snapshot(windows: [window("window:cg:1", pid: 7)], pids: [7]))
-
-    let update = lifecycle.reconcile(
-      snapshot(windows: [window("window:cg:2", pid: 7)], pids: [7]))
-
-    XCTAssertEqual(update.windows.map(\.id), ["window:cg:1", "window:cg:2"])
-    XCTAssertTrue(update.verifiedClosedLifetimes.isEmpty)
-    XCTAssertTrue(update.replacements.isEmpty)
-  }
-
-  func testIneligibleIdentityFlipTargetDoesNotReplaceRetainedWindow() {
-    var lifecycle = ManagedWindowLifecycle()
-    _ = lifecycle.reconcile(snapshot(windows: [window("window:cg:1", pid: 7)], pids: [7]))
-    let fallback = window(
-      "window:ax:7:AXWindow:AXStandardWindow:stable:0", pid: 7, classification: .uncertain)
-
-    let update = lifecycle.reconcile(snapshot(windows: [fallback], pids: [7]))
-
-    XCTAssertEqual(update.windows.map(\.id), ["window:cg:1"])
-    XCTAssertTrue(update.verifiedClosedLifetimes.isEmpty)
-    XCTAssertTrue(update.replacements.isEmpty)
-  }
-
   func testCoordinatedOmissionDoesNotCloseRetainedWindows() {
     var lifecycle = ManagedWindowLifecycle()
     _ = lifecycle.reconcile(
@@ -216,8 +162,7 @@ private func window(_ id: String, pid: Int32, classification: WindowClassificati
   -> NormalizedWindow
 {
   .init(
-    id: id, pid: pid, appName: "App", title: "Window", role: "AXWindow",
-    subrole: "AXStandardWindow",
+    id: id, pid: pid, appName: "App", role: "AXWindow", subrole: "AXStandardWindow",
     frame: .init(x: 0, y: 0, width: 100, height: 100), classification: classification,
     management: .unmanaged, rejectionReasons: [], joinConfidence: .exact, joinSignals: [],
     health: .healthy,

@@ -274,11 +274,12 @@ struct StartupIntentAudit {
         || successfulPIDs.contains(pid)
     }
     guard pruneMissing else { return candidate }
-    for workspace in candidate.workspaces {
+    for workspace in state.workspaces {
       for id in workspace.windowIDs
-      where (inventory.windows.contains { $0.id == id && $0.classification != .normal }
-        || ((id.hasPrefix("window:cg:") || isDefinitivelyAbsentAXIdentity(id))
-          && !liveIDs.contains(id)))
+      where replacements[id] == nil
+        && (inventory.windows.contains { $0.id == id && $0.management == .ineligible }
+          || ((id.hasPrefix("window:cg:") || isDefinitivelyAbsentAXIdentity(id))
+            && !liveIDs.contains(id)))
       {
         candidate.removeWindow(id, from: workspace.name)
       }
