@@ -59,14 +59,30 @@ public struct ManagedWindowLifecycle: Sendable {
     let successfulPIDs = Set(
       inventory.appScans.filter { $0.status == .succeeded }.map(\.application.pid))
     let observedByID = Dictionary(uniqueKeysWithValues: inventory.windows.map { ($0.id, $0) })
+    var verifiedClosed: Set<WindowLifetime> = []
+    var newlyUnmanaged: Set<String> = []
+    var replacements: [String: String] = [:]
+    var replacementRecords: [String: RetainedWindow] = [:]
+
+    let missingRecords = retained.values.filter { observedByID[$0.window.id] == nil }
+    let newlyObserved = inventory.windows.filter {
+      retained[$0.id] == nil && isReplacementEligible($0)
+    }
+    for replacement in unambiguousReplacements(
+      previous: missingRecords.map(\.window), current: newlyObserved)
+    {
+      guard let record = retained.removeValue(forKey: replacement.old.id) else { continue }
+      verifiedClosed.insert(.init(windowID: replacement.old.id, pid: replacement.old.pid))
+      replacements[replacement.old.id] = replacement.new.id
+      replacementRecords[replacement.new.id] = record
+    }
+
     let healthyOmissions = retained.values.filter {
       observedByID[$0.window.id] == nil && successfulPIDs.contains($0.window.pid)
     }
     let inventoryDiscontinuity =
       healthyOmissions.count >= 2
       && healthyOmissions.count * 2 >= retained.count
-    var verifiedClosed: Set<WindowLifetime> = []
-    var replacements: [String: String] = [:]
     var closedWindows: [NormalizedWindow] = []
 
     for (id, previous) in retained where observedByID[id] == nil {
@@ -91,29 +107,32 @@ public struct ManagedWindowLifecycle: Sendable {
     where window.classification == .normal
       || window.classification == .transient || retained[window.id]?.override != nil
     {
-      let previous = retained[window.id]
-      if let previous, previous.window.pid != window.pid {
+      let existing = retained[window.id]
+      if let existing, existing.window.pid != window.pid {
         retained.removeValue(forKey: window.id)
-        verifiedClosed.insert(.init(windowID: window.id, pid: previous.window.pid))
-        closedWindows.append(previous.window)
+        verifiedClosed.insert(.init(windowID: window.id, pid: existing.window.pid))
+        closedWindows.append(existing.window)
       }
-      retained[window.id] = RetainedWindow(
-        window: applying(previous?.window.pid == window.pid ? previous?.override : nil, to: window),
-        override: previous?.window.pid == window.pid ? previous?.override : nil,
+      let previous = existing?.window.pid == window.pid ? existing : replacementRecords[window.id]
+      let updated = RetainedWindow(
+        window: applying(previous?.override, to: window),
+        override: previous?.override,
         missingConfirmations: 0
       )
-    }
-
-    for previous in closedWindows {
-      let candidates = inventory.windows.filter {
-        $0.id != previous.id && $0.pid == previous.pid
-          && $0.bundleID == previous.bundleID && $0.role == previous.role
-          && $0.subrole == previous.subrole
+      retained[window.id] = updated
+      if previous?.window.management == .managed && updated.window.management != .managed {
+        newlyUnmanaged.insert(window.id)
       }
-      if candidates.count == 1 { replacements[previous.id] = candidates[0].id }
     }
 
-    return update(verifiedClosed: verifiedClosed, replacements: replacements)
+    for replacement in unambiguousReplacements(
+      previous: closedWindows, current: inventory.windows.filter(isReplacementEligible))
+    {
+      replacements[replacement.old.id] = replacement.new.id
+    }
+
+    return update(
+      verifiedClosed: verifiedClosed, newlyUnmanaged: newlyUnmanaged, replacements: replacements)
   }
 
   private func update(
@@ -139,5 +158,37 @@ public struct ManagedWindowLifecycle: Sendable {
     case nil: window.management = window.classification == .normal ? .managed : window.management
     }
     return window
+  }
+
+  private func unambiguousReplacements(
+    previous: [NormalizedWindow], current: [NormalizedWindow]
+  ) -> [(old: NormalizedWindow, new: NormalizedWindow)] {
+    previous.compactMap { old in
+      let candidates = current.filter { isSameLogicalWindow(old, $0) }
+      guard candidates.count == 1, let candidate = candidates.first else { return nil }
+      guard previous.filter({ isSameLogicalWindow($0, candidate) }).count == 1 else { return nil }
+      return (old, candidate)
+    }
+  }
+
+  private func isSameLogicalWindow(_ previous: NormalizedWindow, _ current: NormalizedWindow)
+    -> Bool
+  {
+    let crossesIdentitySources =
+      previous.id.hasPrefix("window:cg:") && current.id.hasPrefix("window:ax:")
+      || previous.id.hasPrefix("window:ax:") && current.id.hasPrefix("window:cg:")
+    guard crossesIdentitySources,
+      let previousTitle = previous.title, !previousTitle.isEmpty,
+      previousTitle == current.title,
+      let previousFrame = previous.frame, let currentFrame = current.frame,
+      previousFrame.approximatelyEquals(currentFrame)
+    else { return false }
+    return previous.pid == current.pid
+      && previous.bundleID == current.bundleID && previous.role == current.role
+      && previous.subrole == current.subrole
+  }
+
+  private func isReplacementEligible(_ window: NormalizedWindow) -> Bool {
+    window.classification == .normal || window.classification == .transient
   }
 }
