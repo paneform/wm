@@ -433,7 +433,10 @@ public struct InventorySnapshot: Codable, Hashable, Sendable {
     public var appScans: [AppScanResult]
 
     public var applicationEnumerationSucceeded: Bool {
-        sourceHealth.first { $0.source == .accessibility }?.status == .healthy
+        guard let status = sourceHealth.first(where: { $0.source == .accessibility })?.status else {
+            return false
+        }
+        return status != .unhealthy
     }
 
     public init(

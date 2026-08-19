@@ -34,6 +34,30 @@ final class ManagedWindowLifecycleTests: XCTestCase {
     XCTAssertTrue(omittedAgain.verifiedClosedLifetimes.isEmpty)
   }
 
+  func testManagedWindowBecomingTransientIsNewlyUnmanaged() {
+    var lifecycle = ManagedWindowLifecycle()
+    _ = lifecycle.reconcile(snapshot(windows: [window("a", pid: 7)], pids: [7]))
+
+    let update = lifecycle.reconcile(
+      snapshot(windows: [window("a", pid: 7, classification: .transient)], pids: [7]))
+
+    XCTAssertTrue(update.windows.isEmpty)
+    XCTAssertEqual(update.newlyUnmanagedWindowIDs, ["a"])
+    XCTAssertTrue(update.verifiedClosedLifetimes.isEmpty)
+  }
+
+  func testManagedWindowBecomingSystemUIIsNewlyUnmanaged() {
+    var lifecycle = ManagedWindowLifecycle()
+    _ = lifecycle.reconcile(snapshot(windows: [window("a", pid: 7)], pids: [7]))
+
+    let update = lifecycle.reconcile(
+      snapshot(windows: [window("a", pid: 7, classification: .systemUI)], pids: [7]))
+
+    XCTAssertTrue(update.windows.isEmpty)
+    XCTAssertEqual(update.newlyUnmanagedWindowIDs, ["a"])
+    XCTAssertTrue(update.verifiedClosedLifetimes.isEmpty)
+  }
+
   func testCoordinatedOmissionDoesNotCloseRetainedWindows() {
     var lifecycle = ManagedWindowLifecycle()
     _ = lifecycle.reconcile(
@@ -47,6 +71,24 @@ final class ManagedWindowLifecycleTests: XCTestCase {
     }
   }
 
+  func testUnmanagedTransientOmissionDoesNotBlockManagedClosure() {
+    var lifecycle = ManagedWindowLifecycle()
+    _ = lifecycle.reconcile(
+      snapshot(
+        windows: [
+          window("a", pid: 7), window("b", pid: 8), window("c", pid: 9),
+          window("dialog", pid: 10, classification: .transient),
+        ], pids: [7, 8, 9, 10]))
+
+    _ = lifecycle.reconcile(
+      snapshot(windows: [window("b", pid: 8), window("c", pid: 9)], pids: [7, 8, 9, 10]))
+    let update = lifecycle.reconcile(
+      snapshot(windows: [window("b", pid: 8), window("c", pid: 9)], pids: [7, 8, 9, 10]))
+
+    XCTAssertTrue(update.verifiedClosedLifetimes.contains(.init(windowID: "a", pid: 7)))
+    XCTAssertEqual(update.windows.map(\.id), ["b", "c"])
+  }
+
   func testFailedTopLevelApplicationEnumerationCannotConfirmClosure() {
     var lifecycle = ManagedWindowLifecycle()
     _ = lifecycle.reconcile(snapshot(windows: [window("a", pid: 7)], pids: [7]))
@@ -56,6 +98,18 @@ final class ManagedWindowLifecycleTests: XCTestCase {
 
     XCTAssertEqual(failed.windows.map(\.id), ["a"])
     XCTAssertTrue(failed.verifiedClosedLifetimes.isEmpty)
+  }
+
+  func testUnrelatedFailedAppScanDoesNotBlockTerminatedProcessClosure() {
+    var lifecycle = ManagedWindowLifecycle()
+    _ = lifecycle.reconcile(snapshot(windows: [window("a", pid: 7)], pids: [7]))
+    var degraded = snapshot(windows: [], pids: [8], status: .failed, accessibilityStatus: .degraded)
+    degraded.sourceHealth[0].permissionGranted = true
+
+    let update = lifecycle.reconcile(degraded)
+
+    XCTAssertTrue(update.windows.isEmpty)
+    XCTAssertEqual(update.verifiedClosedLifetimes, [.init(windowID: "a", pid: 7)])
   }
 
   func testPIDRestartEvictsEveryOldWindowAndInsertsReplacementFresh() {
@@ -97,6 +151,14 @@ final class ManagedWindowLifecycleTests: XCTestCase {
         windows: [window("normal", pid: 7), window("dialog", pid: 7, classification: .transient)],
         pids: [7]))
     XCTAssertEqual(replacements.windows.map(\.id), ["normal"])
+  }
+
+  func testManagementOverrideRejectsMismatchedProcessLifetime() {
+    var lifecycle = ManagedWindowLifecycle()
+    _ = lifecycle.reconcile(snapshot(windows: [window("a", pid: 7)], pids: [7]))
+
+    XCTAssertNil(lifecycle.setOverride(.managed, for: "a", pid: 8))
+    XCTAssertNotNil(lifecycle.setOverride(.managed, for: "a", pid: 7))
   }
 
   func testUnmanageAndManageProduceImmediateMembershipTransitionsWithoutClosure() throws {

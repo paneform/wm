@@ -139,13 +139,23 @@ private actor DirectionalGeometry: WindowGeometryEffects {
   var frames: [String: InventoryRect]
   var focused: String?
   var failFocus = false
+  var staleWindowIDs: Set<String> = []
+  var reconciledWindowIDs: [[String]] = []
   var operations: [Operation] = []
 
   init(frames: [String: InventoryRect]) { self.frames = frames }
   func setFailFocus(_ value: Bool) { failFocus = value }
-  func reconcile(windows: [NormalizedWindow]) async {}
+  func setStaleWindowIDs(_ ids: Set<String>) { staleWindowIDs = ids }
+  func resetOperations() { operations.removeAll(keepingCapacity: true) }
+  func reconcile(windows: [NormalizedWindow]) async {
+    reconciledWindowIDs.append(windows.map(\.id).sorted())
+  }
   func evict(lifetimes: Set<WindowLifetime>) async {}
   func get(window: NormalizedWindow) async throws -> WindowFrameGetResult {
+    if staleWindowIDs.contains(window.id) {
+      throw WindowGeometryFailure(
+        code: .inventoryStale, message: "window inventory identity is stale")
+    }
     let frame = frames[window.id] ?? window.frame!
     return .init(windowID: window.id, frame: frame.protocolFrame, observedAt: .init())
   }
@@ -1536,6 +1546,221 @@ private func response(_ text: String) throws -> Response {
   #expect(workspace?.focusedWindowID == "window:cg:200")
   #expect(workspace?.bsp.root == .leaf(windowID: "window:cg:200"))
   try? FileManager.default.removeItem(at: directory)
+}
+
+@Test func periodicFocusSkipsGeometryForRetainedOmittedWindows() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  let displayID = "display:1"
+  let zenID = "window:cg:100"
+  let peerID = "window:cg:101"
+  let spotifyID = "window:cg:200"
+  let state = WorkspaceState(
+    workspaces: [
+      .init(
+        name: "B", origin: .configured, displayID: displayID,
+        windowIDs: [zenID, peerID], focusedWindowID: zenID,
+        bsp: .init(
+          root: .split(
+            axis: .vertical, ratio: 0.5,
+            first: .leaf(windowID: zenID), second: .leaf(windowID: peerID)))),
+      .init(
+        name: "3", origin: .runtime, displayID: displayID, visible: true, focused: true,
+        windowIDs: [spotifyID], focusedWindowID: spotifyID,
+        bsp: .init(root: .leaf(windowID: spotifyID))),
+    ],
+    focusedWorkspaceName: "3",
+    displays: [displayID: .init(visibleWorkspaceName: "3")]
+  )
+  let controller = WorkspaceController(
+    store: WorkspaceStateStore(
+      stateURL: directory.appendingPathComponent("state.json"), buildVersion: "test"
+    ) { try $0.validate() },
+    state: state
+  )
+  let geometry = DirectionalGeometry(frames: [
+    zenID: .init(x: 0, y: 0, width: 500, height: 800),
+    peerID: .init(x: 500, y: 0, width: 500, height: 800),
+    spotifyID: .init(x: 0, y: 0, width: 1_000, height: 800),
+  ])
+  await geometry.setStaleWindowIDs([spotifyID])
+  let handler = DaemonHandler(
+    state: .init(
+      provider: SystemInventoryProvider(
+        scanner: .init(
+          sources: .init(
+            displays: StubDisplays(), accessibility: StubAX(), coreGraphics: StubCG()
+          )))),
+    workspaces: controller, geometryEffects: geometry
+  )
+  var zen = recoveryWindow(id: zenID, bundleID: "zen", displayID: displayID)
+  zen.pid = 10
+  zen.main = true
+  var peer = recoveryWindow(id: peerID, bundleID: "zen", displayID: displayID)
+  peer.pid = 10
+  var spotify = recoveryWindow(id: spotifyID, bundleID: "spotify", displayID: displayID)
+  spotify.pid = 20
+  var dialog = recoveryWindow(id: "window:cg:102", bundleID: "zen", displayID: displayID)
+  dialog.pid = 10
+  dialog.classification = .transient
+  dialog.management = .unmanaged
+  let display = DisplayObservation(
+    id: displayID, name: "Display", isBuiltin: true, isPrimary: true,
+    frame: .init(x: 0, y: 0, width: 1_000, height: 800),
+    visibleFrame: .init(x: 0, y: 0, width: 1_000, height: 800), backingScale: 1,
+    identifiers: .init())
+  func snapshot(_ windows: [NormalizedWindow]) -> InventorySnapshot {
+    .init(
+      timestamp: .init(), durationMilliseconds: 0, displays: [display], rawAXWindows: [],
+      rawCGWindows: [], windows: windows, rejectedAXWindows: [], joinDecisions: [],
+      sourceHealth: [],
+      appScans: [
+        .init(
+          application: .init(pid: 10, name: "Zen"), status: .succeeded,
+          durationMilliseconds: 0, windowCount: windows.filter { $0.pid == 10 }.count, issues: []),
+        .init(
+          application: .init(pid: 20, name: "Spotify"), status: .succeeded,
+          durationMilliseconds: 0, windowCount: windows.filter { $0.pid == 20 }.count, issues: []),
+      ])
+  }
+  try await handler.reconcileObservedWindows(snapshot([zen, peer, spotify]), displayID: displayID)
+
+  try await handler.reconcileApplicationActivation(
+    frontmostPID: zen.pid, inventory: snapshot([spotify]))
+  #expect(await controller.snapshot().focusedWorkspaceName == "3")
+  #expect(await geometry.reconciledWindowIDs.contains([spotifyID]))
+
+  try await handler.reconcilePeriodicObservation(
+    snapshot([spotify, dialog]), displayID: displayID, focusedWindowID: dialog.id,
+    frontmostPID: zen.pid)
+  #expect(await controller.snapshot().focusedWorkspaceName == "3")
+
+  try await handler.reconcilePeriodicObservation(
+    snapshot([spotify, dialog]), displayID: displayID, focusedWindowID: zenID,
+    frontmostPID: zen.pid)
+  #expect(await controller.snapshot().focusedWorkspaceName == "3")
+
+  try await handler.reconcilePeriodicObservation(
+    snapshot([zen, peer]), displayID: displayID, focusedWindowID: nil, frontmostPID: zen.pid)
+  #expect(await controller.snapshot().focusedWorkspaceName == "3")
+
+  try await handler.reconcilePeriodicObservation(
+    snapshot([zen, peer]), displayID: displayID, focusedWindowID: nil, frontmostPID: zen.pid)
+
+  let committed = await controller.snapshot()
+  #expect(committed.focusedWorkspaceName == "B")
+  #expect(committed[workspace: "B"]?.windowIDs == [zenID, peerID])
+  #expect(committed.workspaces.allSatisfy { !($0.windowIDs.contains(spotifyID)) })
+  #expect(await geometry.focused == zenID)
+  #expect(await geometry.operations.filter { $0 == .focus(zenID) }.count == 1)
+  #expect(await geometry.reconciledWindowIDs.contains([zenID, peerID]))
+  try? FileManager.default.removeItem(at: directory)
+}
+
+@Test func automaticFocusOnlyAllowsExplicitManagedTransientEffects() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let scanner = InventoryScanner(
+    sources: .init(
+      displays: StubDisplays(), accessibility: WindowAX(titles: ["source", "target", "panel"]),
+      coreGraphics: WindowCG(titles: ["source", "target", "panel"])))
+  let inventoryState = DaemonHandler.State(provider: SystemInventoryProvider(scanner: scanner))
+  let initial = try await inventoryState.refresh().snapshot.inventory.windows.sorted {
+    $0.id < $1.id
+  }
+  var source = initial[0]
+  source.pid = 10
+  var target = initial[1]
+  target.pid = 20
+  target.main = true
+  var panel = initial[2]
+  panel.pid = 10
+  let sourceID = source.id
+  let targetID = target.id
+  let panelID = panel.id
+  let displayID = "display:1"
+  let controller = WorkspaceController(
+    store: WorkspaceStateStore(
+      stateURL: directory.appendingPathComponent("state.json"), buildVersion: "test"
+    ) { try $0.validate() },
+    state: WorkspaceState(
+      workspaces: [
+        .init(
+          name: "source", origin: .configured, displayID: displayID, visible: true, focused: true,
+          windowIDs: [sourceID, panelID], focusedWindowID: sourceID,
+          bsp: .init(
+            root: .split(
+              axis: .vertical, ratio: 0.5, first: .leaf(windowID: sourceID),
+              second: .leaf(windowID: panelID)))),
+        .init(
+          name: "target", origin: .configured, displayID: displayID, windowIDs: [targetID],
+          focusedWindowID: targetID, bsp: .init(root: .leaf(windowID: targetID))),
+      ], focusedWorkspaceName: "source",
+      displays: [displayID: .init(visibleWorkspaceName: "source")]))
+  let geometry = DirectionalGeometry(frames: [
+    sourceID: source.frame!, targetID: target.frame!, panelID: panel.frame!,
+  ])
+  let handler = DaemonHandler(
+    state: inventoryState, workspaces: controller, geometryEffects: geometry)
+  try await handler.reconcileObservedWindows(
+    lifecycleInventory([source, target, panel]), displayID: displayID)
+  await geometry.resetOperations()
+
+  panel.classification = .transient
+  panel.management = .unmanaged
+  for window in [source, target, panel] {
+    _ = try await inventoryState.update(window: .init(id: window.id, value: window))
+  }
+  let currentInventory = try await inventoryState.state().snapshot.inventory
+
+  try await handler.reconcileApplicationActivation(
+    frontmostPID: target.pid, inventory: currentInventory)
+  #expect(await controller.snapshot().focusedWorkspaceName == "source")
+  #expect(await geometry.operations.isEmpty)
+
+  let replies = await handler.handle(
+    text: try clientMessage(
+      .request(
+        .init(
+          requestId: "manage-panel", method: .windowManage,
+          params: [
+            "window_id": .string(panelID), "return_mode": .string("completion"),
+          ]))), clientID: UUID())
+  #expect(try response(replies[0]).error == nil)
+  await geometry.resetOperations()
+
+  try await handler.reconcileApplicationActivation(
+    frontmostPID: target.pid, inventory: currentInventory)
+  #expect(await controller.snapshot().focusedWorkspaceName == "target")
+  #expect(await geometry.operations.contains(.park(panelID)))
+  #expect(await geometry.focused == targetID)
+
+  let unmanaged = await handler.handle(
+    text: try clientMessage(
+      .request(
+        .init(
+          requestId: "unmanage-panel", method: .windowUnmanage,
+          params: [
+            "window_id": .string(panelID), "return_mode": .string("completion"),
+          ]))), clientID: UUID())
+  #expect(try response(unmanaged[0]).error == nil)
+  let observed = await handler.handle(
+    text: try clientMessage(
+      .request(
+        .init(
+          requestId: "observe-panel", method: .observeWindow,
+          params: ["window_id": .string(panelID)]))), clientID: UUID())
+  guard case .object(let result)? = try response(observed[0]).result,
+    case .array(let windows)? = result["windows"],
+    case .object(let report)? = windows.first,
+    case .object(let expected)? = report["expected"]
+  else {
+    Issue.record("expected panel observation")
+    return
+  }
+  #expect(expected["management"] == .string("unmanaged"))
+  #expect(report["session_retained"] == .bool(true))
 }
 
 @Test func lifecycleCloseRemovesMemberAndRetilesVisibleWorkspace() async throws {

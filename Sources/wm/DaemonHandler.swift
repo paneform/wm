@@ -8,6 +8,7 @@ import WMWebSocket
 import WMWorkspace
 
 actor DaemonHandler: WebSocketRequestHandler {
+  private struct StaleLifecycleProposal: Error {}
   private var shutdownRequest: (@Sendable () -> Void)?
   typealias State = InventoryState<SystemInventoryProvider>
 
@@ -39,7 +40,9 @@ actor DaemonHandler: WebSocketRequestHandler {
   private var observerGeometryReliability = ObserverGeometryReliability()
   private var expectedActivationPIDs: [Int32: Date] = [:]
   private var sessionWindows: [String: NormalizedWindow] = [:]
+  private var managedOverrideLifetimes: Set<WindowLifetime> = []
   private var lifecycle = ManagedWindowLifecycle()
+  private var lifecycleRevision: UInt64 = 0
   private var daemonLifecycle = DaemonLifecycle()
   private var automaticReconciliationEnabled = true
   private var sessionTransitionGeneration: UInt64 = 0
@@ -84,22 +87,49 @@ actor DaemonHandler: WebSocketRequestHandler {
     windowID: String?, frontmostPID: Int32?, inventory: InventorySnapshot,
     tolerateGeometryClamp: Bool = false
   ) async throws {
-    retainSessionWindows(inventory.windows.filter { $0.classification == .normal })
+    let generation = sessionTransitionGeneration
+    await geometry.reconcile(windows: inventory.windows)
+    try requireCurrentSessionGeneration(generation)
+    let observedWindows = inventory.windows.filter { $0.classification == .normal }
+    let observedIDs = Set(observedWindows.map(\.id))
+    let currentLifetimes = Set(
+      inventory.windows.map { WindowLifetime(windowID: $0.id, pid: $0.pid) })
+    retainSessionWindows(observedWindows)
+    retainSessionWindows(
+      inventory.windows.compactMap { window in
+        let lifetime = WindowLifetime(windowID: window.id, pid: window.pid)
+        guard managedOverrideLifetimes.contains(lifetime) else { return nil }
+        var managed = window
+        managed.management = .managed
+        return managed
+      })
+    let effectIDs = observedIDs.union(
+      currentLifetimes.intersection(managedOverrideLifetimes).map(\.windowID))
     let windowID = resolveRetainedFocusedWindowID(
-      windows: Array(sessionWindows.values), focusedWindowID: windowID, frontmostPID: frontmostPID
+      windows: observedWindows,
+      focusedWindowID: windowID.flatMap { observedIDs.contains($0) ? $0 : nil },
+      frontmostPID: frontmostPID
     )
     guard let windowID else { return }
     let before = await workspaces.snapshot()
+    try requireCurrentSessionGeneration(generation)
     guard let name = before.workspaceName(containing: windowID), name != before.focusedWorkspaceName
     else { return }
     let displayID = before[workspace: name]?.displayID
     var mutation = try await workspaces.previewFocus(name: name, displayID: displayID)
+    try requireCurrentSessionGeneration(generation)
     mutation.workspaceState.setFocusedWindow(windowID, in: name)
+    let transition = WorkspaceTransitionPlan(
+      before: before, after: mutation.workspaceState, destination: name)
+    guard transition.incomingWindowIDs.union(transition.outgoingWindowIDs).isSubset(of: effectIDs)
+    else { return }
     try await reconcileWorkspaceFocus(
       before: before, after: &mutation.workspaceState, name: name, inventory: inventory,
-      tolerateGeometryClamp: tolerateGeometryClamp
+      tolerateGeometryClamp: tolerateGeometryClamp, sessionGeneration: generation
     )
+    try requireCurrentSessionGeneration(generation)
     try await workspaces.commitFocus(mutation)
+    try requireCurrentSessionGeneration(generation)
     await publishWorkspaceMutation(mutation, before: before, reason: .workspaceFocused)
   }
 
@@ -157,10 +187,16 @@ actor DaemonHandler: WebSocketRequestHandler {
     async throws
   {
     let generation = sessionTransitionGeneration
-    let update = lifecycle.reconcile(inventory)
+    await geometry.reconcile(windows: inventory.windows)
     try requireCurrentSessionGeneration(generation)
+    let revision = lifecycleRevision
+    var proposedLifecycle = lifecycle
+    let update = proposedLifecycle.reconcile(inventory)
     try await applyLifecycleUpdate(
-      update, inventory: inventory, displayID: displayID, sessionGeneration: generation)
+      update, inventory: inventory, displayID: displayID, sessionGeneration: generation,
+      expectedLifecycleRevision: revision)
+    try requireCurrentSessionGeneration(generation)
+    try commitLifecycle(proposedLifecycle, expectedRevision: revision)
   }
 
   func auditCommittedIntent(
@@ -394,20 +430,26 @@ actor DaemonHandler: WebSocketRequestHandler {
 
   private func discardStaleSessionHandles() async {
     sessionWindows.removeAll(keepingCapacity: true)
+    managedOverrideLifetimes.removeAll(keepingCapacity: true)
     windowMinimumSizes.removeAll(keepingCapacity: true)
     observerGeometryReliability = .init()
     lifecycle = .init()
+    lifecycleRevision &+= 1
     await geometry.reconcile(windows: [])
   }
 
   private func reconstructObservedState(_ inventory: InventorySnapshot) async throws {
+    let generation = sessionTransitionGeneration
     guard
       let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id
     else {
       throw WorkspaceRequestError.displayRequired
     }
     let committed = await workspaces.snapshot()
-    let update = lifecycle.reconcile(inventory)
+    try requireCurrentSessionGeneration(generation)
+    let revision = lifecycleRevision
+    var proposedLifecycle = lifecycle
+    let update = proposedLifecycle.reconcile(inventory)
     reportRecoveryMembership(
       "reconstruct", inventory: inventory, state: committed, update: update)
     var candidate = StartupIntentAudit.candidate(
@@ -417,8 +459,14 @@ actor DaemonHandler: WebSocketRequestHandler {
       connectedDisplayIDs: Set(inventory.displays.map(\.id)), fallbackDisplayID: displayID
     )
     try await auditCommittedIntent(inventory, state: candidate)
+    try requireCurrentSessionGeneration(generation)
     try await workspaces.commit(candidate)
-    try await applyLifecycleUpdate(update, inventory: inventory, displayID: displayID)
+    try requireCurrentSessionGeneration(generation)
+    try await applyLifecycleUpdate(
+      update, inventory: inventory, displayID: displayID, sessionGeneration: generation,
+      expectedLifecycleRevision: revision)
+    try requireCurrentSessionGeneration(generation)
+    try commitLifecycle(proposedLifecycle, expectedRevision: revision)
   }
 
   private func resumeAfterSessionTransition() async {
@@ -427,9 +475,14 @@ actor DaemonHandler: WebSocketRequestHandler {
     await publishSessionEvent(.daemonResumed, data: .object(["resynchronized": .bool(true)]))
   }
 
-  private func publishSessionEvent(_ topic: EventTopic, data: JSONValue) async {
-    workspaceSequence &+= 1
+  private func publishSessionEvent(
+    _ topic: EventTopic, data: JSONValue, sessionGeneration: UInt64? = nil
+  ) async {
     let version = await currentVersion()
+    guard sessionGeneration == nil || sessionGeneration == self.sessionTransitionGeneration else {
+      return
+    }
+    workspaceSequence &+= 1
     for (clientID, subscriptions) in workspaceSubscriptions {
       for subscription in subscriptions.values where subscription.topics.contains(topic) {
         let projected =
@@ -454,19 +507,17 @@ actor DaemonHandler: WebSocketRequestHandler {
 
   private func applyLifecycleUpdate(
     _ update: WindowLifecycleUpdate, inventory: InventorySnapshot, displayID: String,
-    sessionGeneration: UInt64? = nil
+    sessionGeneration: UInt64? = nil, expectedLifecycleRevision: UInt64? = nil
   ) async throws {
+    try requireCurrentSessionGeneration(sessionGeneration)
+    try requireLifecycleRevision(expectedLifecycleRevision)
     let closedIDs = Set(update.verifiedClosedLifetimes.map(\.windowID))
-    for lifetime in update.verifiedClosedLifetimes {
-      if sessionWindows[lifetime.windowID]?.pid == lifetime.pid {
-        sessionWindows.removeValue(forKey: lifetime.windowID)
-      }
-      windowMinimumSizes.removeValue(forKey: lifetime.windowID)
-      observerGeometryReliability.clear(windowID: lifetime.windowID)
-    }
-    await geometry.evict(lifetimes: update.verifiedClosedLifetimes)
     let before = await workspaces.snapshot()
+    try requireCurrentSessionGeneration(sessionGeneration)
+    try requireLifecycleRevision(expectedLifecycleRevision)
     let configured = await configuration.snapshot().configuration ?? Configuration()
+    try requireCurrentSessionGeneration(sessionGeneration)
+    try requireLifecycleRevision(expectedLifecycleRevision)
     let assignedIDs = Set(before.workspaces.flatMap(\.windowIDs))
     let assignments: [String: String] = Dictionary(
       uniqueKeysWithValues: update.windows.compactMap { window in
@@ -492,9 +543,34 @@ actor DaemonHandler: WebSocketRequestHandler {
       removedIDs: closedIDs.union(update.newlyUnmanagedWindowIDs),
       displayID: displayID
     )
-    if let sessionGeneration { try requireCurrentSessionGeneration(sessionGeneration) }
+    try requireCurrentSessionGeneration(sessionGeneration)
+    try requireLifecycleRevision(expectedLifecycleRevision)
     try await workspaces.commit(mutation.workspaceState)
+    try requireCurrentSessionGeneration(sessionGeneration)
+    try requireLifecycleRevision(expectedLifecycleRevision)
+    var evictedLifetimes = update.verifiedClosedLifetimes
+    for lifetime in update.verifiedClosedLifetimes {
+      managedOverrideLifetimes.remove(lifetime)
+      if sessionWindows[lifetime.windowID]?.pid == lifetime.pid {
+        sessionWindows.removeValue(forKey: lifetime.windowID)
+      }
+      windowMinimumSizes.removeValue(forKey: lifetime.windowID)
+      observerGeometryReliability.clear(windowID: lifetime.windowID)
+    }
+    for lifetime in update.newlyUnmanagedLifetimes {
+      let id = lifetime.windowID
+      if sessionWindows[id]?.pid == lifetime.pid {
+        sessionWindows.removeValue(forKey: id)
+        managedOverrideLifetimes.remove(lifetime)
+        windowMinimumSizes.removeValue(forKey: id)
+        observerGeometryReliability.clear(windowID: id)
+      }
+      evictedLifetimes.insert(lifetime)
+    }
     retainSessionWindows(update.windows)
+    await geometry.evict(lifetimes: evictedLifetimes)
+    try requireCurrentSessionGeneration(sessionGeneration)
+    try requireLifecycleRevision(expectedLifecycleRevision)
     if !mutation.modifiedWorkspaces.isEmpty {
       internalErrorReporter?(
         "membership committed: modified=\(mutation.modifiedWorkspaces.sorted()) memberships=\(membershipSummary(mutation.workspaceState))"
@@ -503,20 +579,45 @@ actor DaemonHandler: WebSocketRequestHandler {
     if !closedIDs.isEmpty {
       await publishSessionEvent(
         .windowClosed,
-        data: .object(["window_ids": .array(closedIDs.sorted().map(JSONValue.string))]))
+        data: .object(["window_ids": .array(closedIDs.sorted().map(JSONValue.string))]),
+        sessionGeneration: sessionGeneration)
+      try requireCurrentSessionGeneration(sessionGeneration)
+      try requireLifecycleRevision(expectedLifecycleRevision)
     }
     for name in mutation.modifiedWorkspaces
     where mutation.workspaceState[workspace: name]?.visible == true {
       _ = await tileWorkspaceForObserver(
-        mutation.workspaceState, named: name, inventory: inventory, forceStack: false)
+        mutation.workspaceState, named: name, inventory: inventory, forceStack: false,
+        sessionGeneration: sessionGeneration)
+      try requireCurrentSessionGeneration(sessionGeneration)
+      try requireLifecycleRevision(expectedLifecycleRevision)
     }
-    await publishWorkspaceMutation(mutation, before: before, reason: .workspaceChanged)
+    await publishWorkspaceMutation(
+      mutation, before: before, reason: .workspaceChanged, sessionGeneration: sessionGeneration)
+    try requireCurrentSessionGeneration(sessionGeneration)
+    try requireLifecycleRevision(expectedLifecycleRevision)
   }
 
   private func requireCurrentSessionGeneration(_ generation: UInt64) throws {
     guard generation == sessionTransitionGeneration else {
       throw DaemonLifecycleError.paused
     }
+  }
+
+  private func requireCurrentSessionGeneration(_ generation: UInt64?) throws {
+    if let generation { try requireCurrentSessionGeneration(generation) }
+  }
+
+  private func requireLifecycleRevision(_ revision: UInt64?) throws {
+    guard revision == nil || revision == lifecycleRevision else { throw StaleLifecycleProposal() }
+  }
+
+  private func commitLifecycle(
+    _ proposed: ManagedWindowLifecycle, expectedRevision: UInt64
+  ) throws {
+    try requireLifecycleRevision(expectedRevision)
+    lifecycle = proposed
+    lifecycleRevision &+= 1
   }
 
   private func reportRecoveryMembership(
@@ -839,20 +940,38 @@ actor DaemonHandler: WebSocketRequestHandler {
       case .windowManage, .windowUnmanage:
         let params = try decodeParams(WindowManagementParams.self, from: .object(request.params))
         guard
-          snapshot.inventory.windows.contains(where: { $0.id == params.windowID })
-            || sessionWindows[params.windowID] != nil
+          let window =
+            snapshot.inventory.windows.first(where: { $0.id == params.windowID })
+            ?? sessionWindows[params.windowID]
         else {
           throw WorkspaceRequestError.windowNotFound(params.windowID)
         }
         let override: WindowManagementOverride =
           request.method == .windowManage ? .managed : .unmanaged
-        guard let update = lifecycle.setOverride(override, for: params.windowID) else {
+        let revision = lifecycleRevision
+        var proposedLifecycle = lifecycle
+        guard
+          let update = proposedLifecycle.setOverride(
+            override, for: params.windowID, pid: window.pid)
+        else {
           throw WorkspaceRequestError.windowNotFound(params.windowID)
         }
+        var proposedOverrides = managedOverrideLifetimes
+        let lifetime = WindowLifetime(windowID: params.windowID, pid: window.pid)
+        if override == .managed {
+          proposedOverrides.insert(lifetime)
+        } else {
+          proposedOverrides.remove(lifetime)
+        }
+        let generation = sessionTransitionGeneration
         let displayID = try resolveDisplay(
           nil, inventory: snapshot.inventory, workspaceState: await workspaces.snapshot())
         try await applyLifecycleUpdate(
-          update, inventory: snapshot.inventory, displayID: displayID)
+          update, inventory: snapshot.inventory, displayID: displayID,
+          sessionGeneration: generation, expectedLifecycleRevision: revision)
+        try requireCurrentSessionGeneration(generation)
+        try commitLifecycle(proposedLifecycle, expectedRevision: revision)
+        managedOverrideLifetimes = proposedOverrides
         result = .object([
           "window_id": .string(params.windowID),
           "management": .string(request.method == .windowManage ? "managed" : "unmanaged"),
@@ -1260,7 +1379,9 @@ actor DaemonHandler: WebSocketRequestHandler {
   private func resumeDaemon() async throws -> JSONValue {
     await transactions.beginRecovery(reason: "daemon resume reconciliation")
     do {
+      let generation = sessionTransitionGeneration
       let committed = try await state.refresh()
+      try requireCurrentSessionGeneration(generation)
       guard committed.snapshot.health.capabilities["accessibility"] as? Bool == true,
         committed.snapshot.health.capabilities["core_graphics"] as? Bool == true
       else { throw DaemonLifecycleRequestError.permissionDenied }
@@ -1270,11 +1391,17 @@ actor DaemonHandler: WebSocketRequestHandler {
         let displayID =
           (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id
       else { throw WorkspaceRequestError.displayRequired }
-      let update = lifecycle.reconcile(inventory)
-      try await applyLifecycleUpdate(update, inventory: inventory, displayID: displayID)
+      let revision = lifecycleRevision
+      var proposedLifecycle = lifecycle
+      let update = proposedLifecycle.reconcile(inventory)
+      try await applyLifecycleUpdate(
+        update, inventory: inventory, displayID: displayID, sessionGeneration: generation,
+        expectedLifecycleRevision: revision)
       try await reconcileExternalFocus(
         windowID: committed.snapshot.focusedWindowID, frontmostPID: nil, inventory: inventory,
         allowWhilePaused: true)
+      try requireCurrentSessionGeneration(generation)
+      try commitLifecycle(proposedLifecycle, expectedRevision: revision)
       _ = daemonLifecycle.resume()
       await transactions.endRecovery(success: true)
       return .object(["paused": .bool(false), "reconciled": .bool(true)])
@@ -1618,9 +1745,12 @@ actor DaemonHandler: WebSocketRequestHandler {
   }
 
   private func retainSessionWindows(_ windows: [NormalizedWindow]) {
-    for window in windows where window.classification == .normal {
+    for window in windows
+    where window.classification == .normal || window.management == .managed {
       var retained = window
-      if sessionWindows[window.id]?.management == .managed && retained.management == .unmanaged {
+      if sessionWindows[window.id]?.pid == retained.pid
+        && sessionWindows[window.id]?.management == .managed && retained.management == .unmanaged
+      {
         retained.management = .managed
       }
       sessionWindows[window.id] = retained
@@ -1799,7 +1929,8 @@ actor DaemonHandler: WebSocketRequestHandler {
   private func focusWorkspaceWindow(
     _ state: WMWorkspace.WorkspaceState,
     named name: String,
-    inventory: InventorySnapshot
+    inventory: InventorySnapshot,
+    sessionGeneration: UInt64? = nil
   ) async throws {
     guard let workspace = state.workspaces.first(where: { $0.name == name }) else { return }
     let ids = Self.focusCandidateIDs(workspace: workspace, inventory: inventory)
@@ -1807,7 +1938,9 @@ actor DaemonHandler: WebSocketRequestHandler {
     var lastFailure: WindowGeometryFailure?
     for id in ids {
       do {
+        try requireCurrentSessionGeneration(sessionGeneration)
         try await focusWindow(resolveWindow(id, in: inventory.windows))
+        try requireCurrentSessionGeneration(sessionGeneration)
         return
       } catch let failure as WindowGeometryFailure {
         lastFailure = failure
@@ -1832,8 +1965,10 @@ actor DaemonHandler: WebSocketRequestHandler {
     after: inout WMWorkspace.WorkspaceState,
     name: String,
     inventory: InventorySnapshot,
-    tolerateGeometryClamp: Bool = false
+    tolerateGeometryClamp: Bool = false,
+    sessionGeneration: UInt64? = nil
   ) async throws {
+    try requireCurrentSessionGeneration(sessionGeneration)
     let transition = WorkspaceTransitionPlan(before: before, after: after, destination: name)
     let incomingIDs = transition.incomingWindowIDs
     let outgoingIDs = transition.outgoingWindowIDs
@@ -1853,7 +1988,9 @@ actor DaemonHandler: WebSocketRequestHandler {
     do {
       for id in incomingIDs.union(outgoingIDs).sorted() {
         guard let window = windowsByID[id] else { continue }
+        try requireCurrentSessionGeneration(sessionGeneration)
         let observed = try await geometry.get(window: window).frame
+        try requireCurrentSessionGeneration(sessionGeneration)
         changed.append(
           (
             window,
@@ -1887,7 +2024,9 @@ actor DaemonHandler: WebSocketRequestHandler {
               code: .geometryVerificationFailed,
               message: "cannot plan outgoing parking for \(id)")
           }
+          try requireCurrentSessionGeneration(sessionGeneration)
           let observed = try await geometry.park(window: window, frame: plan.targetFrame)
+          try requireCurrentSessionGeneration(sessionGeneration)
           parkingTrace.append(
             .object([
               "window_id": .string(id), "target": json(plan.targetFrame.protocolFrame),
@@ -1910,7 +2049,8 @@ actor DaemonHandler: WebSocketRequestHandler {
       let incomingIsBSP = after[workspace: name]?.mode == .bsp
       if !incomingIsBSP {
         stage = "activate_incoming"
-        try await focusWorkspaceWindow(after, named: name, inventory: inventory)
+        try await focusWorkspaceWindow(
+          after, named: name, inventory: inventory, sessionGeneration: sessionGeneration)
       }
       for id in incomingIDs where !incomingIsBSP {
         guard let window = windowsByID[id], let restore = after.parkedWindowFrames[id] else {
@@ -1921,13 +2061,17 @@ actor DaemonHandler: WebSocketRequestHandler {
           isCenteredOnDisplay(saved, displays: Array(displayFrames.values))
           ? saved : incomingDisplay ?? saved
         do {
+          try requireCurrentSessionGeneration(sessionGeneration)
           _ = try await geometry.set(window: window, params: frameParams(id, target))
+          try requireCurrentSessionGeneration(sessionGeneration)
         } catch let failure as WindowGeometryFailure {
           guard failure.code == .geometryVerificationFailed,
             let incomingDisplay,
             target != incomingDisplay
           else { throw failure }
+          try requireCurrentSessionGeneration(sessionGeneration)
           _ = try await geometry.set(window: window, params: frameParams(id, incomingDisplay))
+          try requireCurrentSessionGeneration(sessionGeneration)
         }
         restoredIDs.insert(id)
       }
@@ -1935,15 +2079,17 @@ actor DaemonHandler: WebSocketRequestHandler {
       if tolerateGeometryClamp {
         _ = await tileWorkspaceForObserver(
           after, named: name, inventory: inventory,
-          forceStack: false
+          forceStack: false, sessionGeneration: sessionGeneration
         )
       } else {
         try await tileWorkspace(
           after, named: name, inventory: inventory,
-          forceStack: false, priorityWindowIDs: movedIDs)
+          forceStack: false, priorityWindowIDs: movedIDs,
+          sessionGeneration: sessionGeneration)
       }
       stage = "focus_incoming"
-      try await focusWorkspaceWindow(after, named: name, inventory: inventory)
+      try await focusWorkspaceWindow(
+        after, named: name, inventory: inventory, sessionGeneration: sessionGeneration)
       if incomingIsBSP { restoredIDs.formUnion(incomingIDs) }
       for id in restoredIDs { after.parkedWindowFrames.removeValue(forKey: id) }
       lastTransitionTrace = .object([
@@ -1953,6 +2099,8 @@ actor DaemonHandler: WebSocketRequestHandler {
         "parking": .array(parkingTrace),
       ])
     } catch {
+      let transitionError = error
+      try requireCurrentSessionGeneration(sessionGeneration)
       for (window, previousFrame) in changed.reversed() {
         do {
           _ = try await geometry.set(window: window, params: frameParams(window.id, previousFrame))
@@ -1968,7 +2116,7 @@ actor DaemonHandler: WebSocketRequestHandler {
         "parking": .array(parkingTrace), "stage": .string(stage),
         "error": .string(String(describing: error)),
       ])
-      throw error
+      throw transitionError
     }
   }
 
@@ -1985,8 +2133,10 @@ actor DaemonHandler: WebSocketRequestHandler {
     named name: String,
     inventory: InventorySnapshot,
     forceStack: Bool = false,
-    priorityWindowIDs: Set<String> = []
+    priorityWindowIDs: Set<String> = [],
+    sessionGeneration: UInt64? = nil
   ) async throws {
+    try requireCurrentSessionGeneration(sessionGeneration)
     guard let workspace = state.workspaces.first(where: { $0.name == name }),
       workspace.mode == .bsp,
       !workspace.windowIDs.isEmpty,
@@ -2006,6 +2156,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     var cooperation = await workspaceCooperation(
       workspace.windowIDs, inventory: inventory, mode: geometryPolicy.mode
     )
+    try requireCurrentSessionGeneration(sessionGeneration)
     var moved: [NormalizedWindow] = []
     var movedIDs: Set<String> = []
     var replanCount = 0
@@ -2030,10 +2181,12 @@ actor DaemonHandler: WebSocketRequestHandler {
               code: .geometryVerificationFailed,
               message: "workspace policy produced an infeasible frame")
           }
+          try requireCurrentSessionGeneration(sessionGeneration)
           let outcome = try await geometry.setGeometry(
             window: window,
             request: .init(frame: inventoryRect(target), policy: retryPolicy)
           )
+          try requireCurrentSessionGeneration(sessionGeneration)
           if movedIDs.insert(window.id).inserted { moved.append(window) }
           switch outcome.classification {
           case .exact:
@@ -2086,9 +2239,11 @@ actor DaemonHandler: WebSocketRequestHandler {
               var corrected = target
               corrected.x = content.x + content.width - outcome.observedFrame.width
               corrected.width = outcome.observedFrame.width
+              try requireCurrentSessionGeneration(sessionGeneration)
               let correction = try await geometry.setGeometry(
                 window: window,
                 request: .init(frame: inventoryRect(corrected), policy: retryPolicy))
+              try requireCurrentSessionGeneration(sessionGeneration)
               let correctedFrame = correction.observedFrame
               if correctedFrame.x >= content.x - 1,
                 correctedFrame.x + correctedFrame.width <= content.x + content.width + 1
@@ -2120,6 +2275,8 @@ actor DaemonHandler: WebSocketRequestHandler {
       throw WindowGeometryFailure(
         code: .geometryVerificationFailed, message: "workspace policy did not converge")
     } catch {
+      let tilingError = error
+      try requireCurrentSessionGeneration(sessionGeneration)
       for window in moved.reversed() {
         guard let original = originals[window.id] else { continue }
         _ = try? await geometry.set(
@@ -2130,16 +2287,18 @@ actor DaemonHandler: WebSocketRequestHandler {
               x: original.x, y: original.y, width: original.width, height: original.height)
           ))
       }
-      throw error
+      throw tilingError
     }
   }
 
   private func tileWorkspaceForObserver(
     _ state: WMWorkspace.WorkspaceState, named name: String, inventory: InventorySnapshot,
-    forceStack: Bool
+    forceStack: Bool, sessionGeneration: UInt64? = nil
   ) async -> Bool {
     do {
-      try await tileWorkspace(state, named: name, inventory: inventory, forceStack: forceStack)
+      try await tileWorkspace(
+        state, named: name, inventory: inventory, forceStack: forceStack,
+        sessionGeneration: sessionGeneration)
       return true
     } catch {
       reportInternalTransactionError(name: "observer.geometry", error: String(describing: error))
@@ -2381,7 +2540,8 @@ actor DaemonHandler: WebSocketRequestHandler {
   private func publishWorkspaceMutation(
     _ result: WMWorkspace.WorkspaceMutationResult,
     before: WMWorkspace.WorkspaceState,
-    reason: EventTopic
+    reason: EventTopic,
+    sessionGeneration: UInt64? = nil
   ) async {
     guard result.workspaceState != before else { return }
     let previousNames = Set(before.workspaces.map(\.name))
@@ -2389,9 +2549,12 @@ actor DaemonHandler: WebSocketRequestHandler {
     var topics: Set<EventTopic> = [.workspaceChanged, reason]
     if !currentNames.subtracting(previousNames).isEmpty { topics.insert(.workspaceCreated) }
     if !previousNames.subtracting(currentNames).isEmpty { topics.insert(.workspaceDeleted) }
-    workspaceSequence += 1
     let eventData = workspaceMutation(result)
     let version = await currentVersion()
+    guard sessionGeneration == nil || sessionGeneration == self.sessionTransitionGeneration else {
+      return
+    }
+    workspaceSequence += 1
     for (clientID, clientSubscriptions) in workspaceSubscriptions {
       for subscription in clientSubscriptions.values {
         for topic in topics.intersection(subscription.topics) {
