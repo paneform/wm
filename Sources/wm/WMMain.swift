@@ -48,6 +48,7 @@ import WMWorkspace
       FileHandle.standardError.write(Data("invalid daemon configuration\n".utf8))
       return CLIExitCode.usage.rawValue
     }
+    _ = NSApplication.shared
     let processLock: DaemonProcessLock
     do { processLock = try DaemonProcessLock() } catch {
       FileHandle.standardError.write(Data("daemon lock failed: \(error)\n".utf8))

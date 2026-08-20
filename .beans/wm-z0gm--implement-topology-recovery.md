@@ -5,7 +5,7 @@ status: in-progress
 type: feature
 priority: high
 created_at: 2026-08-14T18:58:47Z
-updated_at: 2026-08-15T21:01:56Z
+updated_at: 2026-08-20T23:20:40Z
 ---
 
 Scope: display topology epochs, stable snapshots, work areas, and workspace migration.
@@ -210,3 +210,14 @@ Five independent cycles reset Zen to exact built-in full (0,32,1512,950), then i
 ## Bidirectional Zen Result
 
 Five cycles in each direction show symmetric two-request behavior. Built-in to Dell: attempt 1 always moved position only to (-1030,-1408,1512,950), attempt 2 reached exact Dell (-1030,-1408,3440,1408), attempt 3 remained exact. Dell to built-in: attempt 1 always applied built-in size while retaining Dell position (-1030,-1408,1512,950), attempt 2 moved to exact built-in (0,32,1512,950), attempt 3 remained exact. Each attempt class was 5/5. The shared intermediate frame is (-1030,-1408,1512,950): position is Dell, size is built-in. Therefore direction determines which component changes first, but one identical corrective transaction after settlement is sufficient in both directions. Zen restored exactly and reconciliation remains enabled. Output: /tmp/zen-transition-bidirectional.ndjson.
+
+## Sidecar Hot-Plug Plan
+
+- [x] Initialize the AppKit application lifecycle before daemon inventory scanning.
+- [x] Add regression coverage for daemon AppKit initialization where practical.
+- [x] Rebuild/restart and verify Sidecar appears without reconnecting it.
+- [x] Run focused and full validation.
+
+## Sidecar Hot-Plug Summary
+
+The running command-line daemon had never initialized `NSApplication.shared`, so its `NSScreen.screens` cache remained at the startup topology and `NSApplication.didChangeScreenParametersNotification` was not delivered. A fresh AppKit process and `system_profiler` both saw Sidecar display ID 6 while the daemon saw only the built-in display. The daemon now initializes `NSApplication.shared` before its first inventory scan. After rebuilding and restarting without reconnecting Sidecar, daemon inventory reports both displays, and the workspace-next path passes the multi-display gate. Focused daemon tests, the full suite, build, and diff checks pass.
