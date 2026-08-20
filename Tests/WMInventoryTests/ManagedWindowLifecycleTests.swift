@@ -201,6 +201,20 @@ final class ManagedWindowLifecycleTests: XCTestCase {
     XCTAssertTrue(update.windows.isEmpty)
   }
 
+  func testPositionFixedBecomesNewlyUnmanagedWhilePositionOnlyStaysManaged() {
+    var lifecycle = ManagedWindowLifecycle()
+    var supported = window("a", pid: 7)
+    supported.geometryCapabilities = .init(
+      position: .init(confirmed: .supported), size: .init(confirmed: .fixed))
+    XCTAssertEqual(
+      lifecycle.reconcile(snapshot(windows: [supported], pids: [7])).windows.map(\.id), ["a"])
+
+    supported.geometryCapabilities.position.confirmed = .fixed
+    let update = lifecycle.reconcile(snapshot(windows: [supported], pids: [7]))
+    XCTAssertEqual(update.newlyUnmanagedWindowIDs, ["a"])
+    XCTAssertTrue(update.windows.isEmpty)
+  }
+
 }
 
 private struct WorkspaceStateForLifecycle {

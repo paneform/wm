@@ -122,12 +122,12 @@ actor WorkspaceController {
   }
 
   func previewReconcileObservedWindows(
-    _ ids: [String], assignments: [String: String] = [:], replacements: [String: String] = [:],
+    _ ids: [String], floatingIDs: Set<String> = [], assignments: [String: String] = [:], replacements: [String: String] = [:],
     removedIDs: Set<String> = [], displayID: String
   ) throws -> WMWorkspace.WorkspaceMutationResult {
     var candidate = state
     return try candidate.reconcileObservedWindows(
-      ids, initialAssignments: assignments, replacements: replacements,
+      ids, floatingWindowIDs: floatingIDs, initialAssignments: assignments, replacements: replacements,
       removedWindowIDs: removedIDs, defaultDisplayID: displayID
     )
   }

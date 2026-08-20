@@ -1,4 +1,5 @@
 import Foundation
+import WMProtocol
 import XCTest
 @testable import WMInventory
 
@@ -90,6 +91,32 @@ final class InventoryTests: XCTestCase {
         XCTAssertEqual(result.windows[1].management, .unmanaged)
     }
 
+    func testGeometryCapabilitiesProjectWithoutChangingEligibility() {
+        let capabilities = WMProtocol.GeometryCapabilities(
+            position: .init(reported: .supported, evidence: [.init(source: .platformReport, state: .supported)]),
+            size: .init(reported: .fixed, evidence: [.init(source: .platformReport, state: .fixed)]))
+        let ax = WMInventory.RawAXWindow(
+            pid: 2, appName: "App", role: "AXWindow", subrole: "AXStandardWindow",
+            frame: .init(x: 0, y: 0, width: 200, height: 100), movable: false, resizable: true,
+            geometryCapabilities: capabilities)
+
+        let window = WindowNormalizer.normalize(ax: [ax], cg: []).windows[0]
+
+        XCTAssertEqual(window.geometryCapabilities, capabilities)
+        XCTAssertEqual(window.management, .pending)
+    }
+
+    func testUnknownGeometryCapabilitiesRemainUnknown() {
+        let ax = WMInventory.RawAXWindow(
+            pid: 2, appName: "App", role: "AXWindow", subrole: "AXStandardWindow",
+            frame: .init(x: 0, y: 0, width: 200, height: 100), movable: true, resizable: false)
+
+        let window = WindowNormalizer.normalize(ax: [ax], cg: []).windows[0]
+
+        XCTAssertEqual(window.geometryCapabilities.position.reported, .unknown)
+        XCTAssertEqual(window.geometryCapabilities.size.reported, .unknown)
+    }
+
     func testModalAndNonApplicationParentStandardWindowsAreTransient() {
         let frame = InventoryRect(x: 0, y: 0, width: 260, height: 306)
         let modal = RawAXWindow(
@@ -157,7 +184,7 @@ private struct StubDisplays: DisplayInventorySource {
 }
 
 private struct StubCG: CoreGraphicsInventorySource {
-    func windows() async -> SourceResult<[RawCGWindow]> {
+    func windows() async -> SourceResult<[WMInventory.RawCGWindow]> {
         SourceResult(value: [], health: SourceHealth(source: .coreGraphics, status: .healthy, permissionGranted: true))
     }
 }
@@ -170,9 +197,9 @@ private struct StubAX: AccessibilityInventorySource {
         SourceResult(value: applications, health: SourceHealth(source: .accessibility, status: .healthy, permissionGranted: true))
     }
 
-    func windows(for application: ApplicationObservation) async throws -> [RawAXWindow] {
+    func windows(for application: ApplicationObservation) async throws -> [WMInventory.RawAXWindow] {
         if application.pid == failedPID { throw TestError.failed }
-        return [RawAXWindow(pid: application.pid, appName: application.name, role: "AXWindow", subrole: "AXStandardWindow", frame: .init(x: 0, y: 0, width: 100, height: 100))]
+        return [WMInventory.RawAXWindow(pid: application.pid, appName: application.name, role: "AXWindow", subrole: "AXStandardWindow", frame: .init(x: 0, y: 0, width: 100, height: 100))]
     }
 }
 
@@ -183,7 +210,7 @@ private struct SlowAX: AccessibilityInventorySource {
         SourceResult(value: [application], health: SourceHealth(source: .accessibility, status: .healthy, permissionGranted: true))
     }
 
-    func windows(for application: ApplicationObservation) async throws -> [RawAXWindow] {
+    func windows(for application: ApplicationObservation) async throws -> [WMInventory.RawAXWindow] {
         try await Task.sleep(for: .seconds(1))
         return []
     }
@@ -191,6 +218,6 @@ private struct SlowAX: AccessibilityInventorySource {
 
 private enum TestError: Error { case failed }
 
-private extension Array {
-    var only: Element? { count == 1 ? self[0] : nil }
+extension Array {
+  fileprivate var only: Element? { count == 1 ? self[0] : nil }
 }

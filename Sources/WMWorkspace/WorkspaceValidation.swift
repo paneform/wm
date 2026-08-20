@@ -6,6 +6,8 @@ public enum WorkspaceValidationIssue: Equatable, Sendable {
     case invalidSplitRatio(workspace: WorkspaceName, ratio: Double)
     case bspWindowMissingFromMembership(workspace: WorkspaceName, windowID: WorkspaceWindowID)
     case tiledWindowMissingFromBSP(workspace: WorkspaceName, windowID: WorkspaceWindowID)
+    case floatingWindowMissingFromMembership(workspace: WorkspaceName, windowID: WorkspaceWindowID)
+    case floatingWindowInBSP(workspace: WorkspaceName, windowID: WorkspaceWindowID)
     case focusedWindowMissingFromMembership(workspace: WorkspaceName, windowID: WorkspaceWindowID)
     case focusedWorkspaceMissing(WorkspaceName)
     case focusedWorkspaceMismatch(expected: WorkspaceName, actual: WorkspaceName?)
@@ -88,8 +90,14 @@ private func validateWorkspace(_ workspace: Workspace, into issues: inout [Works
     for id in leaves where !workspace.windowIDs.contains(id) {
         issues.append(.bspWindowMissingFromMembership(workspace: workspace.name, windowID: id))
     }
+    for id in workspace.floatingWindowIDs.sorted() where !workspace.windowIDs.contains(id) {
+        issues.append(.floatingWindowMissingFromMembership(workspace: workspace.name, windowID: id))
+    }
+    for id in leaves where workspace.floatingWindowIDs.contains(id) {
+        issues.append(.floatingWindowInBSP(workspace: workspace.name, windowID: id))
+    }
     if workspace.mode == .bsp {
-        for id in workspace.windowIDs where !leaves.contains(id) {
+        for id in workspace.windowIDs where !workspace.floatingWindowIDs.contains(id) && !leaves.contains(id) {
             issues.append(.tiledWindowMissingFromBSP(workspace: workspace.name, windowID: id))
         }
     }

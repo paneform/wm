@@ -21,7 +21,7 @@ actor DaemonHandler: WebSocketRequestHandler {
   private let router: RequestRouter<SystemInventoryProvider>
   private let geometryProfiles: WindowGeometryProfileRecorder
   private let geometry: any WindowGeometryEffects
-  private let rawGeometry = AXWindowGeometryAdapter()
+  private let rawGeometry: AXWindowGeometryAdapter
   private let workspaces: WorkspaceController
   private let sessionID = UUID().uuidString
   private let version = "0.0.1-dev"
@@ -58,11 +58,13 @@ actor DaemonHandler: WebSocketRequestHandler {
   init(
     state: State, workspaces: WorkspaceController,
     geometryProfiles: WindowGeometryProfileRecorder = .init(),
-    geometryEffects: (any WindowGeometryEffects)? = nil
+    geometryEffects: (any WindowGeometryEffects)? = nil,
+    rawGeometry: AXWindowGeometryAdapter = .init()
   ) {
     self.state = state
     self.workspaces = workspaces
     self.geometryProfiles = geometryProfiles
+    self.rawGeometry = rawGeometry
     geometry =
       geometryEffects
       ?? WindowGeometryService(adapter: AXWindowGeometryAdapter(), profiles: geometryProfiles)
@@ -72,6 +74,10 @@ actor DaemonHandler: WebSocketRequestHandler {
   func installSender(_ sender: @escaping @Sendable (String, UUID) -> Void) { self.sender = sender }
   func installInternalErrorReporter(_ reporter: @escaping @Sendable (String) -> Void) {
     internalErrorReporter = reporter
+  }
+
+  func mergingPersistedCapabilities(into inventory: InventorySnapshot) async -> InventorySnapshot {
+    await geometryProfiles.mergingCapabilities(into: inventory)
   }
 
   func reconcileExternalFocus(
@@ -156,6 +162,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     frontmostPID: Int32?
   ) async throws {
     guard automaticReconciliationEnabled else { return }
+    let inventory = await geometryProfiles.mergingCapabilities(into: inventory)
     let receipt = try await submitInternal(
       name: "observer.periodic", idempotencyKey: "observer.periodic"
     ) { [weak self] in
@@ -186,6 +193,7 @@ actor DaemonHandler: WebSocketRequestHandler {
   private func reconcileObservedWindowsAuthorized(_ inventory: InventorySnapshot, displayID: String)
     async throws
   {
+    let inventory = await geometryProfiles.mergingCapabilities(into: inventory)
     let generation = sessionTransitionGeneration
     await geometry.reconcile(windows: inventory.windows)
     try requireCurrentSessionGeneration(generation)
@@ -210,10 +218,11 @@ actor DaemonHandler: WebSocketRequestHandler {
     for step in audit.orderedSteps {
       switch step.action {
       case .restore(let frame):
-        _ = try await geometry.set(
-          window: resolveWindow(step.windowOrWorkspaceID, in: inventory.windows),
-          params: frameParams(step.windowOrWorkspaceID, frame)
-        )
+        let window = try resolveWindow(step.windowOrWorkspaceID, in: inventory.windows)
+        let floating = committed.workspaces.contains {
+          $0.floatingWindowIDs.contains(step.windowOrWorkspaceID)
+        }
+        _ = try await setRestoredFrame(window: window, target: frame, floating: floating)
       case .park:
         guard
           inventory.windows.contains(where: {
@@ -231,6 +240,7 @@ actor DaemonHandler: WebSocketRequestHandler {
   }
 
   func auditStartupIntent(_ inventory: InventorySnapshot) async throws {
+    let inventory = await geometryProfiles.mergingCapabilities(into: inventory)
     let committed = await workspaces.snapshot()
     let candidate = StartupIntentAudit.candidate(state: committed, inventory: inventory)
     try await auditCommittedIntent(inventory, state: candidate)
@@ -240,6 +250,7 @@ actor DaemonHandler: WebSocketRequestHandler {
   func recoverInvalidPersistedState(
     configuration: Configuration, inventory: InventorySnapshot, defaultDisplayID: String
   ) async throws {
+    let inventory = await geometryProfiles.mergingCapabilities(into: inventory)
     guard workspaces.recoveredFromInvalidPersistedState else { return }
     var candidate = await workspaces.configuredState(
       configuration, defaultDisplayID: defaultDisplayID, displays: inventory.displays,
@@ -340,7 +351,9 @@ actor DaemonHandler: WebSocketRequestHandler {
         continue
       }
       do {
-        _ = try await geometry.set(window: window, params: frameParams(id, restore.inventoryRect))
+        let floating = committed.workspaces.contains { $0.floatingWindowIDs.contains(id) }
+        _ = try await setRestoredFrame(
+          window: window, target: restore.inventoryRect, floating: floating)
       } catch { failures.append("\(id): \(error)") }
     }
     return failures
@@ -439,6 +452,7 @@ actor DaemonHandler: WebSocketRequestHandler {
   }
 
   private func reconstructObservedState(_ inventory: InventorySnapshot) async throws {
+    let inventory = await geometryProfiles.mergingCapabilities(into: inventory)
     let generation = sessionTransitionGeneration
     guard
       let displayID = (inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first)?.id
@@ -537,6 +551,9 @@ actor DaemonHandler: WebSocketRequestHandler {
     }
     let mutation = try await workspaces.previewReconcileObservedWindows(
       update.windows.map(\.id),
+      floatingIDs: Set(update.windows.compactMap {
+        WindowCapabilityPolicy.admission(for: $0.geometryCapabilities) == .floating ? $0.id : nil
+      }),
       assignments: assignments,
       replacements: update.replacements,
       removedIDs: closedIDs.union(update.newlyUnmanagedWindowIDs),
@@ -819,7 +836,10 @@ actor DaemonHandler: WebSocketRequestHandler {
   }
 
   private func route(_ request: Request) async -> ServerMessage {
-    if request.method.isMutation && !request.method.isDebug && request.method != .daemonPause
+    if request.method == .geometryCapabilityProbe, daemonLifecycle.isPaused {
+      return .response(.init(requestId: request.requestId, error: .init(code: .paused, message: "daemon is paused", retryable: true), stateVersion: await currentVersion()))
+    }
+    if request.method.isSerializedMutation && request.method != .daemonPause
       && request.method != .daemonResume
     {
       do {
@@ -874,11 +894,13 @@ actor DaemonHandler: WebSocketRequestHandler {
         _ = await router.route(.init(requestID: request.requestId, method: request.method.rawValue))
       }
       var committed = try await state.state()
-      let snapshot = committed.snapshot
+      var snapshot = committed.snapshot
+      snapshot.inventory = await geometryProfiles.mergingCapabilities(into: snapshot.inventory)
+      snapshot.windows = snapshot.inventory.windows.map { .init(id: $0.id, value: $0) }
       retainSessionWindows(snapshot.inventory.windows)
       await geometry.reconcile(windows: snapshot.inventory.windows)
       let result: JSONValue
-      if request.method.isMutation && !request.method.isDebug && request.method != .daemonPause
+      if request.method.isSerializedMutation && request.method != .daemonPause
         && request.method != .daemonResume
       {
         try daemonLifecycle.requireMutationAllowed()
@@ -1038,6 +1060,32 @@ actor DaemonHandler: WebSocketRequestHandler {
           "window_id": .string(window.id),
           "focused": .bool(try await rawGeometry.isFocused(handle)),
         ])
+      case .geometryCapabilityProbe:
+        let params = try decodeParams(
+          GeometryCapabilityProbeParams.self, from: .object(request.params))
+        let window = try resolveWindow(params.windowID, in: snapshot.inventory.windows)
+        let generation = sessionTransitionGeneration
+        let probe = try await geometry.probeCapabilities(window: window)
+        try requireCurrentSessionGeneration(generation)
+        guard probe.restoration.verified else {
+          result = json(probe)
+          break
+        }
+        let capabilities = GeometryCapabilities(position: probe.position, size: probe.size)
+        try await geometryProfiles.recordCapabilities(capabilities, for: window)
+        try requireCurrentSessionGeneration(generation)
+        var inventory = snapshot.inventory
+        if let index = inventory.windows.firstIndex(where: {
+          $0.id == window.id && $0.pid == window.pid
+        }) {
+          inventory.windows[index].geometryCapabilities = WindowCapabilityPolicy.merging(
+            capabilities, into: inventory.windows[index].geometryCapabilities)
+        }
+        let displayID = try resolveDisplay(
+          nil, inventory: inventory, workspaceState: await workspaces.snapshot())
+        try await reconcileObservedWindowsAuthorized(inventory, displayID: displayID)
+        try requireCurrentSessionGeneration(generation)
+        result = json(probe)
       case .debugEngineGet:
         result = debugEngineState()
       case .debugEngineSet:
@@ -2048,7 +2096,9 @@ actor DaemonHandler: WebSocketRequestHandler {
               message: "cannot plan outgoing parking for \(id)")
           }
           try requireCurrentSessionGeneration(sessionGeneration)
-          let observed = try await geometry.park(window: window, frame: plan.targetFrame)
+          let floating = before[workspace: workspaceName]?.floatingWindowIDs.contains(id) == true
+          let observed = try await park(
+            window: window, frame: plan.targetFrame, floating: floating)
           try requireCurrentSessionGeneration(sessionGeneration)
           parkingTrace.append(
             .object([
@@ -2087,7 +2137,8 @@ actor DaemonHandler: WebSocketRequestHandler {
           ? saved : incomingDisplay ?? saved
         do {
           try requireCurrentSessionGeneration(sessionGeneration)
-          _ = try await geometry.set(window: window, params: frameParams(id, target))
+          _ = try await setRestoredFrame(
+            window: window, target: target, floating: after[workspace: name]?.floatingWindowIDs.contains(id) == true)
           try requireCurrentSessionGeneration(sessionGeneration)
         } catch let failure as WindowGeometryFailure {
           guard failure.code == .geometryVerificationFailed,
@@ -2095,7 +2146,9 @@ actor DaemonHandler: WebSocketRequestHandler {
             target != incomingDisplay
           else { throw failure }
           try requireCurrentSessionGeneration(sessionGeneration)
-          _ = try await geometry.set(window: window, params: frameParams(id, incomingDisplay))
+          _ = try await setRestoredFrame(
+            window: window, target: incomingDisplay,
+            floating: after[workspace: name]?.floatingWindowIDs.contains(id) == true)
           try requireCurrentSessionGeneration(sessionGeneration)
         }
         restoredIDs.insert(id)
@@ -2128,7 +2181,11 @@ actor DaemonHandler: WebSocketRequestHandler {
       try requireCurrentSessionGeneration(sessionGeneration)
       for (window, previousFrame) in changed.reversed() {
         do {
-          _ = try await geometry.set(window: window, params: frameParams(window.id, previousFrame))
+          let floating = before.workspaces.contains {
+            $0.floatingWindowIDs.contains(window.id)
+          }
+          _ = try await setRestoredFrame(
+            window: window, target: previousFrame, floating: floating)
         } catch {
           _ = try? await geometry.fit(window: window, within: previousFrame)
         }
@@ -2164,7 +2221,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     try requireCurrentSessionGeneration(sessionGeneration)
     guard let workspace = state.workspaces.first(where: { $0.name == name }),
       workspace.mode == .bsp,
-      !workspace.windowIDs.isEmpty,
+       workspace.bsp.root != nil,
       let display = inventory.displays.first(where: { $0.id == workspace.displayID })
     else { return }
     guard
@@ -2173,7 +2230,8 @@ actor DaemonHandler: WebSocketRequestHandler {
     let bounds = WorkspaceLayoutRect(
       x: workArea.x, y: workArea.y, width: workArea.width, height: workArea.height)
     retainSessionWindows(inventory.windows)
-    let windows = workspace.windowIDs.compactMap {
+    let bspWindowIDs = workspace.bsp.root?.windowIDs ?? []
+    let windows = bspWindowIDs.compactMap {
       movableWindow($0, retained: sessionWindows, inventory: inventory)
     }
     guard !windows.isEmpty else { return }
@@ -2183,7 +2241,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     let retryPolicy = Self.geometryRetryPolicy(
       retries: geometryPolicy.retries, mode: geometryPolicy.mode)
     var cooperation = await workspaceCooperation(
-      workspace.windowIDs, inventory: inventory, mode: geometryPolicy.mode
+      bspWindowIDs, inventory: inventory, mode: geometryPolicy.mode
     )
     try requireCurrentSessionGeneration(sessionGeneration)
     var moved: [NormalizedWindow] = []
@@ -2473,7 +2531,9 @@ actor DaemonHandler: WebSocketRequestHandler {
         else {
           continue
         }
-        _ = try await geometry.set(window: window, params: frameParams(id, restore.inventoryRect))
+        _ = try await setRestoredFrame(
+          window: window, target: restore.inventoryRect,
+          floating: workspace.floatingWindowIDs.contains(id))
       }
     }
   }
@@ -2494,7 +2554,8 @@ actor DaemonHandler: WebSocketRequestHandler {
       throw WindowGeometryFailure(
         code: .geometryVerificationFailed, message: "cannot plan committed parking for \(id)")
     }
-    let observed = try await geometry.park(window: window, frame: plan.targetFrame)
+    let floating = state[workspace: workspaceName]?.floatingWindowIDs.contains(id) == true
+    let observed = try await park(window: window, frame: plan.targetFrame, floating: floating)
     guard
       plan.accepts(observed)
         || !isCenteredOnDisplay(observed, displays: Array(displayFrames.values))
@@ -2503,6 +2564,23 @@ actor DaemonHandler: WebSocketRequestHandler {
         code: .geometryVerificationFailed, message: "committed hidden window did not park",
         observedFrame: observed.protocolFrame)
     }
+  }
+
+  private func park(
+    window: NormalizedWindow, frame: InventoryRect, floating: Bool
+  ) async throws -> InventoryRect {
+    floating
+      ? try await geometry.setPosition(window: window, frame: frame)
+      : try await geometry.park(window: window, frame: frame)
+  }
+
+  private func setRestoredFrame(
+    window: NormalizedWindow, target: InventoryRect, floating: Bool
+  ) async throws -> InventoryRect {
+    if floating { return try await geometry.setPosition(window: window, frame: target) }
+    let observed = try await geometry.set(
+      window: window, params: frameParams(window.id, target)).observedFrame
+    return .init(x: observed.x, y: observed.y, width: observed.width, height: observed.height)
   }
 
   private func workspaceList(_ state: WMWorkspace.WorkspaceState) -> JSONValue {
@@ -2712,6 +2790,10 @@ private enum WorkspaceRequestError: Error {
 private enum DaemonLifecycleRequestError: Error { case permissionDenied }
 
 extension WMProtocol.Method {
+  fileprivate var isSerializedMutation: Bool {
+    isMutation && (!isDebug || self == .geometryCapabilityProbe)
+  }
+
   fileprivate var isMutation: Bool {
     switch self {
     case .windowManage, .windowUnmanage, .windowFocus, .windowMove, .windowFrameSet,
@@ -2719,7 +2801,7 @@ extension WMProtocol.Method {
       .workspaceMoveWindowBulk, .workspaceMoveDisplay, .workspaceSetMode,
       .layoutPolicySet, .geometryPolicySet, .inventoryRefresh,
       .configurationReload, .commandBatch, .daemonPause, .daemonResume, .debugAXFrameSet,
-      .debugAXFocus,
+      .debugAXFocus, .geometryCapabilityProbe,
       .debugEngineSet:
       true
     default: false
@@ -2728,7 +2810,9 @@ extension WMProtocol.Method {
 
   fileprivate var isDebug: Bool {
     switch self {
-    case .debugAXFrameGet, .debugAXFrameSet, .debugAXFocus, .debugEngineGet, .debugEngineSet: true
+    case .debugAXFrameGet, .debugAXFrameSet, .debugAXFocus,
+      .debugEngineGet, .debugEngineSet:
+      true
     default: false
     }
   }

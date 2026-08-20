@@ -410,6 +410,216 @@ final class WindowGeometryTests: XCTestCase {
     let createdHandles = await adapter.createdHandles
     XCTAssertEqual(createdHandles, 1)
   }
+
+  func testProbeConfirmsMovementResizeAndRestores() async throws {
+    let adapter = ProbeGeometryAdapter(frame: initialFrame)
+    let result = try await WindowGeometryService(adapter: adapter).probeCapabilities(window: window)
+
+    XCTAssertEqual(result.position.confirmed, .supported)
+    XCTAssertEqual(result.size.confirmed, .supported)
+    XCTAssertTrue(result.restoration.verified)
+    XCTAssertEqual(result.finalFrame, initialFrame.protocolFrame)
+  }
+
+  func testProbeClassifiesNoObservedChangeAsInconclusive() async throws {
+    let adapter = ProbeGeometryAdapter(frame: initialFrame, behavior: .fixed)
+    let result = try await WindowGeometryService(adapter: adapter).probeCapabilities(window: window)
+
+    XCTAssertEqual(result.position.confirmed, .inconclusive)
+    XCTAssertEqual(result.size.confirmed, .inconclusive)
+    XCTAssertTrue(result.restoration.verified)
+  }
+
+  func testProbeClassifiesClampingAsInconclusive() async throws {
+    let adapter = ProbeGeometryAdapter(frame: initialFrame, behavior: .clamped)
+    let result = try await WindowGeometryService(adapter: adapter).probeCapabilities(window: window)
+
+    XCTAssertEqual(result.position.confirmed, .inconclusive)
+    XCTAssertEqual(result.size.confirmed, .inconclusive)
+    XCTAssertFalse(result.restoration.verified)
+  }
+
+  func testProbeReportsRestorationFailure() async throws {
+    let adapter = ProbeGeometryAdapter(frame: initialFrame, behavior: .restorationFailure)
+    let result = try await WindowGeometryService(adapter: adapter).probeCapabilities(window: window)
+
+    XCTAssertTrue(result.restoration.attempted)
+    XCTAssertFalse(result.restoration.verified)
+    XCTAssertNotNil(result.restoration.error)
+  }
+
+  func testProbeStaleIdentityIsInconclusiveAndAttemptsRestoration() async throws {
+    let adapter = ProbeGeometryAdapter(frame: initialFrame, behavior: .stale)
+    let result = try await WindowGeometryService(adapter: adapter).probeCapabilities(window: window)
+
+    XCTAssertEqual(result.position.confirmed, .inconclusive)
+    XCTAssertEqual(result.size.confirmed, .inconclusive)
+    XCTAssertTrue(result.restoration.attempted)
+  }
+
+  func testProbeCancellationRestoresAndRethrows() async throws {
+    let adapter = ProbeGeometryAdapter(frame: initialFrame, behavior: .cancelled)
+    do {
+      _ = try await WindowGeometryService(adapter: adapter).probeCapabilities(window: window)
+      XCTFail("expected cancellation")
+    } catch is CancellationError {}
+    let state = await adapter.state
+    XCTAssertEqual(state.frame, initialFrame)
+    XCTAssertEqual(state.writes, 2)
+  }
+
+  func testProbeIdentityReplacementStopsBeforeMutatingReplacement() async throws {
+    let adapter = ProbeGeometryAdapter(frame: initialFrame, behavior: .replacement)
+    let result = try await WindowGeometryService(adapter: adapter).probeCapabilities(window: window)
+    let state = await adapter.state
+    XCTAssertEqual(state.writes, 1)
+    XCTAssertEqual(result.position.confirmed, .inconclusive)
+    XCTAssertFalse(result.restoration.verified)
+  }
+
+  func testProbeStopsAfterIntermediateResetFailure() async throws {
+    let adapter = ProbeGeometryAdapter(frame: initialFrame, behavior: .restorationFailure)
+    _ = try await WindowGeometryService(adapter: adapter).probeCapabilities(window: window)
+    let state = await adapter.state
+    XCTAssertEqual(state.probeWrites, 1)
+  }
+
+  func testProbeRestoresWithChangedComponentOnly() async throws {
+    let adapter = ProbeGeometryAdapter(frame: initialFrame, behavior: .combinedRestorationFailure)
+    let result = try await WindowGeometryService(adapter: adapter).probeCapabilities(window: window)
+
+    XCTAssertEqual(result.position.confirmed, .supported)
+    XCTAssertEqual(result.size.confirmed, .supported)
+    XCTAssertTrue(result.restoration.verified)
+    XCTAssertEqual(result.finalFrame, initialFrame.protocolFrame)
+  }
+
+  func testProbeContinuesAfterRejectedDirection() async throws {
+    let adapter = ProbeGeometryAdapter(frame: initialFrame, behavior: .rejectFirstSize)
+    let result = try await WindowGeometryService(adapter: adapter).probeCapabilities(window: window)
+
+    XCTAssertEqual(result.attempts.count, 8)
+    XCTAssertEqual(result.attempts[4].dimension, .widthIn)
+    XCTAssertNotNil(result.attempts[4].error)
+    XCTAssertEqual(result.attempts[5].dimension, .widthOut)
+    XCTAssertEqual(result.size.confirmed, .inconclusive)
+    XCTAssertTrue(result.restoration.verified)
+  }
+
+  func testProbeConfirmsFixedSizeWhenEveryResizeIsRejected() async throws {
+    let adapter = ProbeGeometryAdapter(frame: initialFrame, behavior: .rejectAllSize)
+    let result = try await WindowGeometryService(adapter: adapter).probeCapabilities(window: window)
+
+    XCTAssertEqual(result.size.confirmed, .fixed)
+    XCTAssertEqual(result.attempts.filter { $0.error != nil }.count, 4)
+    XCTAssertTrue(result.restoration.verified)
+  }
+
+  func testProbeCrossComponentOnlyChangeIsInconclusive() async throws {
+    let adapter = ProbeGeometryAdapter(frame: initialFrame, behavior: .crossComponent)
+    let result = try await WindowGeometryService(adapter: adapter).probeCapabilities(window: window)
+    XCTAssertEqual(result.position.confirmed, .inconclusive)
+    XCTAssertEqual(result.size.confirmed, .inconclusive)
+  }
+
+  func testPositionOnlyWritePreservesSizeAndRejectsCrossComponentChange() async throws {
+    var positionOnly = window
+    positionOnly.geometryCapabilities = .init(
+      position: .init(confirmed: .supported), size: .init(confirmed: .fixed))
+    let adapter = ProbeGeometryAdapter(frame: initialFrame)
+    let observed = try await WindowGeometryService(adapter: adapter).setPosition(
+      window: positionOnly, frame: .init(x: 50, y: 60, width: 1, height: 1))
+    XCTAssertEqual(observed, .init(x: 50, y: 60, width: 400, height: 300))
+
+    let crossChanging = ProbeGeometryAdapter(frame: initialFrame, behavior: .crossComponent)
+    do {
+      _ = try await WindowGeometryService(adapter: crossChanging).setPosition(
+        window: positionOnly, frame: .init(x: 50, y: 60, width: 1, height: 1))
+      XCTFail("expected cross-component verification failure")
+    } catch let failure as WindowGeometryFailure {
+      XCTAssertEqual(failure.code, .geometryVerificationFailed)
+    }
+  }
+}
+
+private actor ProbeGeometryAdapter: WindowGeometryAdapter {
+  enum Behavior {
+    case normal, fixed, clamped, restorationFailure, combinedRestorationFailure
+    case stale, cancelled, replacement, crossComponent, rejectFirstSize, rejectAllSize
+  }
+  private var frame: InventoryRect
+  private let original: InventoryRect
+  private let behavior: Behavior
+  private var writes = 0
+  private var replaced = false
+
+  init(frame: InventoryRect, behavior: Behavior = .normal) {
+    self.frame = frame
+    original = frame
+    self.behavior = behavior
+  }
+  func resolve(_ window: NormalizedWindow) -> WindowGeometryHandle { .init(rawValue: window.id) }
+  func validateControllability(of handle: WindowGeometryHandle) {}
+  func validateIdentity(of handle: WindowGeometryHandle, expected window: NormalizedWindow) throws {
+    if behavior == .replacement, replaced { throw WindowGeometryAdapterError.stale }
+  }
+  private var probeWrites = 0
+  var state: (frame: InventoryRect, writes: Int, probeWrites: Int) {
+    (frame, writes, probeWrites)
+  }
+  func readFrame(of handle: WindowGeometryHandle) throws -> InventoryRect {
+    if behavior == .stale, writes > 0 { throw WindowGeometryAdapterError.stale }
+    return frame
+  }
+  func delay() {}
+  func write(
+    _ component: WindowGeometryComponent, frame requested: InventoryRect,
+    to handle: WindowGeometryHandle
+  ) throws {
+    writes += 1
+    if requested != original { probeWrites += 1 }
+    if behavior == .replacement { replaced = true }
+    if behavior == .restorationFailure, requested == original, writes > 1 {
+      throw WindowGeometryAdapterError.rejected
+    }
+    if behavior == .rejectFirstSize, component == .size, requested.width < original.width {
+      throw WindowGeometryAdapterError.rejected
+    }
+    if behavior == .rejectAllSize, component == .size {
+      throw WindowGeometryAdapterError.rejected
+    }
+    switch behavior {
+    case .fixed: break
+    case .clamped:
+      frame =
+        component == .position
+        ? .init(x: requested.x + 3, y: requested.y + 3, width: requested.width, height: requested.height)
+        : .init(
+          x: requested.x, y: requested.y, width: requested.width + 3,
+          height: requested.height + 3)
+    case .stale where writes > 1: throw WindowGeometryAdapterError.stale
+    case .cancelled: frame = requested
+    case .crossComponent:
+      frame = component == .position
+        ? .init(x: original.x, y: original.y, width: original.width + 1, height: original.height)
+        : .init(x: original.x + 1, y: original.y, width: original.width, height: original.height)
+    default: frame = requested
+    }
+  }
+  func transact(
+    _ transaction: WindowGeometryTransaction, frame requested: InventoryRect,
+    handle: WindowGeometryHandle
+  ) throws {
+    if behavior == .combinedRestorationFailure, requested == original, writes > 0 {
+      throw WindowGeometryAdapterError.rejected
+    }
+    if behavior == .stale, writes > 0 { throw WindowGeometryAdapterError.stale }
+    frame = requested
+  }
+  func settle(_ handle: WindowGeometryHandle, requested: InventoryRect, tolerance: Double) throws -> WindowGeometrySettlement {
+    if behavior == .cancelled, writes == 1 { throw CancellationError() }
+    return .init(frame: frame, reads: 1)
+  }
 }
 
 private actor FakeGeometryAdapter: WindowGeometryAdapter {

@@ -100,7 +100,7 @@ private struct WindowAX: AccessibilityInventorySource {
   func windows(for application: ApplicationObservation) async throws -> [WMInventory.RawAXWindow] {
     titles.enumerated().map { index, title in
       .init(
-        pid: 1, appName: "Test", title: title, role: "AXWindow",
+        pid: 1, appName: "Test", bundleID: "com.example.Test", title: title, role: "AXWindow",
         frame: .init(x: Double(index * 100), y: 0, width: 100, height: 100),
         cgWindowID: UInt32(index + 1))
     }
@@ -193,6 +193,21 @@ private actor DirectionalGeometry: WindowGeometryEffects {
     operations.append(.park(window.id))
     frames[window.id] = frame
     return frame
+  }
+  func setPosition(window: NormalizedWindow, frame: InventoryRect) async throws -> InventoryRect {
+    operations.append(.set(window.id))
+    let original = frames[window.id] ?? window.frame!
+    let positioned = InventoryRect(
+      x: frame.x, y: frame.y, width: original.width, height: original.height)
+    frames[window.id] = positioned
+    return positioned
+  }
+  func probeCapabilities(window: NormalizedWindow) async throws -> GeometryCapabilityProbeResult {
+    let frame = (frames[window.id] ?? window.frame!).protocolFrame
+    return .init(
+      windowID: window.id, originalFrame: frame, finalFrame: frame,
+      position: .init(confirmed: .supported), size: .init(confirmed: .fixed), attempts: [],
+      restoration: .init(attempted: true, succeeded: true, verified: true))
   }
 }
 
@@ -317,6 +332,79 @@ private func response(_ text: String) throws -> Response {
         "paused": .bool(false), "reconciled": .bool(true),
       ]))
   #expect(await !handler.isPaused())
+}
+
+@Test func geometryProbeIsBlockedWhilePaused() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  let scanner = InventoryScanner(sources: .init(displays: StubDisplays(), accessibility: WindowAX(titles: ["One"]), coreGraphics: WindowCG(titles: ["One"])))
+  let state = DaemonHandler.State(provider: SystemInventoryProvider(scanner: scanner))
+  let handler = DaemonHandler(state: state, workspaces: try WorkspaceController(buildVersion: "test", stateURL: directory.appendingPathComponent("state.json")))
+  let snapshot = try await state.refresh()
+  let id = try #require(snapshot.snapshot.inventory.windows.first?.id)
+  let client = UUID()
+  let paused = await handler.handle(text: try clientMessage(.request(.init(requestId: "pause", method: .daemonPause))), clientID: client)
+  #expect(try response(paused[0]).result == .object(["paused": .bool(true)]))
+  #expect(await handler.isPaused())
+  let replies = await handler.handle(text: try clientMessage(.request(.init(requestId: "probe", method: .geometryCapabilityProbe, params: ["window_id": .string(id)]))), clientID: client)
+  let probeResponse = try response(replies[0])
+  #expect(probeResponse.error?.code == .paused)
+}
+
+@Test func verifiedProbeImmediatelyFloatsWindowAndProfilesFutureMatch() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let scanner = InventoryScanner(sources: .init(
+    displays: StubDisplays(), accessibility: WindowAX(titles: ["One"]),
+    coreGraphics: WindowCG(titles: ["One"])))
+  let state = DaemonHandler.State(provider: SystemInventoryProvider(scanner: scanner))
+  let workspaces = try WorkspaceController(
+    buildVersion: "test", stateURL: directory.appendingPathComponent("state.json"))
+  let geometry = DirectionalGeometry(frames: [:])
+  let profiles = WindowGeometryProfileRecorder()
+  let handler = DaemonHandler(
+    state: state, workspaces: workspaces, geometryProfiles: profiles, geometryEffects: geometry)
+  let observedInventory = try await state.refresh().snapshot.inventory
+  let window = try #require(observedInventory.windows.first)
+  try await handler.reconcileObservedWindows(observedInventory, displayID: "display:main")
+
+  let replies = await handler.handle(
+    text: try clientMessage(.request(.init(
+      requestId: "probe", method: .geometryCapabilityProbe,
+      params: ["window_id": .string(window.id), "return_mode": .string("completion")]))),
+    clientID: UUID())
+  #expect(try response(replies[0]).error == nil)
+  let workspace = try #require(await workspaces.snapshot().workspaces.first)
+  #expect(workspace.windowIDs == [window.id])
+  #expect(workspace.floatingWindowIDs == [window.id])
+  #expect(workspace.bsp.root == nil)
+
+  try await handler.reconcilePeriodicObservation(
+    observedInventory, displayID: "display:main", focusedWindowID: nil,
+    frontmostPID: nil)
+  let periodicWorkspace = try #require(await workspaces.snapshot().workspaces.first)
+  #expect(periodicWorkspace.floatingWindowIDs == [window.id])
+  #expect(periodicWorkspace.bsp.root == nil)
+
+  let focus = await handler.handle(
+    text: try clientMessage(.request(.init(
+      requestId: "focus", method: .workspaceFocus,
+      params: ["name": .string(periodicWorkspace.name), "return_mode": .string("completion")]))),
+    clientID: UUID())
+  #expect(try response(focus[0]).error == nil)
+  let focusedWorkspace = try #require(await workspaces.snapshot().workspaces.first)
+  #expect(focusedWorkspace.floatingWindowIDs == [window.id])
+  #expect(focusedWorkspace.bsp.root == nil)
+
+  var future = window
+  future.id = "future"
+  future.pid += 1
+  future.geometryCapabilities = .init()
+  var futureInventory = inventory([])
+  futureInventory.windows = [future]
+  let merged = await profiles.mergingCapabilities(into: futureInventory)
+  #expect(WindowCapabilityPolicy.admission(for: merged.windows[0].geometryCapabilities) == .floating)
 }
 
 @Test func geometryPolicyRuntimeUpdatesGlobalAndWorkspaceSettings() async throws {
@@ -1801,7 +1889,9 @@ private func response(_ text: String) throws -> Response {
       displays: StubDisplays(), accessibility: WindowAX(titles: ["normal", "panel"]),
       coreGraphics: WindowCG(titles: ["normal", "panel"])))
   let inventoryState = DaemonHandler.State(provider: SystemInventoryProvider(scanner: scanner))
-  let initial = try await inventoryState.refresh().snapshot.inventory.windows.sorted { $0.id < $1.id }
+  let initial = try await inventoryState.refresh().snapshot.inventory.windows.sorted {
+    $0.id < $1.id
+  }
   var normal = initial[0]
   normal.pid = 10
   normal.management = .managed
@@ -1817,7 +1907,8 @@ private func response(_ text: String) throws -> Response {
     ) { try $0.validate() },
     state: WorkspaceState(
       workspaces: [
-        .init(name: "source", origin: .configured, displayID: displayID, visible: true, focused: true),
+        .init(
+          name: "source", origin: .configured, displayID: displayID, visible: true, focused: true),
         .init(
           name: "target", origin: .configured, displayID: displayID,
           windowIDs: [normal.id, transient.id], focusedWindowID: transient.id,
@@ -1827,7 +1918,9 @@ private func response(_ text: String) throws -> Response {
               second: .leaf(windowID: transient.id)))),
       ], focusedWorkspaceName: "source",
       displays: [displayID: .init(visibleWorkspaceName: "source")]))
-  let geometry = DirectionalGeometry(frames: [normal.id: normal.frame!, transient.id: transient.frame!])
+  let geometry = DirectionalGeometry(frames: [
+    normal.id: normal.frame!, transient.id: transient.frame!,
+  ])
   let handler = DaemonHandler(
     state: inventoryState,
     workspaces: controller, geometryEffects: geometry)

@@ -1,4 +1,5 @@
 import Foundation
+import WMProtocol
 
 public struct InventoryRect: Codable, Hashable, Sendable {
     public var x: Double
@@ -173,6 +174,7 @@ public struct RawAXWindow: Codable, Hashable, Sendable {
     public var hasParent: Bool?
     public var movable: Bool?
     public var resizable: Bool?
+    public var geometryCapabilities: GeometryCapabilities
     public var cgWindowID: UInt32?
     public var readErrors: [String]
 
@@ -193,6 +195,7 @@ public struct RawAXWindow: Codable, Hashable, Sendable {
         hasParent: Bool? = nil,
         movable: Bool? = nil,
         resizable: Bool? = nil,
+        geometryCapabilities: GeometryCapabilities = .init(),
         cgWindowID: UInt32? = nil,
         readErrors: [String] = []
     ) {
@@ -212,6 +215,7 @@ public struct RawAXWindow: Codable, Hashable, Sendable {
         self.hasParent = hasParent
         self.movable = movable
         self.resizable = resizable
+        self.geometryCapabilities = geometryCapabilities
         self.cgWindowID = cgWindowID
         self.readErrors = readErrors
     }
@@ -220,11 +224,18 @@ public struct RawAXWindow: Codable, Hashable, Sendable {
         case source, pid, title, role, subrole, frame, minimized, fullscreen, focused, main, modal
         case hasParent = "has_parent"
         case movable, resizable
+        case geometryCapabilities = "geometry_capabilities"
         case appName = "app_name"
         case bundleID = "bundle_id"
         case executablePath = "executable_path"
         case cgWindowID = "cg_window_id"
         case readErrors = "read_errors"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        pid = try container.decode(Int32.self, forKey: .pid); appName = try container.decode(String.self, forKey: .appName)
+        bundleID = try container.decodeIfPresent(String.self, forKey: .bundleID); executablePath = try container.decodeIfPresent(String.self, forKey: .executablePath); title = try container.decodeIfPresent(String.self, forKey: .title); role = try container.decodeIfPresent(String.self, forKey: .role); subrole = try container.decodeIfPresent(String.self, forKey: .subrole); frame = try container.decodeIfPresent(InventoryRect.self, forKey: .frame); minimized = try container.decodeIfPresent(Bool.self, forKey: .minimized); fullscreen = try container.decodeIfPresent(Bool.self, forKey: .fullscreen); focused = try container.decodeIfPresent(Bool.self, forKey: .focused); main = try container.decodeIfPresent(Bool.self, forKey: .main); modal = try container.decodeIfPresent(Bool.self, forKey: .modal); hasParent = try container.decodeIfPresent(Bool.self, forKey: .hasParent); movable = try container.decodeIfPresent(Bool.self, forKey: .movable); resizable = try container.decodeIfPresent(Bool.self, forKey: .resizable); geometryCapabilities = try container.decodeIfPresent(GeometryCapabilities.self, forKey: .geometryCapabilities) ?? .init(); cgWindowID = try container.decodeIfPresent(UInt32.self, forKey: .cgWindowID); readErrors = try container.decodeIfPresent([String].self, forKey: .readErrors) ?? []
     }
 }
 
@@ -297,7 +308,8 @@ public struct SourceHealth: Codable, Hashable, Sendable {
 }
 
 public enum AppScanStatus: String, Codable, Hashable, Sendable {
-    case succeeded, failed, timedOut = "timed_out"
+  case succeeded, failed
+  case timedOut = "timed_out"
 }
 
 public struct AppScanResult: Codable, Hashable, Sendable {
@@ -384,6 +396,7 @@ public struct NormalizedWindow: Codable, Hashable, Sendable, Identifiable {
     public var onScreen: Bool?
     public var health: SourceStatus
     public var healthIssues: [String]
+    public var geometryCapabilities: GeometryCapabilities
 
     public init(
         id: String, pid: Int32, appName: String, bundleID: String? = nil, executablePath: String? = nil,
@@ -391,7 +404,8 @@ public struct NormalizedWindow: Codable, Hashable, Sendable, Identifiable {
         displayID: String? = nil, classification: WindowClassification, management: WindowManagement,
         rejectionReasons: [String], cgWindowID: UInt32? = nil, joinConfidence: JoinConfidence,
         joinSignals: [String], minimized: Bool? = nil, fullscreen: Bool? = nil, focused: Bool? = nil,
-        main: Bool? = nil, onScreen: Bool? = nil, health: SourceStatus, healthIssues: [String]
+        main: Bool? = nil, onScreen: Bool? = nil, health: SourceStatus, healthIssues: [String],
+        geometryCapabilities: GeometryCapabilities = .init()
     ) {
         self.id = id; self.pid = pid; self.appName = appName; self.bundleID = bundleID
         self.executablePath = executablePath; self.title = title; self.role = role; self.subrole = subrole
@@ -399,7 +413,7 @@ public struct NormalizedWindow: Codable, Hashable, Sendable, Identifiable {
         self.management = management; self.rejectionReasons = rejectionReasons; self.cgWindowID = cgWindowID
         self.joinConfidence = joinConfidence; self.joinSignals = joinSignals; self.minimized = minimized
         self.fullscreen = fullscreen; self.focused = focused; self.main = main; self.onScreen = onScreen
-        self.health = health; self.healthIssues = healthIssues
+        self.health = health; self.healthIssues = healthIssues; self.geometryCapabilities = geometryCapabilities
     }
 
     enum CodingKeys: String, CodingKey {
@@ -414,6 +428,12 @@ public struct NormalizedWindow: Codable, Hashable, Sendable, Identifiable {
         case joinSignals = "join_signals"
         case onScreen = "on_screen"
         case healthIssues = "health_issues"
+        case geometryCapabilities = "geometry_capabilities"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id); pid = try container.decode(Int32.self, forKey: .pid); appName = try container.decode(String.self, forKey: .appName); bundleID = try container.decodeIfPresent(String.self, forKey: .bundleID); executablePath = try container.decodeIfPresent(String.self, forKey: .executablePath); title = try container.decodeIfPresent(String.self, forKey: .title); role = try container.decodeIfPresent(String.self, forKey: .role); subrole = try container.decodeIfPresent(String.self, forKey: .subrole); frame = try container.decodeIfPresent(InventoryRect.self, forKey: .frame); displayID = try container.decodeIfPresent(String.self, forKey: .displayID); classification = try container.decode(WindowClassification.self, forKey: .classification); management = try container.decode(WindowManagement.self, forKey: .management); rejectionReasons = try container.decodeIfPresent([String].self, forKey: .rejectionReasons) ?? []; cgWindowID = try container.decodeIfPresent(UInt32.self, forKey: .cgWindowID); joinConfidence = try container.decode(JoinConfidence.self, forKey: .joinConfidence); joinSignals = try container.decodeIfPresent([String].self, forKey: .joinSignals) ?? []; minimized = try container.decodeIfPresent(Bool.self, forKey: .minimized); fullscreen = try container.decodeIfPresent(Bool.self, forKey: .fullscreen); focused = try container.decodeIfPresent(Bool.self, forKey: .focused); main = try container.decodeIfPresent(Bool.self, forKey: .main); onScreen = try container.decodeIfPresent(Bool.self, forKey: .onScreen); health = try container.decode(SourceStatus.self, forKey: .health); healthIssues = try container.decodeIfPresent([String].self, forKey: .healthIssues) ?? []; geometryCapabilities = try container.decodeIfPresent(GeometryCapabilities.self, forKey: .geometryCapabilities) ?? .init()
     }
 }
 

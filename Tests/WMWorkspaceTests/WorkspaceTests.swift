@@ -262,6 +262,34 @@ import Testing
   #expect(String(decoding: data, as: UTF8.self).contains("\"focused_workspace_name\""))
 }
 
+@Test func floatingMembershipPersistsAndLegacyJSONDefaultsEmpty() throws {
+  var state = sampleState()
+  state.workspaces[0].floatingWindowIDs = ["b"]
+  state.workspaces[0].bsp.root = state.workspaces[0].bsp.root?.removing(windowID: "b")
+  let data = try JSONEncoder().encode(state)
+  #expect(try JSONDecoder().decode(WorkspaceState.self, from: data) == state)
+
+  let legacy = String(decoding: data, as: UTF8.self)
+    .replacingOccurrences(of: ",\"floating_window_ids\":[\"b\"]", with: "")
+  #expect(try JSONDecoder().decode(WorkspaceState.self, from: Data(legacy.utf8)).workspaces[0].floatingWindowIDs.isEmpty)
+}
+
+@Test func reconciliationMovesPositionOnlyMemberOutsideBSPAndPreservesReplacement() throws {
+  var state = sampleState()
+  _ = try state.reconcileObservedWindows(
+    ["a", "b", "c"], floatingWindowIDs: ["b"], defaultDisplayID: "d")
+  #expect(state[workspace: "source"]?.windowIDs == ["a", "b", "c"])
+  #expect(state[workspace: "source"]?.floatingWindowIDs == ["b"])
+  #expect(state[workspace: "source"]?.bsp.root?.windowIDs == ["a", "c"])
+  try state.validate()
+
+  _ = try state.reconcileObservedWindows(
+    ["a", "replacement", "c"], floatingWindowIDs: ["replacement"],
+    replacements: ["b": "replacement"], removedWindowIDs: ["b"], defaultDisplayID: "d")
+  #expect(state[workspace: "source"]?.floatingWindowIDs == ["replacement"])
+  #expect(state[workspace: "source"]?.bsp.root?.windowIDs == ["a", "c"])
+}
+
 @Test func findsWorkspaceContainingExternallyFocusedWindow() {
   let state = WorkspaceState(workspaces: [
     tiled("one", display: "d", windows: ["a"]),

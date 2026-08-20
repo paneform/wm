@@ -1,4 +1,5 @@
 import Foundation
+import WMProtocol
 
 public struct WindowGeometryProfileIdentity: Codable, Hashable, Sendable {
     public var application: String
@@ -60,12 +61,14 @@ public struct WindowGeometryProfile: Codable, Equatable, Sendable {
     public var pendingMaximumWidthSamples: Int
     public var pendingMaximumHeight: Double?
     public var pendingMaximumHeightSamples: Int
+    public var geometryCapabilities: GeometryCapabilities
 
     enum CodingKeys: String, CodingKey {
         case identity, context, minimumWidth, minimumHeight, maximumWidth, maximumHeight
         case correctiveAttemptCount, sampleCount, successfulSampleCount, lastObservedAt
         case pendingMinimumWidth, pendingMinimumWidthSamples, pendingMinimumHeight, pendingMinimumHeightSamples
         case pendingMaximumWidth, pendingMaximumWidthSamples, pendingMaximumHeight, pendingMaximumHeightSamples
+        case geometryCapabilities
     }
 
     public init(
@@ -76,7 +79,8 @@ public struct WindowGeometryProfile: Codable, Equatable, Sendable {
         lastObservedAt: Date, pendingMinimumWidth: Double? = nil, pendingMinimumWidthSamples: Int = 0,
         pendingMinimumHeight: Double? = nil, pendingMinimumHeightSamples: Int = 0,
         pendingMaximumWidth: Double? = nil, pendingMaximumWidthSamples: Int = 0,
-        pendingMaximumHeight: Double? = nil, pendingMaximumHeightSamples: Int = 0
+        pendingMaximumHeight: Double? = nil, pendingMaximumHeightSamples: Int = 0,
+        geometryCapabilities: GeometryCapabilities = .init()
     ) {
         self.identity = identity
         self.context = context
@@ -96,6 +100,7 @@ public struct WindowGeometryProfile: Codable, Equatable, Sendable {
         self.pendingMaximumWidthSamples = pendingMaximumWidthSamples
         self.pendingMaximumHeight = pendingMaximumHeight
         self.pendingMaximumHeightSamples = pendingMaximumHeightSamples
+        self.geometryCapabilities = geometryCapabilities
     }
 
     public init(from decoder: Decoder) throws {
@@ -118,7 +123,8 @@ public struct WindowGeometryProfile: Codable, Equatable, Sendable {
             pendingMaximumWidth: try values.decodeIfPresent(Double.self, forKey: .pendingMaximumWidth),
             pendingMaximumWidthSamples: try values.decodeIfPresent(Int.self, forKey: .pendingMaximumWidthSamples) ?? 0,
             pendingMaximumHeight: try values.decodeIfPresent(Double.self, forKey: .pendingMaximumHeight),
-            pendingMaximumHeightSamples: try values.decodeIfPresent(Int.self, forKey: .pendingMaximumHeightSamples) ?? 0)
+            pendingMaximumHeightSamples: try values.decodeIfPresent(Int.self, forKey: .pendingMaximumHeightSamples) ?? 0,
+            geometryCapabilities: try values.decodeIfPresent(GeometryCapabilities.self, forKey: .geometryCapabilities) ?? .init())
     }
 
     public var confidence: WindowGeometryProfileConfidence {
@@ -251,6 +257,37 @@ public actor WindowGeometryProfileRecorder {
     }
 
     public func snapshot() -> WindowGeometryProfileCatalog { catalog }
+
+    public func recordCapabilities(
+        _ capabilities: GeometryCapabilities, for window: NormalizedWindow,
+        context: WindowGeometryProfileContext = .init(), observedAt: Date = Date()
+    ) throws {
+        guard let identity = WindowGeometryProfileIdentity(window: window) else { return }
+        let index = catalog.profiles.firstIndex { $0.identity == identity && $0.context == context }
+        var profile = index.map { catalog.profiles[$0] } ?? WindowGeometryProfile(
+            identity: identity, context: context, correctiveAttemptCount: 1, sampleCount: 0,
+            successfulSampleCount: 0, lastObservedAt: observedAt)
+        profile.geometryCapabilities = WindowCapabilityPolicy.merging(
+            capabilities, into: profile.geometryCapabilities)
+        profile.lastObservedAt = observedAt
+        if let index { catalog.profiles[index] = profile } else { catalog.profiles.append(profile) }
+        try persistence?.save(catalog)
+    }
+
+    public func mergingCapabilities(
+        into inventory: InventorySnapshot,
+        context: WindowGeometryProfileContext = .init()
+    ) -> InventorySnapshot {
+        var inventory = inventory
+        inventory.windows = inventory.windows.map { window in
+            guard let profile = profile(for: window, context: context) else { return window }
+            var window = window
+            window.geometryCapabilities = WindowCapabilityPolicy.merging(
+                profile.geometryCapabilities, into: window.geometryCapabilities)
+            return window
+        }
+        return inventory
+    }
 
     public func profile(
         for window: NormalizedWindow, context: WindowGeometryProfileContext = .init()

@@ -41,6 +41,10 @@ extension WorkspaceState {
             guard let focused = workspace.focusedWindowID else {
                 throw WorkspaceMutationError.focusedWindowRequired(name)
             }
+            guard workspace.bsp.root?.contains(focused) == true else {
+                throw WorkspaceMutationError.directionalTargetNotFound(
+                    windowID: focused, direction: direction)
+            }
             let frames = workspace.layout(in: bounds)
             guard let target = directionalTarget(
                 from: focused, direction: direction, frames: frames
@@ -228,6 +232,7 @@ extension WorkspaceState {
 
     public mutating func reconcileObservedWindows(
         _ observedWindowIDs: [WorkspaceWindowID],
+        floatingWindowIDs: Set<WorkspaceWindowID> = [],
         initialAssignments: [WorkspaceWindowID: WorkspaceName] = [:],
         replacements: [WorkspaceWindowID: WorkspaceWindowID] = [:],
         removedWindowIDs: Set<WorkspaceWindowID> = [],
@@ -245,6 +250,9 @@ extension WorkspaceState {
                 let index = state.index(of: workspace.name)!
                 state.workspaces[index].windowIDs = workspace.windowIDs.map { $0 == oldID ? newID : $0 }
                 state.workspaces[index].bsp.root = workspace.bsp.root?.replacing(oldID, with: newID)
+                if state.workspaces[index].floatingWindowIDs.remove(oldID) != nil {
+                    state.workspaces[index].floatingWindowIDs.insert(newID)
+                }
                 if focused { state.workspaces[index].focusedWindowID = newID }
                 state.parkedWindowFrames.removeValue(forKey: oldID)
                 if let parkedFrame { state.parkedWindowFrames[newID] = parkedFrame }
@@ -267,8 +275,20 @@ extension WorkspaceState {
                 if state.index(of: destination) == nil {
                     state.workspaces.append(.init(name: destination, origin: .configured, displayID: defaultDisplayID))
                 }
-                state.insert(windowID: id, into: destination)
+                state.insert(windowID: id, into: destination, floating: floatingWindowIDs.contains(id))
                 modified.insert(destination)
+            }
+
+            for index in state.workspaces.indices {
+                let workspace = state.workspaces[index]
+                let desired = Set(workspace.windowIDs.filter(floatingWindowIDs.contains))
+                guard desired != workspace.floatingWindowIDs else { continue }
+                for id in desired { state.workspaces[index].bsp.root = state.workspaces[index].bsp.root?.removing(windowID: id) }
+                for id in workspace.floatingWindowIDs.subtracting(desired).sorted() {
+                    state.insertIntoBSP(windowID: id, workspaceIndex: index)
+                }
+                state.workspaces[index].floatingWindowIDs = desired
+                modified.insert(workspace.name)
             }
 
             return (
@@ -276,7 +296,7 @@ extension WorkspaceState {
                     workspaceState: state,
                     modifiedWorkspaces: modified.sorted()
                 ),
-                !added.isEmpty || !removedWindowIDs.isEmpty
+                !added.isEmpty || !removedWindowIDs.isEmpty || !modified.isEmpty
             )
         }
     }
@@ -461,15 +481,26 @@ private extension WorkspaceState {
     mutating func remove(windowID: WorkspaceWindowID, from name: WorkspaceName) {
         guard let index = index(of: name) else { return }
         workspaces[index].windowIDs.removeAll { $0 == windowID }
+        workspaces[index].floatingWindowIDs.remove(windowID)
         workspaces[index].bsp.root = workspaces[index].bsp.root?.removing(windowID: windowID)
         if workspaces[index].focusedWindowID == windowID {
             workspaces[index].focusedWindowID = workspaces[index].bsp.root?.windowIDs.last ?? workspaces[index].windowIDs.last
         }
     }
 
-    mutating func insert(windowID: WorkspaceWindowID, into name: WorkspaceName) {
+    mutating func insert(windowID: WorkspaceWindowID, into name: WorkspaceName, floating: Bool = false) {
         guard let index = index(of: name) else { return }
         workspaces[index].windowIDs.append(windowID)
+        if floating {
+            workspaces[index].floatingWindowIDs.insert(windowID)
+            workspaces[index].focusedWindowID = windowID
+            return
+        }
+        insertIntoBSP(windowID: windowID, workspaceIndex: index)
+        workspaces[index].focusedWindowID = windowID
+    }
+
+    mutating func insertIntoBSP(windowID: WorkspaceWindowID, workspaceIndex index: Int) {
         let target = workspaces[index].focusedWindowID.flatMap { workspaces[index].bsp.root?.contains($0) == true ? $0 : nil }
             ?? workspaces[index].bsp.root?.windowIDs.last
         if let root = workspaces[index].bsp.root, let target {
@@ -477,7 +508,6 @@ private extension WorkspaceState {
         } else {
             workspaces[index].bsp.root = .leaf(windowID: windowID)
         }
-        workspaces[index].focusedWindowID = windowID
     }
 
     mutating func deleteEmptyParkedRuntimeWorkspaces(

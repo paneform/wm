@@ -305,6 +305,10 @@ public struct CLIParser: Sendable {
     }
 
     private func parseDebugAX(_ arguments: [String]) throws -> CLICommand {
+        if arguments.first == "probe" {
+            guard arguments.count >= 2, !arguments[1].isEmpty else { throw CLIParseError("expected 'debug ax probe WINDOW_ID'") }
+            return .request(method: "geometry.capability.probe", params: ["window_id": .string(arguments[1])], url: try parseURLOnly(Array(arguments.dropFirst(2))))
+        }
         if arguments.first == "focus" {
             guard arguments.count >= 2, !arguments[1].isEmpty else { throw CLIParseError("missing window ID") }
             return .request(

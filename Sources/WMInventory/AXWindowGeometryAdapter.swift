@@ -102,6 +102,10 @@ public struct AXWindowGeometryAdapter: WindowGeometryAdapter, @unchecked Sendabl
         _ = try frame(element)
     }
 
+    public func validateIdentity(of handle: WindowGeometryHandle, expected window: NormalizedWindow) async throws {
+        guard isSameLogicalWindow(try element(for: handle), window) else { throw WindowGeometryAdapterError.stale }
+    }
+
     public func readFrame(of handle: WindowGeometryHandle) async throws -> InventoryRect {
         try frame(element(for: handle))
     }

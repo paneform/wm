@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
+import WMProtocol
 
 public struct AppKitDisplayInventorySource: DisplayInventorySource {
     public init() {}
@@ -148,6 +149,8 @@ private func readWindow(_ element: AXUIElement, application: ApplicationObservat
     let parentRole: String? = parent.flatMap { readOptional($0, kAXRoleAttribute) }
     let movable: Bool? = readOptional(element, "AXMovable")
     let resizable: Bool? = readOptional(element, "AXResizable")
+    let positionSettable = attributeSettable(element, kAXPositionAttribute)
+    let sizeSettable = attributeSettable(element, kAXSizeAttribute)
     let cgWindowID: UInt32? = read(element, "AXWindowNumber", errors: &errors).flatMap { (number: NSNumber) in number.uint32Value }
     return RawAXWindow(
         pid: application.pid,
@@ -166,9 +169,25 @@ private func readWindow(_ element: AXUIElement, application: ApplicationObservat
         hasParent: parentRole != nil && parentRole != kAXApplicationRole,
         movable: movable,
         resizable: resizable,
+        geometryCapabilities: .init(
+            position: reportedCapability(positionSettable),
+            size: reportedCapability(sizeSettable)
+        ),
         cgWindowID: cgWindowID,
         readErrors: errors
     )
+}
+
+private func attributeSettable(_ element: AXUIElement, _ attribute: String) -> Bool? {
+    var settable = DarwinBoolean(false)
+    guard AXUIElementIsAttributeSettable(element, attribute as CFString, &settable) == .success else { return nil }
+    return settable.boolValue
+}
+
+private func reportedCapability(_ settable: Bool?) -> GeometryCapability {
+    guard let settable else { return .init() }
+    let state: GeometryCapabilityState = settable ? .supported : .fixed
+    return .init(reported: state, evidence: [.init(source: .platformReport, state: state)])
 }
 
 private func readOptional<T>(_ element: AXUIElement, _ attribute: String) -> T? {

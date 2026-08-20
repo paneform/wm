@@ -266,6 +266,10 @@ struct StartupIntentAudit {
       do {
         let result = try candidate.reconcileObservedWindows(
           [],
+          floatingWindowIDs: Set(inventory.windows.compactMap {
+            WindowCapabilityPolicy.admission(for: $0.geometryCapabilities) == .floating
+              ? $0.id : nil
+          }),
           replacements: replacements, defaultDisplayID: displayID)
         candidate = result.workspaceState
       } catch {

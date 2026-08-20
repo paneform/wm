@@ -25,6 +25,17 @@ final class WindowGeometryProfileStoreTests: XCTestCase {
         XCTAssertEqual(try store.load(), catalog)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["geometry-profiles.json"])
     }
+
+    func testLegacyProfileDefaultsCapabilityEvidenceToUnknown() throws {
+        let profile = WindowGeometryProfile(
+            identity: .init(window: testWindow())!, context: .init(), correctiveAttemptCount: 1,
+            sampleCount: 0, successfulSampleCount: 0, lastObservedAt: .distantPast)
+        var object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(profile)) as! [String: Any]
+        object.removeValue(forKey: "geometryCapabilities")
+        let decoded = try JSONDecoder().decode(
+            WindowGeometryProfile.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertEqual(decoded.geometryCapabilities, .init())
+    }
 }
 
 private func testWindow() -> NormalizedWindow {

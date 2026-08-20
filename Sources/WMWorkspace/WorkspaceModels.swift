@@ -211,6 +211,7 @@ public struct Workspace: Codable, Equatable, Sendable {
     public var maxGeometryRetries: Int
     public var geometryProfileMode: GeometryProfileMode
     public var windowIDs: [WorkspaceWindowID]
+    public var floatingWindowIDs: Set<WorkspaceWindowID>
     public var focusedWindowID: WorkspaceWindowID?
     public var bsp: BSPTree
 
@@ -229,6 +230,7 @@ public struct Workspace: Codable, Equatable, Sendable {
         maxGeometryRetries: Int = 5,
         geometryProfileMode: GeometryProfileMode = .store,
         windowIDs: [WorkspaceWindowID] = [],
+        floatingWindowIDs: Set<WorkspaceWindowID> = [],
         focusedWindowID: WorkspaceWindowID? = nil,
         bsp: BSPTree = .init()
     ) {
@@ -246,6 +248,7 @@ public struct Workspace: Codable, Equatable, Sendable {
         self.maxGeometryRetries = maxGeometryRetries
         self.geometryProfileMode = geometryProfileMode
         self.windowIDs = windowIDs
+        self.floatingWindowIDs = floatingWindowIDs
         self.focusedWindowID = focusedWindowID
         self.bsp = bsp
     }
@@ -259,7 +262,29 @@ public struct Workspace: Codable, Equatable, Sendable {
         case maxGeometryRetries = "max_geometry_retries"
         case geometryProfileMode = "geometry_profile_mode"
         case windowIDs = "window_ids"
+        case floatingWindowIDs = "floating_window_ids"
         case focusedWindowID = "focused_window_id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        origin = try container.decode(WorkspaceOrigin.self, forKey: .origin)
+        displayID = try container.decode(String.self, forKey: .displayID)
+        preferredDisplayID = try container.decodeIfPresent(String.self, forKey: .preferredDisplayID)
+        visible = try container.decode(Bool.self, forKey: .visible)
+        focused = try container.decode(Bool.self, forKey: .focused)
+        mode = try container.decode(WorkspaceMode.self, forKey: .mode)
+        margin = try container.decode(WorkspaceMargin.self, forKey: .margin)
+        gap = try container.decode(Double.self, forKey: .gap)
+        resizeIncrement = try container.decode(Double.self, forKey: .resizeIncrement)
+        layoutPolicy = try container.decode([LayoutPolicy].self, forKey: .layoutPolicy)
+        maxGeometryRetries = try container.decode(Int.self, forKey: .maxGeometryRetries)
+        geometryProfileMode = try container.decode(GeometryProfileMode.self, forKey: .geometryProfileMode)
+        windowIDs = try container.decode([String].self, forKey: .windowIDs)
+        floatingWindowIDs = try container.decodeIfPresent(Set<String>.self, forKey: .floatingWindowIDs) ?? []
+        focusedWindowID = try container.decodeIfPresent(String.self, forKey: .focusedWindowID)
+        bsp = try container.decode(BSPTree.self, forKey: .bsp)
     }
 }
 
@@ -349,6 +374,7 @@ public struct WorkspaceState: Codable, Equatable, Sendable {
     public mutating func removeWindow(_ windowID: WorkspaceWindowID, from workspaceName: WorkspaceName) {
         guard let index = workspaces.firstIndex(where: { $0.name == workspaceName }) else { return }
         workspaces[index].windowIDs.removeAll { $0 == windowID }
+        workspaces[index].floatingWindowIDs.remove(windowID)
         workspaces[index].bsp.root = workspaces[index].bsp.root?.removing(windowID: windowID)
         if workspaces[index].focusedWindowID == windowID {
             workspaces[index].focusedWindowID = workspaces[index].bsp.root?.windowIDs.last

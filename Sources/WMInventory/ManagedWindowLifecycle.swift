@@ -158,6 +158,10 @@ public struct ManagedWindowLifecycle: Sendable {
       window.management = .unmanaged
       return window
     }
+    if WindowCapabilityPolicy.admission(for: window.geometryCapabilities) == .unmanaged {
+      window.management = .unmanaged
+      return window
+    }
     switch override {
     case .managed: window.management = .managed
     case .unmanaged: window.management = .unmanaged

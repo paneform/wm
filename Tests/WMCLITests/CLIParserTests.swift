@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import WMConfiguration
+
 @testable import WMCLI
 
 @Test func parsesHelpCommands() throws {
@@ -170,6 +171,9 @@ import WMConfiguration
 
 @Test func parsesRawAXDebugCommands() throws {
     let parser = CLIParser()
+    #expect(try parser.parseInvocation(["--pretty", "debug", "ax", "probe", "window:1"]) == .init(
+        command: .request(method: "geometry.capability.probe", params: ["window_id": .string("window:1")], url: defaultWMWebSocketURL), pretty: true
+    ))
     #expect(try parser.parse(["debug", "ax", "focus", "window:1"]) == .request(
         method: "debug.ax.focus", params: ["window_id": .string("window:1")], url: defaultWMWebSocketURL
     ))

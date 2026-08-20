@@ -40,6 +40,7 @@ public protocol WindowGeometryAdapter: Sendable {
   func reconcile(windows: [NormalizedWindow]) async
   func evict(lifetimes: Set<WindowLifetime>) async
   func resolve(_ window: NormalizedWindow) async throws -> WindowGeometryHandle
+  func validateIdentity(of handle: WindowGeometryHandle, expected window: NormalizedWindow) async throws
   func validateControllability(of handle: WindowGeometryHandle) async throws
   func readFrame(of handle: WindowGeometryHandle) async throws -> InventoryRect
   func write(
@@ -62,6 +63,7 @@ public protocol WindowGeometryAdapter: Sendable {
 extension WindowGeometryAdapter {
   public func reconcile(windows: [NormalizedWindow]) async {}
   public func evict(lifetimes: Set<WindowLifetime>) async {}
+  public func validateIdentity(of handle: WindowGeometryHandle, expected window: NormalizedWindow) async throws {}
   public func focus(_ handle: WindowGeometryHandle) async throws {
     throw WindowGeometryAdapterError.notControllable
   }
@@ -155,11 +157,15 @@ public protocol WindowGeometryEffects: Sendable {
   func reconcile(windows: [NormalizedWindow]) async
   func evict(lifetimes: Set<WindowLifetime>) async
   func get(window: NormalizedWindow) async throws -> WindowFrameGetResult
-  func set(window: NormalizedWindow, params: WindowFrameSetParams) async throws -> WindowFrameSetResult
-  func setGeometry(window: NormalizedWindow, request: WindowGeometrySetRequest) async throws -> WindowGeometrySetOutcome
+  func set(window: NormalizedWindow, params: WindowFrameSetParams) async throws
+    -> WindowFrameSetResult
+  func setGeometry(window: NormalizedWindow, request: WindowGeometrySetRequest) async throws
+    -> WindowGeometrySetOutcome
   func focus(window: NormalizedWindow) async throws
   func fit(window: NormalizedWindow, within frame: InventoryRect) async throws -> InventoryRect
   func park(window: NormalizedWindow, frame: InventoryRect) async throws -> InventoryRect
+  func setPosition(window: NormalizedWindow, frame: InventoryRect) async throws -> InventoryRect
+  func probeCapabilities(window: NormalizedWindow) async throws -> GeometryCapabilityProbeResult
 }
 
 public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
@@ -370,6 +376,223 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
     }
   }
 
+  public func setPosition(window: NormalizedWindow, frame: InventoryRect) async throws -> InventoryRect {
+    try requireMovable(window)
+    guard WindowCapabilityPolicy.effective(window.geometryCapabilities.position) != .fixed else {
+      throw WindowGeometryFailure(
+        code: .windowNotControllable, message: "window position is not writable")
+    }
+    let handle = try await resolve(window)
+    let original = try await read(handle)
+    var requested = original
+    requested.x = frame.x
+    requested.y = frame.y
+    do {
+      try await adapter.write(.position, frame: requested, to: handle)
+      let observed = try await settle(handle, requested: requested, tolerance: 1).frame
+      guard abs(observed.x - requested.x) <= 1, abs(observed.y - requested.y) <= 1,
+        abs(observed.width - original.width) <= 1, abs(observed.height - original.height) <= 1
+      else {
+        throw WindowGeometryFailure(
+          code: .geometryVerificationFailed,
+          message: "position-only write changed size or missed its target",
+          observedFrame: observed.protocolFrame)
+      }
+      return observed
+    } catch let failure as WindowGeometryFailure {
+      throw failure
+    } catch {
+      throw mapAdapter(error, defaultCode: .geometryRejected)
+    }
+  }
+
+  public func probeCapabilities(window: NormalizedWindow) async throws
+    -> GeometryCapabilityProbeResult
+  {
+    let handle = try await resolve(window)
+    try await adapter.validateIdentity(of: handle, expected: window)
+    let original = try await read(handle)
+    var attempts: [GeometryProbeAttempt] = []
+    var errors: [String] = []
+    var positionSupported = false
+    var sizeSupported = false
+    var positionUncertain = false
+    var sizeUncertain = false
+    var rejectedSizeDimensions: Set<GeometryProbeDimension> = []
+    var changedComponents: Set<WindowGeometryComponent> = []
+    let candidates: [(GeometryProbeDimension, WindowGeometryComponent, InventoryRect)] = [
+      (
+        .xNegative, .position,
+        .init(x: original.x - 1, y: original.y, width: original.width, height: original.height)
+      ),
+      (
+        .xPositive, .position,
+        .init(x: original.x + 1, y: original.y, width: original.width, height: original.height)
+      ),
+      (
+        .yNegative, .position,
+        .init(x: original.x, y: original.y - 1, width: original.width, height: original.height)
+      ),
+      (
+        .yPositive, .position,
+        .init(x: original.x, y: original.y + 1, width: original.width, height: original.height)
+      ),
+      (
+        .widthIn, .size,
+        .init(
+          x: original.x, y: original.y, width: max(1, original.width - 1), height: original.height)
+      ),
+      (
+        .widthOut, .size,
+        .init(x: original.x, y: original.y, width: original.width + 1, height: original.height)
+      ),
+      (
+        .heightIn, .size,
+        .init(
+          x: original.x, y: original.y, width: original.width, height: max(1, original.height - 1))
+      ),
+      (
+        .heightOut, .size,
+        .init(x: original.x, y: original.y, width: original.width, height: original.height + 1)
+      ),
+    ]
+    var restoration = GeometryProbeRestoration(attempted: false, succeeded: false, verified: false)
+    do {
+      candidateLoop: for (dimension, component, requested) in candidates {
+        do {
+          try Task.checkCancellation()
+          try await adapter.validateIdentity(of: handle, expected: window)
+          try await adapter.write(component, frame: requested, to: handle)
+          changedComponents.insert(component)
+          try await adapter.validateIdentity(of: handle, expected: window)
+          let observed = try await adapter.settle(handle, requested: requested, tolerance: 0.25).frame
+          let changed = componentChanged(component, original, observed)
+          let matched = componentMatches(component, requested, observed)
+          let crossChanged = componentChanged(component == .position ? .size : .position, original, observed)
+          attempts.append(.init(dimension: dimension, requestedFrame: requested.protocolFrame, observedFrame: observed.protocolFrame, changed: changed, matchedRequest: matched))
+          if component == .position {
+            positionSupported = positionSupported || changed && matched && !crossChanged
+            positionUncertain = positionUncertain || crossChanged || changed && !matched
+          } else {
+            sizeSupported = sizeSupported || changed && matched && !crossChanged
+            sizeUncertain = sizeUncertain || crossChanged || changed && !matched
+          }
+          if crossChanged {
+            changedComponents.insert(component == .position ? .size : .position)
+          }
+          do {
+            try await restore(component, original: original, handle: handle, window: window)
+            changedComponents.remove(component)
+          } catch is CancellationError {
+            throw CancellationError()
+          } catch {
+            let message = "intermediate restoration: \(error)"
+            errors.append(message)
+            if component == .position { positionUncertain = true } else { sizeUncertain = true }
+            break candidateLoop
+          }
+        } catch is CancellationError {
+          throw CancellationError()
+        } catch {
+          let message = String(describing: error)
+          attempts.append(.init(dimension: dimension, requestedFrame: requested.protocolFrame, error: message))
+          errors.append("\(dimension.rawValue): \(message)")
+          if component == .position {
+            positionUncertain = true
+          } else {
+            sizeUncertain = true
+            if case WindowGeometryAdapterError.rejected = error {
+              rejectedSizeDimensions.insert(dimension)
+            }
+          }
+          if case WindowGeometryAdapterError.stale = error { break candidateLoop }
+        }
+      }
+    } catch is CancellationError {
+      await bestEffortRestore(
+        changedComponents, original: original, handle: handle, window: window)
+      throw CancellationError()
+    }
+    restoration.attempted = true
+    do {
+      try await restore(
+        changedComponents, original: original, handle: handle, window: window)
+      restoration.succeeded = true
+      try await adapter.validateIdentity(of: handle, expected: window)
+      let final = try await adapter.readFrame(of: handle)
+      restoration.verified = final.approximatelyEquals(original, tolerance: 0.25)
+      let position = probeCapability(supported: positionSupported, uncertain: positionUncertain)
+      let size = probeCapability(
+        supported: sizeSupported, uncertain: sizeUncertain,
+        fixed: rejectedSizeDimensions == [.widthIn, .widthOut, .heightIn, .heightOut])
+      return .init(
+        windowID: window.id, originalFrame: original.protocolFrame, finalFrame: final.protocolFrame,
+        position: position, size: size, attempts: attempts, restoration: restoration, errors: errors
+      )
+    } catch {
+      restoration.error = String(describing: error)
+      errors.append("restoration: \(error)")
+      let final = try? await adapter.readFrame(of: handle)
+      return .init(
+        windowID: window.id, originalFrame: original.protocolFrame,
+        finalFrame: final?.protocolFrame,
+        position: probeCapability(supported: positionSupported, uncertain: true),
+        size: probeCapability(supported: sizeSupported, uncertain: true), attempts: attempts,
+        restoration: restoration, errors: errors)
+    }
+  }
+
+  private func probeCapability(
+    supported: Bool, uncertain: Bool, fixed: Bool = false
+  ) -> GeometryCapability {
+    let state: GeometryCapabilityState = fixed ? .fixed : supported && !uncertain ? .supported : .inconclusive
+    return .init(confirmed: state, evidence: [.init(source: .behavioralProbe, state: state)])
+  }
+
+  private func componentChanged(_ component: WindowGeometryComponent, _ lhs: InventoryRect, _ rhs: InventoryRect) -> Bool {
+    !componentMatches(component, lhs, rhs)
+  }
+
+  private func componentMatches(_ component: WindowGeometryComponent, _ lhs: InventoryRect, _ rhs: InventoryRect) -> Bool {
+    switch component {
+    case .position: abs(lhs.x - rhs.x) <= 0.25 && abs(lhs.y - rhs.y) <= 0.25
+    case .size: abs(lhs.width - rhs.width) <= 0.25 && abs(lhs.height - rhs.height) <= 0.25
+    }
+  }
+
+  private func restore(
+    _ component: WindowGeometryComponent, original: InventoryRect,
+    handle: WindowGeometryHandle, window: NormalizedWindow
+  ) async throws {
+    try await adapter.validateIdentity(of: handle, expected: window)
+    try await adapter.write(component, frame: original, to: handle)
+    try await adapter.validateIdentity(of: handle, expected: window)
+    let observed = try await adapter.settle(handle, requested: original, tolerance: 0.25).frame
+    guard componentMatches(component, original, observed) else {
+      throw WindowGeometryAdapterError.stale
+    }
+  }
+
+  private func restore(
+    _ components: Set<WindowGeometryComponent>, original: InventoryRect,
+    handle: WindowGeometryHandle, window: NormalizedWindow
+  ) async throws {
+    for component in [WindowGeometryComponent.position, .size] where components.contains(component) {
+      try await restore(component, original: original, handle: handle, window: window)
+    }
+  }
+
+  private func bestEffortRestore(
+    _ components: Set<WindowGeometryComponent>, original: InventoryRect,
+    handle: WindowGeometryHandle, window: NormalizedWindow
+  ) async {
+    for component in [WindowGeometryComponent.position, .size] where components.contains(component) {
+      do {
+        try await restore(component, original: original, handle: handle, window: window)
+      } catch {}
+    }
+  }
+
   private func requireMovable(_ window: NormalizedWindow) throws {
     guard window.classification == .normal else {
       throw WindowGeometryFailure(
@@ -498,7 +721,6 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
       && abs(observed.x - requested.x) <= tolerance
       && abs(observed.y - requested.y) <= tolerance
   }
-
 
   private func result(
     _ id: String, _ requested: InventoryRect, _ observed: InventoryRect, _ attempts: Int,

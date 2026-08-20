@@ -91,7 +91,7 @@ import WMWorkspace
     let configPath = ConfigurationFile.path()
     do {
       let committed = try await state.refresh()
-      let inventory = committed.snapshot.inventory
+      let inventory = await handler.mergingPersistedCapabilities(into: committed.snapshot.inventory)
       guard committed.snapshot.health.capabilities["accessibility"] as? Bool == true,
         committed.snapshot.health.capabilities["core_graphics"] as? Bool == true
       else {

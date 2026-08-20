@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import WMProtocol
 @testable import WMInventory
 
 final class WindowGeometryProfileTests: XCTestCase {
@@ -130,6 +131,35 @@ final class WindowGeometryProfileTests: XCTestCase {
         XCTAssertEqual(profile?.minimumWidth, 712)
         XCTAssertEqual(profile?.pendingMinimumWidthSamples, 0)
     }
+
+    func testCapabilityPrecedenceAndProfileMerge() async throws {
+        var reportedFixed = profileWindow()
+        reportedFixed.geometryCapabilities.position.reported = .fixed
+        XCTAssertEqual(
+            WindowCapabilityPolicy.admission(for: reportedFixed.geometryCapabilities), .unmanaged)
+        reportedFixed.geometryCapabilities.position.confirmed = .supported
+        reportedFixed.geometryCapabilities.size.reported = .fixed
+        XCTAssertEqual(
+            WindowCapabilityPolicy.admission(for: reportedFixed.geometryCapabilities), .floating)
+        reportedFixed.geometryCapabilities.size.confirmed = .supported
+        XCTAssertEqual(
+            WindowCapabilityPolicy.admission(for: reportedFixed.geometryCapabilities), .bsp)
+
+        let recorder = WindowGeometryProfileRecorder()
+        try await recorder.recordCapabilities(
+            .init(position: .init(confirmed: .supported), size: .init(confirmed: .fixed)),
+            for: profileWindow())
+        let merged = await recorder.mergingCapabilities(into: profileInventory(profileWindow()))
+        XCTAssertEqual(merged.windows[0].geometryCapabilities.position.confirmed, .supported)
+        XCTAssertEqual(merged.windows[0].geometryCapabilities.size.confirmed, .fixed)
+    }
+}
+
+private func profileInventory(_ window: NormalizedWindow) -> InventorySnapshot {
+    .init(
+        timestamp: .distantPast, durationMilliseconds: 0, displays: [], rawAXWindows: [],
+        rawCGWindows: [], windows: [window], rejectedAXWindows: [], joinDecisions: [],
+        sourceHealth: [], appScans: [])
 }
 
 private func profileWindow() -> NormalizedWindow {

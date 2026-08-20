@@ -194,7 +194,8 @@ public enum WindowNormalizer {
             main: ax.main,
             onScreen: cg?.onScreen,
             health: issues.isEmpty ? .healthy : .degraded,
-            healthIssues: issues
+            healthIssues: issues,
+            geometryCapabilities: ax.geometryCapabilities
         )
     }
 
