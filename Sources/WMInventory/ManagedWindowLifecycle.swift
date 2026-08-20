@@ -121,8 +121,11 @@ public struct ManagedWindowLifecycle: Sendable {
       }
     }
 
+    let managedWindows = retained.values.map(\.window).filter {
+      $0.management == .managed && $0.classification == .normal
+    }
     for previous in closedWindows {
-      let candidates = inventory.windows.filter {
+      let candidates = managedWindows.filter {
         $0.id != previous.id && $0.pid == previous.pid
           && $0.bundleID == previous.bundleID && $0.role == previous.role
           && $0.subrole == previous.subrole

@@ -172,7 +172,7 @@ actor DaemonHandler: WebSocketRequestHandler {
   static func focusCandidateIDs(
     workspace: WMWorkspace.Workspace, inventory: InventorySnapshot
   ) -> [String] {
-    let liveIDs = Set(inventory.windows.map(\.id))
+    let liveIDs = Set(inventory.windows.filter { $0.classification == .normal }.map(\.id))
     let preferred = workspace.focusedWindowID.map { [$0] } ?? []
     return (preferred + workspace.windowIDs.reversed().filter { $0 != workspace.focusedWindowID })
       .filter(liveIDs.contains)
@@ -453,8 +453,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     reportRecoveryMembership(
       "reconstruct", inventory: inventory, state: committed, update: update)
     var candidate = StartupIntentAudit.candidate(
-      state: committed, inventory: inventory, replacements: update.replacements,
-      pruneMissing: false)
+      state: committed, inventory: inventory, replacements: update.replacements)
     _ = try candidate.reconcileDisplayTopology(
       connectedDisplayIDs: Set(inventory.displays.map(\.id)), fallbackDisplayID: displayID
     )
@@ -1935,6 +1934,15 @@ actor DaemonHandler: WebSocketRequestHandler {
     return window
   }
 
+  private func movableWindow(
+    _ id: String, retained: [String: NormalizedWindow], inventory: InventorySnapshot
+  ) -> NormalizedWindow? {
+    guard inventory.windows.first(where: { $0.id == id })?.classification == .normal else {
+      return nil
+    }
+    return movableWindow(id, in: retained)
+  }
+
   private func focusWorkspaceWindow(
     _ state: WMWorkspace.WorkspaceState,
     named name: String,
@@ -1996,7 +2004,9 @@ actor DaemonHandler: WebSocketRequestHandler {
     ])
     do {
       for id in incomingIDs.union(outgoingIDs).sorted() {
-        guard let window = movableWindow(id, in: windowsByID) else { continue }
+        guard let window = movableWindow(id, retained: windowsByID, inventory: inventory) else {
+          continue
+        }
         try requireCurrentSessionGeneration(sessionGeneration)
         let observed = try await geometry.get(window: window).frame
         try requireCurrentSessionGeneration(sessionGeneration)
@@ -2020,7 +2030,9 @@ actor DaemonHandler: WebSocketRequestHandler {
       let incomingDisplay = incomingDisplayID.flatMap { displayFrames[$0] }
       func parkOutgoingWindows() async throws {
         for id in outgoingIDs.sorted() {
-          guard let window = movableWindow(id, in: windowsByID), let original = window.frame else {
+          guard let window = movableWindow(id, retained: windowsByID, inventory: inventory),
+            let original = window.frame
+          else {
             continue
           }
           guard let workspaceName = before.workspaceName(containing: id),
@@ -2064,7 +2076,7 @@ actor DaemonHandler: WebSocketRequestHandler {
           after, named: name, inventory: inventory, sessionGeneration: sessionGeneration)
       }
       for id in incomingIDs where !incomingIsBSP {
-        guard let window = movableWindow(id, in: windowsByID),
+        guard let window = movableWindow(id, retained: windowsByID, inventory: inventory),
           let restore = after.parkedWindowFrames[id]
         else {
           continue
@@ -2160,7 +2172,11 @@ actor DaemonHandler: WebSocketRequestHandler {
     else { return }
     let bounds = WorkspaceLayoutRect(
       x: workArea.x, y: workArea.y, width: workArea.width, height: workArea.height)
-    let windows = try workspace.windowIDs.map { try resolveWindow($0, in: inventory.windows) }
+    retainSessionWindows(inventory.windows)
+    let windows = workspace.windowIDs.compactMap {
+      movableWindow($0, retained: sessionWindows, inventory: inventory)
+    }
+    guard !windows.isEmpty else { return }
     let originals = Dictionary(
       uniqueKeysWithValues: windows.compactMap { window in window.frame.map { (window.id, $0) } })
     let geometryPolicy = resolvedGeometryPolicy(for: workspace)

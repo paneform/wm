@@ -153,6 +153,19 @@ final class ManagedWindowLifecycleTests: XCTestCase {
     XCTAssertEqual(replacements.windows.map(\.id), ["normal"])
   }
 
+  func testTransientCandidateDoesNotReplaceClosedManagedWindow() {
+    var lifecycle = ManagedWindowLifecycle()
+    _ = lifecycle.reconcile(snapshot(windows: [window("old", pid: 7)], pids: [7]))
+    _ = lifecycle.reconcile(snapshot(windows: [], pids: [7]))
+
+    let update = lifecycle.reconcile(
+      snapshot(windows: [window("panel", pid: 7, classification: .transient)], pids: [7]))
+
+    XCTAssertEqual(update.verifiedClosedLifetimes, [.init(windowID: "old", pid: 7)])
+    XCTAssertTrue(update.replacements.isEmpty)
+    XCTAssertTrue(update.windows.isEmpty)
+  }
+
   func testManagementOverrideRejectsMismatchedProcessLifetime() {
     var lifecycle = ManagedWindowLifecycle()
     _ = lifecycle.reconcile(snapshot(windows: [window("a", pid: 7)], pids: [7]))

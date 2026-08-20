@@ -659,7 +659,13 @@ private func response(_ text: String) throws -> Response {
           ]
         ))), clientID: UUID())
 
-  #expect(try response(replies[0]).error == nil)
+  let reply = try response(replies[0])
+  #expect(reply.error == nil)
+  if case .object(let result)? = reply.result,
+    case .object(let transaction)? = result["transaction"]
+  {
+    #expect(transaction["failure"] == nil)
+  }
   let committed = await controller.snapshot()
   #expect(committed.focusedWorkspaceName == "destination")
   #expect(committed[workspace: "source"]?.windowIDs == ["window:cg:2"])
@@ -1743,7 +1749,13 @@ private func response(_ text: String) throws -> Response {
           params: [
             "window_id": .string(panelID), "return_mode": .string("completion"),
           ]))), clientID: UUID())
-  #expect(try response(replies[0]).error == nil)
+  let reply = try response(replies[0])
+  #expect(reply.error == nil)
+  if case .object(let result)? = reply.result,
+    case .object(let transaction)? = result["transaction"]
+  {
+    #expect(transaction["failure"] == nil)
+  }
   await geometry.resetOperations()
 
   try await handler.reconcileApplicationActivation(
@@ -1777,6 +1789,70 @@ private func response(_ text: String) throws -> Response {
   }
   #expect(expected["management"] == .string("unmanaged"))
   #expect(report["session_retained"] == .bool(true))
+}
+
+@Test func workspaceFocusIgnoresStaleTransientMember() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let displayID = "display:1"
+  let scanner = InventoryScanner(
+    sources: .init(
+      displays: StubDisplays(), accessibility: WindowAX(titles: ["normal", "panel"]),
+      coreGraphics: WindowCG(titles: ["normal", "panel"])))
+  let inventoryState = DaemonHandler.State(provider: SystemInventoryProvider(scanner: scanner))
+  let initial = try await inventoryState.refresh().snapshot.inventory.windows.sorted { $0.id < $1.id }
+  var normal = initial[0]
+  normal.pid = 10
+  normal.management = .managed
+  normal.displayID = displayID
+  var transient = initial[1]
+  transient.pid = 20
+  transient.classification = .transient
+  transient.displayID = displayID
+  transient.management = .unmanaged
+  let controller = WorkspaceController(
+    store: WorkspaceStateStore(
+      stateURL: directory.appendingPathComponent("state.json"), buildVersion: "test"
+    ) { try $0.validate() },
+    state: WorkspaceState(
+      workspaces: [
+        .init(name: "source", origin: .configured, displayID: displayID, visible: true, focused: true),
+        .init(
+          name: "target", origin: .configured, displayID: displayID,
+          windowIDs: [normal.id, transient.id], focusedWindowID: transient.id,
+          bsp: .init(
+            root: .split(
+              axis: .vertical, ratio: 0.5, first: .leaf(windowID: normal.id),
+              second: .leaf(windowID: transient.id)))),
+      ], focusedWorkspaceName: "source",
+      displays: [displayID: .init(visibleWorkspaceName: "source")]))
+  let geometry = DirectionalGeometry(frames: [normal.id: normal.frame!, transient.id: transient.frame!])
+  let handler = DaemonHandler(
+    state: inventoryState,
+    workspaces: controller, geometryEffects: geometry)
+  for window in [normal, transient] {
+    _ = try await inventoryState.update(window: .init(id: window.id, value: window))
+  }
+
+  let replies = await handler.handle(
+    text: try clientMessage(
+      .request(
+        .init(
+          requestId: "focus-target", method: .workspaceFocus,
+          params: ["name": .string("target"), "return_mode": .string("completion")]))),
+    clientID: UUID())
+
+  let focusReply = try response(replies[0])
+  #expect(focusReply.error == nil)
+  if case .object(let result)? = focusReply.result,
+    case .object(let transaction)? = result["transaction"]
+  {
+    #expect(transaction["failure"] == nil)
+  }
+  #expect(await controller.snapshot().focusedWorkspaceName == "target")
+  #expect(await geometry.focused == normal.id)
+  #expect(!(await geometry.operations.contains(.set(transient.id))))
 }
 
 @Test func lifecycleCloseRemovesMemberAndRetilesVisibleWorkspace() async throws {
@@ -1882,6 +1958,20 @@ private func response(_ text: String) throws -> Response {
   #expect(workspace?.bsp.root == .leaf(windowID: "window:cg:200"))
   #expect(await geometry.operations.isEmpty)
   try? FileManager.default.removeItem(at: directory)
+}
+
+@Test func recoveryPrunesStaleCGMemberBeforeGeometryEffects() async throws {
+  let staleID = "window:cg:155"
+  let liveID = "window:cg:200"
+  let state = startupState(staleID: staleID, liveID: liveID)
+  let inventory = completeInventory([liveID])
+  let candidate = StartupIntentAudit.candidate(state: state, inventory: inventory)
+
+  #expect(candidate[workspace: "visible"]?.windowIDs == [liveID])
+  #expect(
+    WorkspaceIntentAudit(state: candidate, inventory: inventory).orderedSteps.allSatisfy {
+      $0.windowOrWorkspaceID != staleID
+    })
 }
 
 @Test func periodicUnhealthyCGRetainsStaleMembersConservatively() {
