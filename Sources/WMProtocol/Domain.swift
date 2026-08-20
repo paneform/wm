@@ -89,12 +89,16 @@ public struct RawAXWindow: Codable, Equatable, Sendable {
     public var fullscreen: Bool?
     public var focused: Bool?
     public var main: Bool?
+    public var modal: Bool?
+    public var hasParent: Bool?
+    public var movable: Bool?
+    public var resizable: Bool?
     public var cgWindowId: UInt32?
     public var readErrors: [String]
-    public init(source: WindowSource = .accessibility, pid: Int32, appName: String? = nil, bundleId: String? = nil, title: String? = nil, role: String? = nil, subrole: String? = nil, frame: Rectangle? = nil, minimized: Bool? = nil, fullscreen: Bool? = nil, focused: Bool? = nil, main: Bool? = nil, cgWindowId: UInt32? = nil, readErrors: [String] = []) {
-        self.source = source; self.pid = pid; self.appName = appName; self.bundleId = bundleId; self.title = title; self.role = role; self.subrole = subrole; self.frame = frame; self.minimized = minimized; self.fullscreen = fullscreen; self.focused = focused; self.main = main; self.cgWindowId = cgWindowId; self.readErrors = readErrors
+    public init(source: WindowSource = .accessibility, pid: Int32, appName: String? = nil, bundleId: String? = nil, title: String? = nil, role: String? = nil, subrole: String? = nil, frame: Rectangle? = nil, minimized: Bool? = nil, fullscreen: Bool? = nil, focused: Bool? = nil, main: Bool? = nil, modal: Bool? = nil, hasParent: Bool? = nil, movable: Bool? = nil, resizable: Bool? = nil, cgWindowId: UInt32? = nil, readErrors: [String] = []) {
+        self.source = source; self.pid = pid; self.appName = appName; self.bundleId = bundleId; self.title = title; self.role = role; self.subrole = subrole; self.frame = frame; self.minimized = minimized; self.fullscreen = fullscreen; self.focused = focused; self.main = main; self.modal = modal; self.hasParent = hasParent; self.movable = movable; self.resizable = resizable; self.cgWindowId = cgWindowId; self.readErrors = readErrors
     }
-    enum CodingKeys: String, CodingKey { case source, pid, appName = "app_name", bundleId = "bundle_id", title, role, subrole, frame, minimized, fullscreen, focused, main, cgWindowId = "cg_window_id", readErrors = "read_errors" }
+    enum CodingKeys: String, CodingKey { case source, pid, appName = "app_name", bundleId = "bundle_id", title, role, subrole, frame, minimized, fullscreen, focused, main, modal, hasParent = "has_parent", movable, resizable, cgWindowId = "cg_window_id", readErrors = "read_errors" }
 }
 
 public struct RawCGWindow: Codable, Equatable, Sendable {

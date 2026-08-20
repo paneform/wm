@@ -151,6 +151,10 @@ public struct ManagedWindowLifecycle: Sendable {
     -> NormalizedWindow
   {
     var window = window
+    if window.classification == .transient {
+      window.management = .unmanaged
+      return window
+    }
     switch override {
     case .managed: window.management = .managed
     case .unmanaged: window.management = .unmanaged

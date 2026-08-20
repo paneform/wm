@@ -143,6 +143,11 @@ private func readWindow(_ element: AXUIElement, application: ApplicationObservat
     let fullscreen: Bool? = read(element, "AXFullScreen", errors: &errors)
     let focused: Bool? = read(element, kAXFocusedAttribute, errors: &errors)
     let main: Bool? = read(element, kAXMainAttribute, errors: &errors)
+    let modal: Bool? = readOptional(element, kAXModalAttribute)
+    let parent: AXUIElement? = readOptional(element, kAXParentAttribute)
+    let parentRole: String? = parent.flatMap { readOptional($0, kAXRoleAttribute) }
+    let movable: Bool? = readOptional(element, "AXMovable")
+    let resizable: Bool? = readOptional(element, "AXResizable")
     let cgWindowID: UInt32? = read(element, "AXWindowNumber", errors: &errors).flatMap { (number: NSNumber) in number.uint32Value }
     return RawAXWindow(
         pid: application.pid,
@@ -157,9 +162,21 @@ private func readWindow(_ element: AXUIElement, application: ApplicationObservat
         fullscreen: fullscreen,
         focused: focused,
         main: main,
+        modal: modal,
+        hasParent: parentRole != nil && parentRole != kAXApplicationRole,
+        movable: movable,
+        resizable: resizable,
         cgWindowID: cgWindowID,
         readErrors: errors
     )
+}
+
+private func readOptional<T>(_ element: AXUIElement, _ attribute: String) -> T? {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
+        return nil
+    }
+    return value as? T
 }
 
 private func read<T>(_ element: AXUIElement, _ attribute: String, errors: inout [String]) -> T? {

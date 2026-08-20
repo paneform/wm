@@ -223,6 +223,7 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
   public func setGeometry(
     window: NormalizedWindow, request: WindowGeometrySetRequest
   ) async throws -> WindowGeometrySetOutcome {
+    try requireMovable(window)
     let requested = request.frame
     try validate(requested, tolerance: request.tolerance, attempts: request.policy.maximumAttempts)
     let handle = try await resolve(window)
@@ -311,6 +312,7 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
   public func fit(window: NormalizedWindow, within frame: InventoryRect) async throws
     -> InventoryRect
   {
+    try requireMovable(window)
     let handle = try await resolve(window)
     do {
       try await adapter.fit(handle, within: frame)
@@ -358,12 +360,21 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
   }
 
   public func park(window: NormalizedWindow, frame: InventoryRect) async throws -> InventoryRect {
+    try requireMovable(window)
     let handle = try await resolve(window)
     do {
       try await adapter.park(frame: frame, handle: handle)
       return try await adapter.readFrame(of: handle)
     } catch {
       throw mapAdapter(error, defaultCode: .geometryRejected)
+    }
+  }
+
+  private func requireMovable(_ window: NormalizedWindow) throws {
+    guard window.classification == .normal else {
+      throw WindowGeometryFailure(
+        code: .windowNotControllable,
+        message: "transient windows cannot be moved")
     }
   }
 

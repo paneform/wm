@@ -220,10 +220,19 @@ struct WorkspaceIntentAudit: Equatable {
       if workspace.visible {
         reconcileVisible.insert(workspace.name)
         for id in workspace.windowIDs where state.parkedWindowFrames[id] != nil {
-          if live[id] != nil { restore[id] = state.parkedWindowFrames[id]?.inventoryRect }
+          if let window = live[id], window.classification == .normal,
+            window.management == .managed
+          {
+            restore[id] = state.parkedWindowFrames[id]?.inventoryRect
+          }
         }
       } else {
-        for id in workspace.windowIDs where live[id] != nil { park.insert(id) }
+        for id in workspace.windowIDs {
+          guard let window = live[id], window.classification == .normal,
+            window.management == .managed
+          else { continue }
+          park.insert(id)
+        }
       }
     }
   }

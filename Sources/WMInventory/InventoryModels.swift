@@ -169,6 +169,10 @@ public struct RawAXWindow: Codable, Hashable, Sendable {
     public var fullscreen: Bool?
     public var focused: Bool?
     public var main: Bool?
+    public var modal: Bool?
+    public var hasParent: Bool?
+    public var movable: Bool?
+    public var resizable: Bool?
     public var cgWindowID: UInt32?
     public var readErrors: [String]
 
@@ -185,6 +189,10 @@ public struct RawAXWindow: Codable, Hashable, Sendable {
         fullscreen: Bool? = nil,
         focused: Bool? = nil,
         main: Bool? = nil,
+        modal: Bool? = nil,
+        hasParent: Bool? = nil,
+        movable: Bool? = nil,
+        resizable: Bool? = nil,
         cgWindowID: UInt32? = nil,
         readErrors: [String] = []
     ) {
@@ -200,12 +208,18 @@ public struct RawAXWindow: Codable, Hashable, Sendable {
         self.fullscreen = fullscreen
         self.focused = focused
         self.main = main
+        self.modal = modal
+        self.hasParent = hasParent
+        self.movable = movable
+        self.resizable = resizable
         self.cgWindowID = cgWindowID
         self.readErrors = readErrors
     }
 
     enum CodingKeys: String, CodingKey {
-        case source, pid, title, role, subrole, frame, minimized, fullscreen, focused, main
+        case source, pid, title, role, subrole, frame, minimized, fullscreen, focused, main, modal
+        case hasParent = "has_parent"
+        case movable, resizable
         case appName = "app_name"
         case bundleID = "bundle_id"
         case executablePath = "executable_path"

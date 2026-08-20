@@ -90,6 +90,27 @@ final class InventoryTests: XCTestCase {
         XCTAssertEqual(result.windows[1].management, .unmanaged)
     }
 
+    func testModalAndNonApplicationParentStandardWindowsAreTransient() {
+        let frame = InventoryRect(x: 0, y: 0, width: 260, height: 306)
+        let modal = RawAXWindow(
+            pid: 2, appName: "Auth", role: "AXWindow", subrole: "AXStandardWindow",
+            frame: frame, modal: true)
+        let attached = RawAXWindow(
+            pid: 3, appName: "App", role: "AXWindow", subrole: "AXStandardWindow",
+            frame: frame, hasParent: true)
+        let surfaces = [
+            RawCGWindow(cgWindowID: 2, pid: 2, frame: frame),
+            RawCGWindow(cgWindowID: 3, pid: 3, frame: frame),
+        ]
+
+        let result = WindowNormalizer.normalize(ax: [modal, attached], cg: surfaces)
+
+        XCTAssertEqual(result.windows.map(\.classification), [.transient, .transient])
+        XCTAssertTrue(result.windows.allSatisfy { $0.management == .unmanaged })
+        XCTAssertTrue(result.windows[0].rejectionReasons.contains("AXModal is true"))
+        XCTAssertTrue(result.windows[1].rejectionReasons.contains("window has an AX parent"))
+    }
+
     func testScannerIsolatesFailedApplication() async {
         let good = ApplicationObservation(pid: 1, name: "Good")
         let bad = ApplicationObservation(pid: 2, name: "Bad")

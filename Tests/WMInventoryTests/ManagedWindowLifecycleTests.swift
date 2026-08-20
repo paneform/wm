@@ -130,7 +130,7 @@ final class ManagedWindowLifecycleTests: XCTestCase {
     XCTAssertEqual(restarted.windows.first { $0.id == "a" }?.management, .managed)
   }
 
-  func testManageAndUnmanageOverridesLastForLogicalWindowLifetime() {
+  func testTransientWindowCannotBeManagedByOverride() {
     var lifecycle = ManagedWindowLifecycle()
     _ = lifecycle.reconcile(
       snapshot(
@@ -143,7 +143,7 @@ final class ManagedWindowLifecycleTests: XCTestCase {
       snapshot(
         windows: [window("normal", pid: 7), window("dialog", pid: 7, classification: .transient)],
         pids: [7]))
-    XCTAssertEqual(updated.windows.map(\.id), ["dialog"])
+    XCTAssertTrue(updated.windows.isEmpty)
 
     _ = lifecycle.reconcile(snapshot(windows: [], pids: []))
     let replacements = lifecycle.reconcile(
@@ -187,6 +187,7 @@ final class ManagedWindowLifecycleTests: XCTestCase {
 
     XCTAssertTrue(update.windows.isEmpty)
   }
+
 }
 
 private struct WorkspaceStateForLifecycle {

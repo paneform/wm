@@ -188,6 +188,12 @@ private func fixture(ping: [Bool], running: [Bool] = []) throws -> (LifecycleCon
     #expect(await launchd.operations == ["bootstrap", "kickstart"])
 }
 
+@Test func manualStartupTimeoutDoesNotClaimLaunchdSupervision() async throws {
+    let failure = LifecycleFailure.startupTimeout("Check the wm state logs for manual startup errors.")
+    #expect(!failure.message.contains("launchd"))
+    #expect(failure.message.contains("manual startup errors"))
+}
+
 @Test func deterministicStartupFailureReplacesLaunchdDiagnostics() async throws {
     let (base, launchd, process, directory) = try fixture(ping: [])
     defer { try? FileManager.default.removeItem(at: directory) }

@@ -1347,6 +1347,22 @@ private func response(_ text: String) throws -> Response {
   #expect(parkIndex != nil && retileIndex != nil && parkIndex! < retileIndex!)
 }
 
+@Test func committedIntentAuditNeverMovesTransientOrUnmanagedMembers() {
+  var state = WorkspaceState()
+  _ = try? state.focusWorkspace(named: "visible", displayID: "display:1")
+  _ = try? state.focusWorkspace(named: "hidden", displayID: "display:1")
+  _ = try? state.adoptUnassignedWindows(["transient", "unmanaged"], displayID: "display:1")
+  _ = try? state.focusWorkspace(named: "visible", displayID: "display:1")
+  var snapshot = inventory(["transient", "unmanaged"])
+  snapshot.windows[0].classification = .transient
+  snapshot.windows[1].management = .unmanaged
+
+  let audit = WorkspaceIntentAudit(state: state, inventory: snapshot)
+
+  #expect(audit.park.isEmpty)
+  #expect(audit.restore.isEmpty)
+}
+
 @Test func healthyStartupAuditRemovesDefinitivelyAbsentMembers() throws {
   let state = startupState(staleID: "window:cg:155", liveID: "window:cg:200")
   let candidate = StartupIntentAudit.candidate(
@@ -1657,7 +1673,7 @@ private func response(_ text: String) throws -> Response {
   try? FileManager.default.removeItem(at: directory)
 }
 
-@Test func automaticFocusOnlyAllowsExplicitManagedTransientEffects() async throws {
+@Test func automaticFocusNeverMovesExplicitlyManagedTransientWindows() async throws {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
   defer { try? FileManager.default.removeItem(at: directory) }
@@ -1733,7 +1749,7 @@ private func response(_ text: String) throws -> Response {
   try await handler.reconcileApplicationActivation(
     frontmostPID: target.pid, inventory: currentInventory)
   #expect(await controller.snapshot().focusedWorkspaceName == "target")
-  #expect(await geometry.operations.contains(.park(panelID)))
+  #expect(!(await geometry.operations.contains(.park(panelID))))
   #expect(await geometry.focused == targetID)
 
   let unmanaged = await handler.handle(

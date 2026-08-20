@@ -260,9 +260,10 @@ extension WorkspaceState {
 
             let assigned = Set(state.workspaces.flatMap(\.windowIDs))
             let added = observed.subtracting(assigned).sorted()
+            let fallback = state.focusedWorkspaceName ?? state.workspaces.first(where: \.visible)?.name ?? "1"
 
             for id in added {
-                let destination = initialAssignments[id] ?? "1"
+                let destination = initialAssignments[id] ?? fallback
                 if state.index(of: destination) == nil {
                     state.workspaces.append(.init(name: destination, origin: .configured, displayID: defaultDisplayID))
                 }

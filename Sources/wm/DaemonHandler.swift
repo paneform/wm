@@ -1926,6 +1926,15 @@ actor DaemonHandler: WebSocketRequestHandler {
     }
   }
 
+  private func movableWindow(_ id: String, in windows: [String: NormalizedWindow])
+    -> NormalizedWindow?
+  {
+    guard let window = windows[id], window.classification == .normal,
+      window.management == .managed
+    else { return nil }
+    return window
+  }
+
   private func focusWorkspaceWindow(
     _ state: WMWorkspace.WorkspaceState,
     named name: String,
@@ -1987,7 +1996,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     ])
     do {
       for id in incomingIDs.union(outgoingIDs).sorted() {
-        guard let window = windowsByID[id] else { continue }
+        guard let window = movableWindow(id, in: windowsByID) else { continue }
         try requireCurrentSessionGeneration(sessionGeneration)
         let observed = try await geometry.get(window: window).frame
         try requireCurrentSessionGeneration(sessionGeneration)
@@ -2011,7 +2020,9 @@ actor DaemonHandler: WebSocketRequestHandler {
       let incomingDisplay = incomingDisplayID.flatMap { displayFrames[$0] }
       func parkOutgoingWindows() async throws {
         for id in outgoingIDs.sorted() {
-          guard let window = windowsByID[id], let original = window.frame else { continue }
+          guard let window = movableWindow(id, in: windowsByID), let original = window.frame else {
+            continue
+          }
           guard let workspaceName = before.workspaceName(containing: id),
             let displayID = before[workspace: workspaceName]?.displayID,
             let displayFrame = displayFrames[displayID],
@@ -2053,7 +2064,9 @@ actor DaemonHandler: WebSocketRequestHandler {
           after, named: name, inventory: inventory, sessionGeneration: sessionGeneration)
       }
       for id in incomingIDs where !incomingIsBSP {
-        guard let window = windowsByID[id], let restore = after.parkedWindowFrames[id] else {
+        guard let window = movableWindow(id, in: windowsByID),
+          let restore = after.parkedWindowFrames[id]
+        else {
           continue
         }
         let saved = restore.inventoryRect
@@ -2439,7 +2452,9 @@ actor DaemonHandler: WebSocketRequestHandler {
     retainSessionWindows(inventory.windows)
     for workspace in committed.workspaces where all || workspace.visible {
       for id in workspace.windowIDs {
-        guard let restore = committed.parkedWindowFrames[id], let window = sessionWindows[id] else {
+        guard let restore = committed.parkedWindowFrames[id],
+          let window = movableWindow(id, in: sessionWindows)
+        else {
           continue
         }
         _ = try await geometry.set(window: window, params: frameParams(id, restore.inventoryRect))
@@ -2451,7 +2466,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     _ id: String, state: WMWorkspace.WorkspaceState, inventory: InventorySnapshot
   ) async throws {
     let displayFrames = DisplayTopologySnapshot(displays: inventory.displays).axFrames
-    guard let window = sessionWindows[id], let original = window.frame,
+    guard let window = movableWindow(id, in: sessionWindows), let original = window.frame,
       let workspaceName = state.workspaceName(containing: id),
       let displayID = state[workspace: workspaceName]?.displayID,
       let displayFrame = displayFrames[displayID],

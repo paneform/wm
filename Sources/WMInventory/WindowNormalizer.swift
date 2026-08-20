@@ -133,6 +133,14 @@ public enum WindowNormalizer {
             reasons.append("transient AX subrole: \(subrole)")
             return Classification(classification: .transient, management: .unmanaged, reasons: reasons)
         }
+        if window.modal == true {
+            reasons.append("AXModal is true")
+            return Classification(classification: .transient, management: .unmanaged, reasons: reasons)
+        }
+        if window.hasParent == true {
+            reasons.append("window has an AX parent")
+            return Classification(classification: .transient, management: .unmanaged, reasons: reasons)
+        }
         let systemUIBundles = [
             "com.apple.controlcenter",
             "com.apple.dock",

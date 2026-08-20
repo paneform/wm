@@ -96,7 +96,7 @@ public enum LifecycleFailure: Error, Equatable, Sendable {
         case .ownershipMetadataMissing: "The running wm daemon has no verified ownership metadata, so it cannot be force-stopped safely. Stop the legacy daemon manually, then use `wm start` to replace it."
         case .permissionDenied(let message): message
         case .gracefulTimeout: "daemon did not stop within 5 seconds; retry with --force"
-        case .startupTimeout(let diagnostics): "daemon did not become ready; launchd remains supervising. \(diagnostics)"
+        case .startupTimeout(let diagnostics): "daemon did not become ready. \(diagnostics)"
         case .operationFailed(let message): message
         }
     }

@@ -352,7 +352,7 @@ import Testing
   try state.validate()
 }
 
-@Test func observedWindowReconciliationPreservesMissingAssignmentsAndAdoptsIntoOne() throws {
+@Test func observedWindowReconciliationPreservesMissingAssignmentsAndAdoptsIntoFocusedWorkspace() throws {
   var state = WorkspaceState(
     workspaces: [
       .init(
@@ -374,11 +374,10 @@ import Testing
   let result = try state.reconcileObservedWindows(
     ["new-b", "keep", "new-a", "focused-window"], defaultDisplayID: "d")
 
-  #expect(result.modifiedWorkspaces == ["1"])
-  #expect(state[workspace: "1"]?.windowIDs == ["keep", "closed", "new-a", "new-b"])
-  #expect(state[workspace: "1"]?.bsp.root?.windowIDs == ["keep", "closed", "new-a", "new-b"])
-  #expect(state[workspace: "1"]?.focusedWindowID == "new-b")
-  #expect(state[workspace: "focused"]?.windowIDs == ["focused-window"])
+  #expect(result.modifiedWorkspaces == ["focused"])
+  #expect(state[workspace: "1"]?.windowIDs == ["keep", "closed"])
+  #expect(state[workspace: "focused"]?.windowIDs == ["focused-window", "new-a", "new-b"])
+  #expect(state.focusedWorkspaceName == "focused")
   #expect(state.parkedWindowFrames["closed"] == .init(x: 1, y: 2, width: 3, height: 4))
 
   let unchanged = try state.reconcileObservedWindows(
@@ -405,8 +404,8 @@ import Testing
 @Test func initialAssignmentsOnlyPlaceUnassignedWindows() throws {
   var state = WorkspaceState(workspaces: [
     tiled("M", display: "d", windows: ["manually-moved"]),
-    tiled("other", display: "d", windows: []),
-  ])
+    tiled("other", display: "d", windows: [], visible: true, focused: true),
+  ], focusedWorkspaceName: "other", displays: ["d": .init(visibleWorkspaceName: "other")])
 
   let result = try state.reconcileObservedWindows(
     ["manually-moved", "messages", "fallback"],
@@ -414,22 +413,22 @@ import Testing
     defaultDisplayID: "d"
   )
 
-  #expect(result.modifiedWorkspaces == ["1", "M"])
+  #expect(result.modifiedWorkspaces == ["M", "other"])
   #expect(state[workspace: "M"]?.windowIDs == ["manually-moved", "messages"])
-  #expect(state[workspace: "other"]?.windowIDs.isEmpty == true)
-  #expect(state[workspace: "1"]?.windowIDs == ["fallback"])
+  #expect(state[workspace: "other"]?.windowIDs == ["fallback"])
+  #expect(state.focusedWorkspaceName == "other")
 }
 
 @Test func sameIDReplacementIsRemovedThenFreshlyInserted() throws {
-  var state = WorkspaceState(workspaces: [tiled("old", display: "d", windows: ["a", "sibling"])])
+  var state = WorkspaceState(
+    workspaces: [tiled("old", display: "d", windows: ["a", "sibling"], visible: true, focused: true)],
+    focusedWorkspaceName: "old", displays: ["d": .init(visibleWorkspaceName: "old")])
 
   _ = try state.reconcileObservedWindows(
     ["a", "sibling"], removedWindowIDs: ["a"], defaultDisplayID: "d")
 
-  #expect(state[workspace: "old"]?.windowIDs == ["sibling"])
-  #expect(state[workspace: "1"]?.windowIDs == ["a"])
-  #expect(state[workspace: "old"]?.bsp.root == .leaf(windowID: "sibling"))
-  #expect(state[workspace: "1"]?.bsp.root == .leaf(windowID: "a"))
+  #expect(state[workspace: "old"]?.windowIDs == ["sibling", "a"])
+  #expect(state[workspace: "old"]?.bsp.root?.windowIDs == ["sibling", "a"])
 }
 
 @Test func identifiedReplacementPreservesWorkspaceMembership() throws {
