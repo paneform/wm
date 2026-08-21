@@ -621,6 +621,83 @@ final class WindowParkingTests: XCTestCase {
       displayID: "right", displays: displays, operatingSystem: os)
     XCTAssertNotEqual(left, right)
   }
+
+  func testFingerprintIgnoresNeighborArrangementButTracksOwnGeometry() throws {
+    let os = OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0)
+    let left = observedDisplay(id: "left", primary: true, frame: display)
+
+    // Connecting, disconnecting, or rearranging neighbors never changes this display's key:
+    // measured parking extents are display-local OS properties.
+    let withRight = [left, observedDisplay(id: "right", primary: false, frame: .init(x: 1920, y: 0, width: 1920, height: 1080))]
+    let withFarRight = [left, observedDisplay(id: "right", primary: false, frame: .init(x: 4000, y: -500, width: 1000, height: 900))]
+    let keyWithRight = try ParkingDiagnosticIdentity.key(displayID: "left", displays: withRight, operatingSystem: os)
+    XCTAssertEqual(
+      keyWithRight,
+      try ParkingDiagnosticIdentity.key(displayID: "left", displays: withFarRight, operatingSystem: os))
+    XCTAssertEqual(
+      keyWithRight,
+      try ParkingDiagnosticIdentity.key(displayID: "left", displays: [left], operatingSystem: os))
+
+    // The display's own geometry is part of the key.
+    var movedLeft = left
+    movedLeft.frame.x = 100
+    XCTAssertNotEqual(
+      keyWithRight,
+      try ParkingDiagnosticIdentity.key(displayID: "left", displays: [movedLeft], operatingSystem: os))
+
+    // Unknown displays cannot produce a key.
+    XCTAssertThrowsError(
+      try ParkingDiagnosticIdentity.key(
+        displayID: "missing", displays: [left], operatingSystem: os))
+  }
+
+  func testNeighborOverhangDeterminesBottomRightViability() throws {
+    // User scenario: A clamps at 60px vertical visibility; its bottom-right target spans
+    // rows [740, 1040] and columns [999, 1399] for a 400x300 window.
+    let assigned = InventoryRect(x: 0, y: 0, width: 1_000, height: 800)
+    let limits = ParkingVisibility(horizontal: 1, vertical: 60)
+    let windowFrame = InventoryRect(x: 0, y: 0, width: 400, height: 300)
+    let diagnosis = ResolvedDiagnostic(
+      value: ParkingLimits(corners: Dictionary(uniqueKeysWithValues: ParkingCorner.allCases.map {
+        ($0, limits)
+      })),
+      provenance: .init(key: .init(id: "parking-limits", revision: 7, fingerprint: "test")))
+    let target = WindowParkingPlan.target(
+      for: .bottomRight, display: assigned, window: windowFrame, limits: limits)
+    XCTAssertEqual(target.x, 999)
+    XCTAssertEqual(target.y, 740)
+
+    func bottomRightViable(_ neighbor: InventoryRect) -> Bool {
+      WindowParkingPlan.alternatives(
+        displayFrame: assigned, otherDisplayFrames: [neighbor], windowFrame: windowFrame,
+        diagnosis: diagnosis
+      ).contains { $0.corner == .bottomRight }
+    }
+
+    // Neighbor whose bottom sits only 30px above A's bottom overlaps the overhang and blocks
+    // the corner; disconnecting it makes the corner viable.
+    let closeBottomNeighbor = InventoryRect(x: 1_000, y: 770 - 900, width: 1_200, height: 900)
+    XCTAssertTrue(rectanglesIntersect(target, closeBottomNeighbor))
+    XCTAssertFalse(bottomRightViable(closeBottomNeighbor))
+
+    // A neighbor whose bottom edge exactly meets the target's top edge only touches it, so the
+    // corner stays viable.
+    let exactNeighbor = InventoryRect(x: 1_000, y: 740 - 900, width: 1_200, height: 900)
+    XCTAssertFalse(rectanglesIntersect(target, exactNeighbor))
+    XCTAssertTrue(bottomRightViable(exactNeighbor))
+
+    // That new neighbor's own bottom-left corner hangs left over A and is not viable.
+    let neighborDiagnosis = ResolvedDiagnostic(
+      value: ParkingLimits(corners: Dictionary(uniqueKeysWithValues: ParkingCorner.allCases.map {
+        ($0, ParkingVisibility(horizontal: 1, vertical: 52))
+      })),
+      provenance: diagnosis.provenance)
+    XCTAssertFalse(
+      WindowParkingPlan.alternatives(
+        displayFrame: exactNeighbor, otherDisplayFrames: [assigned], windowFrame: windowFrame,
+        diagnosis: neighborDiagnosis
+      ).contains { $0.corner == .bottomLeft })
+  }
 }
 
 private func XCTAssertThrowsErrorAsync(

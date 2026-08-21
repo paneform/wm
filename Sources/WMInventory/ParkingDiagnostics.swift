@@ -24,6 +24,7 @@ public struct ParkingLimits: Codable, Equatable, Sendable {
 public enum ParkingDiagnosticError: Error, Equatable {
   case noAcceptedPosition
   case noTopologySafeCorner
+  case unknownDisplay(String)
   case unstableBoundary
   case inconclusiveObservation
 }
@@ -170,8 +171,12 @@ public enum ParkingJointDiscovery {
 
 public enum ParkingDiagnosticIdentity {
   public static let id = "parking-limits"
-  public static let revision = 6
+  public static let revision = 7
 
+  /// Diagnosed parking extents are display-local OS properties, so the fingerprint scopes to the
+  /// assigned display's own identity and geometry. Neighbor arrangement changes affect plan-time
+  /// corner feasibility (recomputed per park) but never the measured extents, so connecting,
+  /// disconnecting, or rearranging other displays must not invalidate this display's fact.
   public static func key(
     displayID: String, displays: [DisplayObservation], operatingSystem: OperatingSystemVersion
   )
@@ -187,20 +192,20 @@ public enum ParkingDiagnosticIdentity {
     }
     struct Conditions: Codable {
       var operatingSystem: [Int]
-      var displayID: String
-      var displays: [DisplayCondition]
+      var display: DisplayCondition
+    }
+    guard let display = displays.first(where: { $0.id == displayID }) else {
+      throw ParkingDiagnosticError.unknownDisplay(displayID)
     }
     let conditions = Conditions(
       operatingSystem: [
         operatingSystem.majorVersion, operatingSystem.minorVersion,
         operatingSystem.patchVersion,
       ],
-      displayID: displayID,
-      displays: displays.sorted { $0.id < $1.id }.map {
-        .init(
-          id: $0.id, isBuiltin: $0.isBuiltin, isPrimary: $0.isPrimary, frame: $0.frame,
-          visibleFrame: $0.visibleFrame, backingScale: $0.backingScale)
-      })
+      display: .init(
+        id: display.id, isBuiltin: display.isBuiltin, isPrimary: display.isPrimary,
+        frame: display.frame, visibleFrame: display.visibleFrame,
+        backingScale: display.backingScale))
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     let encoded = try encoder.encode(conditions)

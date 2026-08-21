@@ -11,7 +11,11 @@ the diagnostic identifier and algorithm revision, an environment fingerprint, a 
 the measurement time. Consumers retain that provenance rather than receiving an unlabelled value.
 
 The fingerprint declares the conditions under which the result is valid. Parking facts are scoped to
-one display and include its ID, the OS version, and normalized display topology. Window-capability diagnostics can instead use application,
+one display and include its own ID, geometry, scale, the OS version — not neighboring displays.
+Measured extents are display-local OS properties: connecting, disconnecting, or rearranging other
+displays changes plan-time corner feasibility (recomputed per park against current topology) but never
+the measured limits, so those changes must not invalidate this display's fact or force a re-probe.
+Window-capability diagnostics can instead use application,
 role, subrole, and window-lifetime scopes. Changing the procedure requires incrementing its revision.
 
 `DiagnosticCoordinator` loads matching facts, single-flights missing work, persists successful
@@ -128,5 +132,5 @@ parking plans carry provenance and invalidate the exact fact when observed place
 temporary writes and atomic rename. Diagnostic facts are separate from workspace intent and learned
 window profiles so corrupt or obsolete environmental evidence cannot invalidate authoritative state.
 Corrupt, oversized, or unsupported catalogs are cache misses rather than startup failures. Catalog and
-payload counts are bounded, and topology fingerprints are compact deterministic digests that omit raw
+payload counts are bounded, and fingerprints are compact deterministic digests that omit raw
 display names and serial numbers.

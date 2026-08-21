@@ -55,6 +55,7 @@ actor DaemonHandler: WebSocketRequestHandler {
   private let configuration = ConfigurationStore()
   private var lastTransitionTrace: JSONValue = .null
   private var parkingDiagnoses: [String: ResolvedDiagnostic<ParkingLimits>] = [:]
+  private var lastParkingTopology: DisplayTopologySnapshot?
   private var pendingParking: Set<WindowLifetime> = []
   private var parkingTask: Task<Void, Never>?
   private var parkingTaskGeneration: UInt64 = 0
@@ -336,6 +337,7 @@ actor DaemonHandler: WebSocketRequestHandler {
       name: "observer.periodic", idempotencyKey: "observer.periodic"
     ) { [weak self] in
       guard let self else { throw CancellationError() }
+      await self.reconcileParkingTopology(inventory)
       try await self.reconcileObservedWindowsAuthorized(inventory, displayID: displayID)
       try await self.reconcileExternalFocusAuthorized(
         windowID: focusedWindowID, frontmostPID: frontmostPID, inventory: inventory,
@@ -598,6 +600,7 @@ actor DaemonHandler: WebSocketRequestHandler {
       rebuildInventory: { [state] in try await state.refresh().snapshot.inventory },
       reconstructAndReconcile: { [weak self] inventory in
         guard let self else { throw CancellationError() }
+        await self.reconcileParkingTopology(inventory)
         try await self.reconstructObservedState(inventory)
       },
       resume: {}
@@ -667,7 +670,48 @@ actor DaemonHandler: WebSocketRequestHandler {
   private func resumeAfterSessionTransition() async {
     _ = daemonLifecycle.resume()
     await transactions.endRecovery(success: true)
+    scheduleParking()
     await publishSessionEvent(.daemonResumed, data: .object(["resynchronized": .bool(true)]))
+  }
+
+  /// Layout-engine hook: detects an attached-display or arrangement change, invalidates parking
+  /// facts scoped to the changed displays so every consumer revalidates against a fresh probe,
+  /// publishes `display.topology_changed`, and schedules revalidation of parked positions.
+  func reconcileParkingTopology(_ inventory: InventorySnapshot) async {
+    let current = DisplayTopologySnapshot(displays: inventory.displays)
+    guard let previous = lastParkingTopology else {
+      lastParkingTopology = current
+      return
+    }
+    guard previous != current else { return }
+    lastParkingTopology = current
+    let targets = Self.parkingTopologyInvalidationTargets(previous: previous, current: current)
+    for displayID in targets {
+      parkingDiagnoses[displayID] = nil
+      parkingProbePriority[displayID] = nil
+    }
+    await publishSessionEvent(
+      .displayTopologyChanged,
+      data: .object([
+        "changed_display_ids": .array(targets.sorted().map(JSONValue.string)),
+        "attached_displays": .number(Double(current.displays.count)),
+      ]))
+    scheduleParking()
+  }
+
+  nonisolated static func parkingTopologyInvalidationTargets(
+    previous: DisplayTopologySnapshot, current: DisplayTopologySnapshot
+  ) -> Set<String> {
+    let previousByID = Dictionary(uniqueKeysWithValues: previous.displays.map { ($0.id, $0) })
+    let currentByID = Dictionary(uniqueKeysWithValues: current.displays.map { ($0.id, $0) })
+    var ids = Set(previous.displays.map(\.id))
+    ids.formUnion(current.displays.map(\.id))
+    return ids.filter { id in
+      guard let beforeDisplay = previousByID[id], let afterDisplay = currentByID[id] else {
+        return true
+      }
+      return beforeDisplay != afterDisplay
+    }
   }
 
   private func publishSessionEvent(
@@ -2434,6 +2478,10 @@ actor DaemonHandler: WebSocketRequestHandler {
 
   private func scheduleParking() {
     guard parkingTask == nil else { return }
+    if daemonLifecycle.isPaused || daemonLifecycle.isTerminating {
+      parkingRetryRequested = true
+      return
+    }
     parkingRetryRequested = false
     parkingTaskGeneration &+= 1
     let generation = parkingTaskGeneration
@@ -2963,6 +3011,16 @@ actor DaemonHandler: WebSocketRequestHandler {
       parkingRetryRequested = true
       return
     }
+  }
+
+  func parkingDiagnosisExists(for displayID: String) -> Bool {
+    parkingDiagnoses[displayID] != nil
+  }
+
+  func storeParkingDiagnosisForTesting(
+    displayID: String, diagnosis: ResolvedDiagnostic<ParkingLimits>
+  ) {
+    parkingDiagnoses[displayID] = diagnosis
   }
 
   private func requireParkingDiagnosis(displayID: String) throws

@@ -203,6 +203,7 @@ public enum EventTopic: String, Codable, CaseIterable, Sendable {
   case windowInventory = "window.inventory"
   case windowClosed = "window.closed"
   case displayInventory = "display.inventory"
+  case displayTopologyChanged = "display.topology_changed"
   case healthChanged = "health.changed"
   case configurationChanged = "configuration.changed"
   case inventoryRefreshed = "inventory.refreshed"

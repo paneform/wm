@@ -346,7 +346,7 @@ private func response(_ text: String) throws -> Response {
 
 @Test func revisionCacheMissPrefersAlreadyParkedCandidateAndKeepsVisibleRestoreFrame() async throws
 {
-  #expect(ParkingDiagnosticIdentity.revision == 5)
+  #expect(ParkingDiagnosticIdentity.revision == 7)
   let store = TransientDiagnosticStore()
   let fingerprint = "parked-candidate"
   try store.save(
@@ -414,6 +414,78 @@ private func response(_ text: String) throws -> Response {
     for: "display:1", lifetimes: lifetimes, state: workspaceState, inventory: snapshot)
 
   #expect(candidates.map(\.window.id) == [fallback.id])
+}
+
+@Test func parkingTopologyInvalidationTargetsCoverAdditionsRemovalsAndChanges() {
+  func display(_ id: String, x: Double, scale: Double = 1) -> DisplayObservation {
+    .init(
+      id: id, name: id, isBuiltin: false, isPrimary: false,
+      frame: .init(x: x, y: 0, width: 1000, height: 800),
+      visibleFrame: .init(x: x, y: 0, width: 1000, height: 780), backingScale: scale,
+      identifiers: .init())
+  }
+
+  let original = DisplayTopologySnapshot(displays: [display("left", x: 0), display("right", x: 1000)])
+  #expect(
+    DaemonHandler.parkingTopologyInvalidationTargets(
+      previous: original,
+      current: DisplayTopologySnapshot(displays: [display("left", x: 0), display("right", x: 1000)])
+    ).isEmpty)
+
+  // Rearrangement invalidates both displays because relative geometry defines parking corners.
+  let swapped = DisplayTopologySnapshot(displays: [display("left", x: 1000), display("right", x: 0)])
+  #expect(
+    DaemonHandler.parkingTopologyInvalidationTargets(previous: original, current: swapped)
+      == ["left", "right"])
+
+  // A moved or rescaled display invalidates itself.
+  var moved = original
+  moved.displays[1].frame.x = 1100
+  #expect(
+    DaemonHandler.parkingTopologyInvalidationTargets(
+      previous: original, current: moved
+    ) == ["right"])
+  var rescaled = original
+  rescaled.displays[0].backingScale = 2
+  #expect(
+    DaemonHandler.parkingTopologyInvalidationTargets(
+      previous: original, current: rescaled
+    ) == ["left"])
+
+  // Attach and detach invalidate only the changed display; survivor limits stay valid because
+  // diagnosed extents are display-local and plan-time intersection checks handle arrangement.
+  let attached = DisplayTopologySnapshot(displays: original.displays + [display("third", x: -1000)])
+  #expect(
+    DaemonHandler.parkingTopologyInvalidationTargets(previous: original, current: attached)
+      == ["third"])
+  let detached = DisplayTopologySnapshot(displays: [display("left", x: 0)])
+  #expect(
+    DaemonHandler.parkingTopologyInvalidationTargets(previous: original, current: detached)
+      == ["right"])
+}
+
+@Test func parkingTopologyChangeInvalidatesDiagnoses() async throws {
+  let (handler, _) = try daemonHandler()
+  var snapshot = lifecycleInventory([recoveryWindow(id: "w", bundleID: "test", displayID: nil)])
+  snapshot.displays = [parkingTestDisplay]
+  try await handler.reconcileObservedWindows(snapshot, displayID: "display:1")
+  await handler.storeParkingDiagnosisForTesting(
+    displayID: "display:1",
+    diagnosis: .init(
+      value: ParkingLimits(corners: [.bottomLeft: .init(horizontal: 1, vertical: 52)]),
+      provenance: .init(
+        key: .init(id: ParkingDiagnosticIdentity.id, revision: 6, fingerprint: "test"))))
+  #expect(await handler.parkingDiagnosisExists(for: "display:1"))
+
+  // Same topology: nothing invalidated.
+  try await handler.reconcileParkingTopology(snapshot)
+  #expect(await handler.parkingDiagnosisExists(for: "display:1"))
+
+  // Rearranged topology: the fact is dropped so the next audit probes fresh limits.
+  var rearranged = snapshot
+  rearranged.displays[0].frame.x = 250
+  try await handler.reconcileParkingTopology(rearranged)
+  #expect(await !handler.parkingDiagnosisExists(for: "display:1"))
 }
 
 @Test func inactiveGeometryIsNotAuthoritativeExternalFocus() {

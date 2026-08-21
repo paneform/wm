@@ -69,6 +69,7 @@ private let workspace = WorkspaceState(
     #expect(EventTopic.daemonPaused.rawValue == "daemon.paused")
     #expect(EventTopic.daemonResumed.rawValue == "daemon.resumed")
     #expect(EventTopic.sessionResynchronized.rawValue == "session.resynchronized")
+    #expect(EventTopic.displayTopologyChanged.rawValue == "display.topology_changed")
     #expect(ErrorCode.workspaceNotFound.rawValue == "workspace_not_found")
     #expect(ErrorCode.displayNotFound.rawValue == "display_not_found")
 }
