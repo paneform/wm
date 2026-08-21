@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import WMConfiguration
 import WMCore
+import WMDiagnostics
 import WMInventory
 import WMPersistence
 import WMProtocol
@@ -117,6 +118,11 @@ private actor ErrorProbe {
   private var messages: [String] = []
   func record(_ message: String) { messages.append(message) }
   func contains(_ text: String) -> Bool { messages.contains { $0.contains(text) } }
+}
+
+private actor DiagnosticRunProbe {
+  private(set) var ran = false
+  func mark() { ran = true }
 }
 
 private struct DeniedAX: AccessibilityInventorySource {
@@ -336,6 +342,78 @@ private func response(_ text: String) throws -> Response {
 
   let (unmanagedHandler, _) = try daemonHandler()
   #expect(await unmanagedHandler.parkingProbe(for: lifetime, inventory: raw) == nil)
+}
+
+@Test func revisionCacheMissPrefersAlreadyParkedCandidateAndKeepsVisibleRestoreFrame() async throws
+{
+  #expect(ParkingDiagnosticIdentity.revision == 5)
+  let store = TransientDiagnosticStore()
+  let fingerprint = "parked-candidate"
+  try store.save(
+    DiagnosticRecord(
+      ResolvedDiagnostic(
+        value: ParkingLimits(corners: [:]),
+        provenance: .init(
+          key: .init(
+            id: ParkingDiagnosticIdentity.id, revision: 4, fingerprint: fingerprint)))))
+  let runProbe = DiagnosticRunProbe()
+  _ = try await DiagnosticCoordinator(persistence: store).resolve(
+    key: .init(
+      id: ParkingDiagnosticIdentity.id, revision: ParkingDiagnosticIdentity.revision,
+      fingerprint: fingerprint)
+  ) {
+    await runProbe.mark()
+    return ParkingLimits(corners: [:])
+  }
+  #expect(await runProbe.ran)
+  let (handler, _) = try daemonHandler()
+  var parked = recoveryWindow(id: "parked", bundleID: "test", displayID: nil)
+  parked.frame = .init(x: -99, y: 760, width: 100, height: 100)
+  let visible = recoveryWindow(id: "visible-anchor", bundleID: "test", displayID: nil)
+  var snapshot = lifecycleInventory([visible, parked])
+  snapshot.displays = [parkingTestDisplay]
+  try await handler.reconcileObservedWindows(snapshot, displayID: "display:1")
+  var workspaceState = WorkspaceState(workspaces: [
+    .init(
+      name: "hidden", origin: .configured, displayID: "display:1",
+      windowIDs: [visible.id, parked.id])
+  ])
+  let restore = ParkedWindowFrame(x: 20, y: 30, width: 100, height: 100)
+  workspaceState.parkedWindowFrames[parked.id] = restore
+  let lifetimes = Set(snapshot.windows.map { WindowLifetime(windowID: $0.id, pid: $0.pid) })
+
+  let candidates = await handler.parkingProbeCandidates(
+    for: "display:1", lifetimes: lifetimes, state: workspaceState, inventory: snapshot)
+
+  #expect(candidates.map(\.window.id) == [parked.id, visible.id])
+  #expect(candidates[0].currentFrame == parked.frame)
+  #expect(candidates[0].restoreFrame == .init(x: 20, y: 30, width: 100, height: 100))
+  #expect(
+    await handler.parkingProbeCandidates(
+      for: "display:1", lifetimes: lifetimes, state: workspaceState, inventory: snapshot,
+      preferredWindowID: visible.id
+    ).map(\.window.id) == [visible.id, parked.id])
+}
+
+@Test func unusableFirstParkingCandidateFallsBackToAnotherManagedWindow() async throws {
+  let (handler, _) = try daemonHandler()
+  var fixed = recoveryWindow(id: "aaa-fixed", bundleID: "test", displayID: nil)
+  fixed.geometryCapabilities.position.confirmed = .fixed
+  let fallback = recoveryWindow(id: "bbb-fallback", bundleID: "test", displayID: nil)
+  var snapshot = lifecycleInventory([fixed, fallback])
+  snapshot.displays = [parkingTestDisplay]
+  try await handler.reconcileObservedWindows(snapshot, displayID: "display:1")
+  let workspaceState = WorkspaceState(workspaces: [
+    .init(
+      name: "hidden", origin: .configured, displayID: "display:1",
+      windowIDs: [fixed.id, fallback.id])
+  ])
+  let lifetimes = Set(snapshot.windows.map { WindowLifetime(windowID: $0.id, pid: $0.pid) })
+
+  let candidates = await handler.parkingProbeCandidates(
+    for: "display:1", lifetimes: lifetimes, state: workspaceState, inventory: snapshot)
+
+  #expect(candidates.map(\.window.id) == [fallback.id])
 }
 
 @Test func inactiveGeometryIsNotAuthoritativeExternalFocus() {
@@ -2396,3 +2474,9 @@ private func lifecycleInventory(_ windows: [NormalizedWindow]) -> InventorySnaps
     ]
   )
 }
+
+private let parkingTestDisplay = DisplayObservation(
+  id: "display:1", name: "Display", isBuiltin: true, isPrimary: true,
+  frame: .init(x: 0, y: 0, width: 1_000, height: 800),
+  visibleFrame: .init(x: 0, y: 0, width: 1_000, height: 800), backingScale: 1,
+  identifiers: .init())

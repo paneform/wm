@@ -23,6 +23,7 @@ public struct ParkingLimits: Codable, Equatable, Sendable {
 
 public enum ParkingDiagnosticError: Error, Equatable {
   case noAcceptedPosition
+  case noTopologySafeCorner
   case unstableBoundary
   case inconclusiveObservation
 }
@@ -41,13 +42,28 @@ public struct ParkingAxisBounds: Equatable, Sendable {
 public struct ParkingLimitDiscovery: Sendable {
   public init() {}
 
+  public func boundsIfClamped(
+    observed: Double, endpoint: Double, direction: Double, acceptedSeed: Double? = nil
+  ) throws -> ParkingAxisBounds? {
+    guard observed != endpoint else { return nil }
+    return try clampedAxisBounds(
+      observed: observed, endpoint: endpoint, direction: direction,
+      acceptedSeed: acceptedSeed)
+  }
+
   public func clampedAxisBounds(
-    observed: Double, endpoint: Double, direction: Double
+    observed: Double, endpoint: Double, direction: Double, acceptedSeed: Double? = nil
   ) throws -> ParkingAxisBounds {
     guard direction == -1 || direction == 1 else {
       throw ParkingDiagnosticError.inconclusiveObservation
     }
-    let accepted = direction > 0 ? observed.rounded(.down) : observed.rounded(.up)
+    func safeInteger(_ value: Double) -> Double {
+      direction > 0 ? value.rounded(.down) : value.rounded(.up)
+    }
+    let observedAccepted = safeInteger(observed)
+    let accepted = [observedAccepted, acceptedSeed.map(safeInteger)].compactMap { $0 }.max {
+      ($0 - observedAccepted) * direction < ($1 - observedAccepted) * direction
+    }!
     let rejected = endpoint - direction
     let distance = Int(((rejected - accepted) * direction).rounded())
     guard distance >= 0 else { throw ParkingDiagnosticError.inconclusiveObservation }
@@ -76,7 +92,7 @@ public struct ParkingLimitDiscovery: Sendable {
   }
 
   public func furthestRetainedCoordinate(
-    bounds: ParkingAxisBounds, tolerance: Double = 1,
+    bounds: ParkingAxisBounds, tolerance: Double = 0,
     observe: @escaping @Sendable (Double) async throws -> Double
   ) async throws -> Double {
     let progress = try await maximumAcceptedProgress(distance: bounds.distance) { progress in
@@ -95,7 +111,7 @@ public struct ParkingLimitDiscovery: Sendable {
 
 public enum ParkingDiagnosticIdentity {
   public static let id = "parking-limits"
-  public static let revision = 3
+  public static let revision = 5
 
   public static func key(
     displayID: String, displays: [DisplayObservation], operatingSystem: OperatingSystemVersion

@@ -58,6 +58,8 @@ actor DaemonHandler: WebSocketRequestHandler {
   private var pendingParking: Set<WindowLifetime> = []
   private var parkingTask: Task<Void, Never>?
   private var parkingTaskGeneration: UInt64 = 0
+  private var parkingRetryRequested = false
+  private var parkingProbePriority: [String: String] = [:]
   private var parkingProbe: (window: NormalizedWindow, original: InventoryRect, generation: UInt64)?
   private var sender: (@Sendable (String, UUID) -> Void)?
   private var internalErrorReporter: (@Sendable (String) -> Void)?
@@ -91,7 +93,7 @@ actor DaemonHandler: WebSocketRequestHandler {
 
   func resolveParkingDiagnosis(
     _ inventory: InventorySnapshot, displayID: String, probe: NormalizedWindow,
-    original: InventoryRect, generation: UInt64
+    currentFrame: InventoryRect, restoreFrame: InventoryRect, generation: UInt64
   ) async throws {
     let key = try ParkingDiagnosticIdentity.key(
       displayID: displayID, displays: inventory.displays,
@@ -99,80 +101,86 @@ actor DaemonHandler: WebSocketRequestHandler {
     parkingDiagnoses[displayID] = try await diagnostics.resolve(key: key) {
       let topology = DisplayTopologySnapshot(displays: inventory.displays)
       let displayFrames = topology.axFrames
-      guard let display = displayFrames[displayID], Self.containsCenter(display, of: original)
-      else { throw ParkingDiagnosticError.noProbeWindow }
+      guard let display = displayFrames[displayID] else {
+        throw ParkingDiagnosticError.noProbeWindow
+      }
       let others = displayFrames.values.filter { $0 != display }
       let corners = WindowParkingPlan.availableCorners(
-        on: display, avoiding: Array(others), window: original)
-      guard !corners.isEmpty else { throw WMInventory.ParkingDiagnosticError.noAcceptedPosition }
+        on: display, avoiding: Array(others), window: currentFrame,
+        currentFrame: currentFrame)
+      guard !corners.isEmpty else {
+        throw WMInventory.ParkingDiagnosticError.noTopologySafeCorner
+      }
       var results: [ParkingCorner: ParkingVisibility] = [:]
-      var restorationError: Error?
-      do {
-        for corner in corners {
-          let anchor = WindowParkingPlan.visibleAnchor(
-            for: corner, display: display, window: original)
+      var lastProbeError: Error?
+      for corner in corners {
+        do {
+          let start = WindowParkingPlan.diagnosticStart(
+            for: corner, display: display, window: currentFrame, currentFrame: currentFrame,
+            avoiding: Array(others))
           let endpoint = WindowParkingPlan.offscreenEndpoint(
-            for: corner, display: display, window: original)
+            for: corner, display: display, window: currentFrame)
           let accepted = try await self.probeParkingCorner(
-            probe: probe, original: original, anchor: anchor, endpoint: endpoint, display: display,
-            displayID: displayID, displays: inventory.displays,
+            probe: probe, original: currentFrame, start: start, endpoint: endpoint,
+            otherDisplays: Array(others), displayID: displayID, displays: inventory.displays,
             generation: generation)
           results[corner] = WindowParkingPlan.visibility(
             for: corner, display: display, accepted: accepted)
+        } catch {
+          lastProbeError = error
         }
-      } catch { restorationError = error }
+      }
+      let workspaceState = await self.workspaces.snapshot()
+      let workspace = workspaceState.workspaceName(containing: probe.id)
+      let remainsHidden = workspace.flatMap { workspaceState[workspace: $0]?.visible } == false
+      let restorationTarget = remainsHidden ? currentFrame : restoreFrame
       do {
         try await self.restoreProbe(
-          probe, original: original, displayID: displayID, displays: inventory.displays)
+          probe, original: restorationTarget, displayID: displayID, displays: inventory.displays)
       } catch { throw ParkingDiagnosticError.restorationFailed }
       try await self.requireParkingTaskGeneration(generation)
-      if let restorationError { throw restorationError }
+      if results.isEmpty {
+        throw lastProbeError ?? WMInventory.ParkingDiagnosticError.noAcceptedPosition
+      }
       return ParkingLimits(corners: results)
     }
   }
 
   func probeParkingCorner(
-    probe: NormalizedWindow, original: InventoryRect, anchor: InventoryRect,
-    endpoint: InventoryRect, display: InventoryRect, displayID: String,
+    probe: NormalizedWindow, original: InventoryRect, start: InventoryRect,
+    endpoint: InventoryRect, otherDisplays: [InventoryRect], displayID: String,
     displays: [DisplayObservation], generation: UInt64
   ) async throws -> InventoryRect {
-    let anchored = try await self.setParkingProbePosition(
-      probe, target: anchor, original: original, displayID: displayID,
-      displays: displays, generation: generation)
-    guard Self.contains(display, frame: anchored, tolerance: 1) else {
-      throw WMInventory.ParkingDiagnosticError.inconclusiveObservation
-    }
+    let seeded = try await self.setParkingProbePosition(
+      probe, target: start, original: original, otherDisplays: otherDisplays,
+      displayID: displayID, displays: displays, generation: generation)
     let endpointObservation = try await self.setParkingProbePosition(
-      probe, target: endpoint, original: original, displayID: displayID,
-      displays: displays, generation: generation)
+      probe, target: endpoint, original: original, otherDisplays: otherDisplays,
+      displayID: displayID, displays: displays, generation: generation)
     var accepted = endpoint
-    let xClamped = endpointObservation.x != endpoint.x
-    let yClamped = endpointObservation.y != endpoint.y
+    let discovery = ParkingLimitDiscovery()
+    let xDirection = WindowParkingPlan.axisDirection(from: start, to: endpoint, horizontal: true)
+    let yDirection = WindowParkingPlan.axisDirection(from: start, to: endpoint, horizontal: false)
+    let xBounds = try discovery.boundsIfClamped(
+      observed: endpointObservation.x, endpoint: endpoint.x, direction: xDirection,
+      acceptedSeed: seeded.x)
+    let yBounds = try discovery.boundsIfClamped(
+      observed: endpointObservation.y, endpoint: endpoint.y, direction: yDirection,
+      acceptedSeed: seeded.y)
     var seed = endpointObservation
-    if xClamped {
-      let direction = WindowParkingPlan.axisDirection(
-        from: anchor, to: endpoint, horizontal: true)
-      seed.x = try ParkingLimitDiscovery().clampedAxisBounds(
-        observed: endpointObservation.x, endpoint: endpoint.x, direction: direction
-      ).acceptedCoordinate
-    }
-    if yClamped {
-      let direction = WindowParkingPlan.axisDirection(
-        from: anchor, to: endpoint, horizontal: false)
-      seed.y = try ParkingLimitDiscovery().clampedAxisBounds(
-        observed: endpointObservation.y, endpoint: endpoint.y, direction: direction
-      ).acceptedCoordinate
-    }
-    if xClamped {
+    seed.x = xBounds?.acceptedCoordinate ?? endpoint.x
+    seed.y = yBounds?.acceptedCoordinate ?? endpoint.y
+    if xBounds != nil {
       accepted.x = try await self.discoverParkingAxis(
         probe: probe, original: original, seed: seed, endpoint: endpoint,
-        horizontal: true, displayID: displayID, displays: displays,
+        horizontal: true, otherDisplays: otherDisplays, displayID: displayID, displays: displays,
         generation: generation)
+      seed.x = accepted.x
     }
-    if yClamped {
+    if yBounds != nil {
       accepted.y = try await self.discoverParkingAxis(
         probe: probe, original: original, seed: seed, endpoint: endpoint,
-        horizontal: false, displayID: displayID, displays: displays,
+        horizontal: false, otherDisplays: otherDisplays, displayID: displayID, displays: displays,
         generation: generation)
     }
     return accepted
@@ -180,7 +188,7 @@ actor DaemonHandler: WebSocketRequestHandler {
 
   private func discoverParkingAxis(
     probe: NormalizedWindow, original: InventoryRect, seed: InventoryRect,
-    endpoint: InventoryRect, horizontal: Bool, displayID: String,
+    endpoint: InventoryRect, horizontal: Bool, otherDisplays: [InventoryRect], displayID: String,
     displays: [DisplayObservation], generation: UInt64
   ) async throws -> Double {
     let observed = horizontal ? seed.x : seed.y
@@ -194,7 +202,8 @@ actor DaemonHandler: WebSocketRequestHandler {
       var target = seed
       if horizontal { target.x = coordinate } else { target.y = coordinate }
       let observed = try await self.setParkingProbePosition(
-        probe, target: target, original: original, displayID: displayID,
+        probe, target: target, original: original, otherDisplays: otherDisplays,
+        displayID: displayID,
         displays: displays, generation: generation)
       guard abs(observed.width - original.width) <= 1,
         abs(observed.height - original.height) <= 1
@@ -207,8 +216,12 @@ actor DaemonHandler: WebSocketRequestHandler {
 
   private func setParkingProbePosition(
     _ probe: NormalizedWindow, target: InventoryRect, original: InventoryRect,
-    displayID: String, displays: [DisplayObservation], generation: UInt64
+    otherDisplays: [InventoryRect], displayID: String, displays: [DisplayObservation],
+    generation: UInt64
   ) async throws -> InventoryRect {
+    guard WindowParkingPlan.isTopologySafe(target, avoiding: otherDisplays) else {
+      throw WMInventory.ParkingDiagnosticError.noTopologySafeCorner
+    }
     try await validateParkingProbe(
       probe, original: original, displayID: displayID, displays: displays,
       generation: generation)
@@ -217,7 +230,8 @@ actor DaemonHandler: WebSocketRequestHandler {
       probe, original: original, displayID: displayID, displays: displays,
       generation: generation)
     guard abs(observed.width - original.width) <= 1,
-      abs(observed.height - original.height) <= 1
+      abs(observed.height - original.height) <= 1,
+      WindowParkingPlan.isTopologySafe(observed, avoiding: otherDisplays)
     else {
       throw WMInventory.ParkingDiagnosticError.inconclusiveObservation
     }
@@ -249,7 +263,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     else { throw CancellationError() }
   }
 
-  private nonisolated static func containsCenter(_ display: InventoryRect, of window: InventoryRect)
+  nonisolated static func containsCenter(_ display: InventoryRect, of window: InventoryRect)
     -> Bool
   {
     let centerX = window.x + window.width / 2
@@ -2223,6 +2237,42 @@ actor DaemonHandler: WebSocketRequestHandler {
     return retained
   }
 
+  struct ParkingProbeCandidate: Sendable {
+    var window: NormalizedWindow
+    var currentFrame: InventoryRect
+    var restoreFrame: InventoryRect
+    var wasParked: Bool
+  }
+
+  func parkingProbeCandidates(
+    for displayID: String, lifetimes: Set<WindowLifetime>, state: WMWorkspace.WorkspaceState,
+    inventory: InventorySnapshot, preferredWindowID: String? = nil
+  ) -> [ParkingProbeCandidate] {
+    let display = DisplayTopologySnapshot(displays: inventory.displays).axFrames[displayID]
+    return lifetimes.compactMap { lifetime in
+      guard let workspace = state.workspaceName(containing: lifetime.windowID),
+        state[workspace: workspace]?.displayID == displayID,
+        state[workspace: workspace]?.visible == false,
+        let window = parkingProbe(for: lifetime, inventory: inventory),
+        let currentFrame = window.frame
+      else { return nil }
+      let parkedRestore = state.parkedWindowFrames[window.id]?.inventoryRect
+      guard
+        let restoreFrame = parkedRestore
+          ?? display.flatMap({ Self.containsCenter($0, of: currentFrame) ? currentFrame : nil })
+      else { return nil }
+      return ParkingProbeCandidate(
+        window: window, currentFrame: currentFrame, restoreFrame: restoreFrame,
+        wasParked: parkedRestore != nil)
+    }.sorted {
+      if ($0.window.id == preferredWindowID) != ($1.window.id == preferredWindowID) {
+        return $0.window.id == preferredWindowID
+      }
+      if $0.wasParked != $1.wasParked { return $0.wasParked }
+      return $0.window.id < $1.window.id
+    }
+  }
+
   private func focusWorkspaceWindow(
     _ state: WMWorkspace.WorkspaceState,
     named name: String,
@@ -2419,6 +2469,7 @@ actor DaemonHandler: WebSocketRequestHandler {
 
   private func scheduleParking() {
     guard parkingTask == nil else { return }
+    parkingRetryRequested = false
     parkingTaskGeneration &+= 1
     let generation = parkingTaskGeneration
     parkingTask = Task { [weak self] in
@@ -2428,7 +2479,10 @@ actor DaemonHandler: WebSocketRequestHandler {
 
   private func runParking(generation: UInt64) async {
     defer {
-      if parkingTaskGeneration == generation { parkingTask = nil }
+      if parkingTaskGeneration == generation {
+        parkingTask = nil
+        if parkingRetryRequested { scheduleParking() }
+      }
     }
     do {
       let inventory = try await state.refresh().snapshot.inventory
@@ -2450,22 +2504,29 @@ actor DaemonHandler: WebSocketRequestHandler {
         }
       ).filter { parkingDiagnoses[$0] == nil }
       guard let displayID = missingDisplayIDs.sorted().first else { return }
-      guard
-        let lifetime = remaining.sorted(by: { $0.windowID < $1.windowID }).first(where: {
-          guard let workspace = committed.workspaceName(containing: $0.windowID) else {
-            return false
-          }
-          return committed[workspace: workspace]?.displayID == displayID
-        }),
-        let probe = parkingProbe(for: lifetime, inventory: inventory), let original = probe.frame,
-        let workspace = committed.workspaceName(containing: probe.id),
-        committed[workspace: workspace]?.visible == false
-      else { return }
-      parkingProbe = (probe, original, generation)
-      defer { if parkingProbe?.generation == generation { parkingProbe = nil } }
-      try await resolveParkingDiagnosis(
-        inventory, displayID: displayID, probe: probe, original: original, generation: generation)
-      parkingProbe = nil
+      let candidates = parkingProbeCandidates(
+        for: displayID, lifetimes: remaining, state: committed, inventory: inventory,
+        preferredWindowID: parkingProbePriority[displayID])
+      var lastProbeError: Error?
+      for candidate in candidates {
+        parkingProbe = (candidate.window, candidate.currentFrame, generation)
+        do {
+          try await resolveParkingDiagnosis(
+            inventory, displayID: displayID, probe: candidate.window,
+            currentFrame: candidate.currentFrame, restoreFrame: candidate.restoreFrame,
+            generation: generation)
+          parkingProbe = nil
+          lastProbeError = nil
+          break
+        } catch {
+          parkingProbe = nil
+          if error is CancellationError { throw error }
+          lastProbeError = error
+        }
+      }
+      guard parkingDiagnoses[displayID] != nil else {
+        throw lastProbeError ?? ParkingDiagnosticError.noProbeWindow
+      }
       guard generation == parkingTaskGeneration, !Task.isCancelled else { return }
       let refreshed = try await state.refresh().snapshot.inventory
       let authoritative = await workspaces.snapshot()
@@ -2474,6 +2535,7 @@ actor DaemonHandler: WebSocketRequestHandler {
       pendingParking = authoritativeHidden
       try await parkAuthoritativeHiddenWindows(
         authoritativeHidden, state: authoritative, inventory: refreshed, generation: generation)
+      if parkingDiagnoses[displayID] != nil { parkingProbePriority[displayID] = nil }
     } catch is CancellationError {
     } catch {
       internalErrorReporter?(
@@ -2930,14 +2992,16 @@ actor DaemonHandler: WebSocketRequestHandler {
         windowFrame: original, diagnosis: try requireParkingDiagnosis(displayID: displayID))
     else {
       throw WindowGeometryFailure(
-        code: .geometryVerificationFailed, message: "cannot plan committed parking for \(id)")
+        code: .geometryVerificationFailed,
+        message: "no topology-safe parking corner for \(id) on its assigned display")
     }
     let floating = state[workspace: workspaceName]?.floatingWindowIDs.contains(id) == true
     let observed = try await park(window: window, frame: plan.targetFrame, floating: floating)
     guard plan.accepts(observed) else {
       try await diagnostics.invalidate(plan.provenance)
       parkingDiagnoses[displayID] = nil
-      scheduleParking()
+      parkingProbePriority[displayID] = id
+      parkingRetryRequested = true
       return
     }
   }

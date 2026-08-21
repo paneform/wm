@@ -8,6 +8,7 @@ public enum ParkingCorner: String, CaseIterable, Codable, Sendable {
 public struct WindowParkingPlan: Sendable {
   public let corner: ParkingCorner
   public let displayFrame: InventoryRect
+  public let otherDisplayFrames: [InventoryRect]
   public let targetFrame: InventoryRect
   public let limits: ParkingVisibility
   public let provenance: DiagnosticProvenance
@@ -17,39 +18,37 @@ public struct WindowParkingPlan: Sendable {
     diagnosis: ResolvedDiagnostic<ParkingLimits>
   ) {
     guard
-      let corner = Self.availableCorners(
-        on: displayFrame, avoiding: otherDisplayFrames, window: windowFrame
+      let plan = Self.alternatives(
+        displayFrame: displayFrame, otherDisplayFrames: otherDisplayFrames,
+        windowFrame: windowFrame, diagnosis: diagnosis
       ).first
     else { return nil }
-    guard let limits = diagnosis.value.corners[corner] else { return nil }
-    self.corner = corner
-    self.displayFrame = displayFrame
-    self.limits = limits
-    provenance = diagnosis.provenance
-    targetFrame = Self.target(
-      for: corner, display: displayFrame, window: windowFrame, limits: limits)
+    self = plan
   }
 
   public static func alternatives(
     displayFrame: InventoryRect, otherDisplayFrames: [InventoryRect], windowFrame: InventoryRect,
     diagnosis: ResolvedDiagnostic<ParkingLimits>
   ) -> [Self] {
-    availableCorners(on: displayFrame, avoiding: otherDisplayFrames, window: windowFrame).compactMap
-    {
-      guard let limits = diagnosis.value.corners[$0] else { return nil }
+    ParkingCorner.allCases.compactMap { corner in
+      guard let limits = diagnosis.value.corners[corner] else { return nil }
+      let targetFrame = target(
+        for: corner, display: displayFrame, window: windowFrame, limits: limits)
+      guard !otherDisplayFrames.contains(where: { $0.intersects(targetFrame) }) else { return nil }
       return Self(
-        corner: $0, displayFrame: displayFrame,
-        targetFrame: target(for: $0, display: displayFrame, window: windowFrame, limits: limits),
+        corner: corner, displayFrame: displayFrame, otherDisplayFrames: otherDisplayFrames,
+        targetFrame: targetFrame,
         limits: limits, provenance: diagnosis.provenance)
     }
   }
 
   private init(
-    corner: ParkingCorner, displayFrame: InventoryRect, targetFrame: InventoryRect,
-    limits: ParkingVisibility, provenance: DiagnosticProvenance
+    corner: ParkingCorner, displayFrame: InventoryRect, otherDisplayFrames: [InventoryRect],
+    targetFrame: InventoryRect, limits: ParkingVisibility, provenance: DiagnosticProvenance
   ) {
     self.corner = corner
     self.displayFrame = displayFrame
+    self.otherDisplayFrames = otherDisplayFrames
     self.targetFrame = targetFrame
     self.limits = limits
     self.provenance = provenance
@@ -57,7 +56,8 @@ public struct WindowParkingPlan: Sendable {
 
   public func accepts(_ observed: InventoryRect, tolerance: Double = 1) -> Bool {
     guard abs(observed.width - targetFrame.width) <= tolerance,
-      abs(observed.height - targetFrame.height) <= tolerance
+      abs(observed.height - targetFrame.height) <= tolerance,
+      !otherDisplayFrames.contains(where: { $0.intersects(observed) })
     else { return false }
     switch corner {
     case .bottomLeft:
@@ -76,19 +76,55 @@ public struct WindowParkingPlan: Sendable {
   }
 
   public static func availableCorners(
-    on display: InventoryRect, avoiding others: [InventoryRect], window: InventoryRect
+    on display: InventoryRect, avoiding others: [InventoryRect], window: InventoryRect,
+    currentFrame: InventoryRect? = nil
   ) -> [ParkingCorner] {
     ParkingCorner.allCases.filter { corner in
-      !others.contains {
-        $0.intersects(clampedFrame(for: corner, display: display, window: window))
-      }
+      let anchor = diagnosticStart(
+        for: corner, display: display, window: window, currentFrame: currentFrame,
+        avoiding: others)
+      let endpoint = offscreenEndpoint(for: corner, display: display, window: window)
+      return isTopologySafe(sweptRegion(from: anchor, to: endpoint), avoiding: others)
     }
   }
 
-  private static func clampedFrame(
-    for corner: ParkingCorner, display: InventoryRect, window: InventoryRect
+  public static func diagnosticStart(
+    for corner: ParkingCorner, display: InventoryRect, window: InventoryRect,
+    currentFrame: InventoryRect?, avoiding others: [InventoryRect]
   ) -> InventoryRect {
-    target(for: corner, display: display, window: window, limits: .init(horizontal: 1, vertical: 1))
+    let anchor = visibleAnchor(for: corner, display: display, window: window)
+    guard let currentFrame,
+      abs(currentFrame.width - window.width) <= 1,
+      abs(currentFrame.height - window.height) <= 1,
+      isTopologySafe(currentFrame, avoiding: others)
+    else { return anchor }
+    let endpoint = offscreenEndpoint(for: corner, display: display, window: window)
+    var result = anchor
+    if isAxisSeed(currentFrame.x, from: anchor.x, to: endpoint.x) { result.x = currentFrame.x }
+    if isAxisSeed(currentFrame.y, from: anchor.y, to: endpoint.y) { result.y = currentFrame.y }
+    return isTopologySafe(result, avoiding: others) ? result : anchor
+  }
+
+  public static func isTopologySafe(
+    _ frame: InventoryRect, avoiding others: [InventoryRect]
+  ) -> Bool {
+    !others.contains { $0.intersects(frame) }
+  }
+
+  public static func isAxisSeed(_ coordinate: Double, from anchor: Double, to endpoint: Double)
+    -> Bool
+  {
+    let range = min(anchor, endpoint)...max(anchor, endpoint)
+    return range.contains(coordinate)
+  }
+
+  private static func sweptRegion(from start: InventoryRect, to endpoint: InventoryRect)
+    -> InventoryRect
+  {
+    .init(
+      x: min(start.x, endpoint.x), y: min(start.y, endpoint.y),
+      width: abs(endpoint.x - start.x) + start.width,
+      height: abs(endpoint.y - start.y) + start.height)
   }
 
   public static func target(

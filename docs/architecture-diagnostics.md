@@ -68,6 +68,43 @@ acceptance compares only the searched coordinate; an orthogonal clamp is expecte
 does not reject an otherwise retained searched coordinate. A known rejected bound avoids a redundant
 adjacent rejection request.
 
+An available parking plan has exactly one visibility exception: the assigned display may retain the
+diagnosed unavoidable horizontal and vertical sliver. The plan's actual fixed-size target must have zero
+area of intersection with every other attached display; touching a display edge is not intersection.
+This is evaluated per window because its dimensions and the diagnosed corner limits determine the final
+rectangle. Consequently, a partially aligned neighbor can block one corner while leaving another valid:
+for example, a display extending far enough below its right-hand neighbor may use its bottom-right corner
+when the diagnosed target clears that neighbor, but not when even a one-point strip still overlaps it.
+Observed placement is checked against both the assigned-display limits and all neighboring display
+frames. A clamp into a neighbor invalidates the consumed diagnostic provenance.
+
+Diagnostics prefer an already parked hidden managed window when its workspace retains a visible restore
+frame. Display assignment comes from authoritative workspace state, not the probe's current center. The
+current fixed-size frame and the restore frame remain distinct: each current coordinate may seed its axis
+when it is on the selected corner's anchor-to-endpoint interval and the resulting frame is topology-safe.
+An unusable coordinate falls back to the visible corner anchor. A hidden probe returns to its retained
+current frame before publication and is then included in the full authoritative parking audit; a probe
+whose workspace became visible returns to its saved visible restore frame.
+
+The zero-visible endpoint request produces independent X and Y evidence. An axis retained exactly at its
+endpoint is complete with zero visibility. A clamped axis rounds fractional observed evidence toward the
+visible side, combines it with any closer retained parked seed, and binary-searches only that axis while
+holding the other at a known safe retained coordinate. Every request remains position-only, preserves the
+fixed dimensions, and is rejected if its requested or observed frame intersects another display. A clamp
+on one axis never causes the other axis to be classified as clamped.
+
+Before mutating a probe, diagnostics reject a corner whose fixed-size swept region from its usable seeded
+start (or visible anchor fallback) to the zero-visible endpoint intersects another display. Individual
+corner failures continue to other topology-safe corners, and candidate failures continue through every
+hidden managed position-capable window, so deterministic ordering cannot starve calibration. A display
+with no safely diagnosable corner remains pending and emits a bounded deferred diagnostic; it is never
+parked on another monitor.
+
+If another hidden window clamps outside a published limit, invalidation records that concrete window as
+the next preferred probe and reschedules only after the current audit exits. This monotonically widens a
+display fact to the strictest observed application constraint instead of repeatedly selecting an easier
+parked probe.
+
 Each display has an independent durable fact. Pending windows trigger calibration only for their owning
 display, so evidence from one display is never treated as complete for another.
 
