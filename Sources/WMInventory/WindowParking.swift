@@ -9,19 +9,18 @@ public struct WindowParkingPlan: Sendable {
     public let displayFrame: InventoryRect
     public let targetFrame: InventoryRect
 
-    public init?(displayFrame: InventoryRect, otherDisplayFrames: [InventoryRect], windowFrame: InventoryRect, offset: Double = 100) {
+    public init?(displayFrame: InventoryRect, otherDisplayFrames: [InventoryRect], windowFrame: InventoryRect) {
         guard let corner = Self.availableCorners(on: displayFrame, avoiding: otherDisplayFrames, window: windowFrame).first else { return nil }
         self.corner = corner
         self.displayFrame = displayFrame
-        targetFrame = Self.target(for: corner, display: displayFrame, window: windowFrame, offset: offset)
+        targetFrame = Self.target(for: corner, display: displayFrame, window: windowFrame)
     }
 
     public static func alternatives(
-        displayFrame: InventoryRect, otherDisplayFrames: [InventoryRect], windowFrame: InventoryRect,
-        offset: Double = 100
+        displayFrame: InventoryRect, otherDisplayFrames: [InventoryRect], windowFrame: InventoryRect
     ) -> [Self] {
         availableCorners(on: displayFrame, avoiding: otherDisplayFrames, window: windowFrame).map {
-            Self(corner: $0, displayFrame: displayFrame, targetFrame: target(for: $0, display: displayFrame, window: windowFrame, offset: offset))
+            Self(corner: $0, displayFrame: displayFrame, targetFrame: target(for: $0, display: displayFrame, window: windowFrame))
         }
     }
 
@@ -36,13 +35,13 @@ public struct WindowParkingPlan: Sendable {
               abs(observed.height - targetFrame.height) <= tolerance else { return false }
         switch corner {
         case .bottomLeft:
-            return observed.maxX <= displayFrame.x + tolerance && observed.y >= displayFrame.maxY - tolerance
+            return observed.maxX <= displayFrame.x + 1 + tolerance && observed.y >= displayFrame.maxY - 52 - tolerance
         case .bottomRight:
-            return observed.x >= displayFrame.maxX - tolerance && observed.y >= displayFrame.maxY - tolerance
+            return observed.x >= displayFrame.maxX - 1 - tolerance && observed.y >= displayFrame.maxY - 52 - tolerance
         case .topLeft:
-            return observed.maxX <= displayFrame.x + tolerance && observed.maxY <= displayFrame.y + tolerance
+            return observed.maxX <= displayFrame.x + 1 + tolerance && observed.maxY <= displayFrame.y + 52 + tolerance
         case .topRight:
-            return observed.x >= displayFrame.maxX - tolerance && observed.maxY <= displayFrame.y + tolerance
+            return observed.x >= displayFrame.maxX - 1 - tolerance && observed.maxY <= displayFrame.y + 52 + tolerance
         }
     }
 
@@ -53,22 +52,17 @@ public struct WindowParkingPlan: Sendable {
     }
 
     private static func clampedFrame(for corner: ParkingCorner, display: InventoryRect, window: InventoryRect) -> InventoryRect {
-        switch corner {
-        case .bottomLeft: .init(x: display.x - window.width, y: display.maxY, width: window.width, height: window.height)
-        case .bottomRight: .init(x: display.maxX, y: display.maxY, width: window.width, height: window.height)
-        case .topLeft: .init(x: display.x - window.width, y: display.y - window.height, width: window.width, height: window.height)
-        case .topRight: .init(x: display.maxX, y: display.y - window.height, width: window.width, height: window.height)
-        }
+        target(for: corner, display: display, window: window)
     }
 
-    private static func target(for corner: ParkingCorner, display: InventoryRect, window: InventoryRect, offset: Double) -> InventoryRect {
+    private static func target(for corner: ParkingCorner, display: InventoryRect, window: InventoryRect) -> InventoryRect {
         let x = switch corner {
-        case .bottomLeft, .topLeft: display.x - window.width - offset
-        case .bottomRight, .topRight: display.maxX + offset
+        case .bottomLeft, .topLeft: display.x - window.width + 1
+        case .bottomRight, .topRight: display.maxX - 1
         }
         let y = switch corner {
-        case .topLeft, .topRight: display.y - window.height - offset
-        case .bottomLeft, .bottomRight: display.maxY + offset
+        case .topLeft, .topRight: display.y - window.height + 52
+        case .bottomLeft, .bottomRight: display.maxY - 52
         }
         return InventoryRect(x: x, y: y, width: window.width, height: window.height)
     }

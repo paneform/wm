@@ -6,7 +6,7 @@ final class WindowParkingTests: XCTestCase {
         let plan = try XCTUnwrap(WindowParkingPlan(displayFrame: display, otherDisplayFrames: [], windowFrame: window))
 
         XCTAssertEqual(plan.corner, .bottomLeft)
-        XCTAssertEqual(plan.targetFrame, .init(x: -900, y: 1180, width: 800, height: 600))
+        XCTAssertEqual(plan.targetFrame, .init(x: -799, y: 1028, width: 800, height: 600))
     }
 
     func testRejectsCoveredCornersInPriorityOrder() throws {
@@ -36,10 +36,10 @@ final class WindowParkingTests: XCTestCase {
         let plan = try XCTUnwrap(WindowParkingPlan(displayFrame: display, otherDisplayFrames: [], windowFrame: window))
 
         XCTAssertTrue(plan.accepts(plan.targetFrame))
-        XCTAssertTrue(plan.accepts(.init(x: -760, y: 1040, width: 800, height: 600)))
+        XCTAssertTrue(plan.accepts(.init(x: -759, y: 988, width: 800, height: 600)))
         XCTAssertFalse(plan.accepts(.init(x: 0, y: 400, width: 800, height: 600)))
-        XCTAssertFalse(plan.accepts(.init(x: 0, y: 1030, width: 700, height: 600)))
-        XCTAssertFalse(plan.accepts(.init(x: -400, y: 1180, width: 800, height: 600)))
+        XCTAssertFalse(plan.accepts(.init(x: 0, y: 1028, width: 700, height: 600)))
+        XCTAssertFalse(plan.accepts(.init(x: -400, y: 1028, width: 800, height: 600)))
     }
 
     func testDetectsWhetherRestoreFrameIntersectsADisplay() {
