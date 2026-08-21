@@ -40,7 +40,8 @@ public protocol WindowGeometryAdapter: Sendable {
   func reconcile(windows: [NormalizedWindow]) async
   func evict(lifetimes: Set<WindowLifetime>) async
   func resolve(_ window: NormalizedWindow) async throws -> WindowGeometryHandle
-  func validateIdentity(of handle: WindowGeometryHandle, expected window: NormalizedWindow) async throws
+  func validateIdentity(of handle: WindowGeometryHandle, expected window: NormalizedWindow)
+    async throws
   func validateControllability(of handle: WindowGeometryHandle) async throws
   func readFrame(of handle: WindowGeometryHandle) async throws -> InventoryRect
   func write(
@@ -63,7 +64,9 @@ public protocol WindowGeometryAdapter: Sendable {
 extension WindowGeometryAdapter {
   public func reconcile(windows: [NormalizedWindow]) async {}
   public func evict(lifetimes: Set<WindowLifetime>) async {}
-  public func validateIdentity(of handle: WindowGeometryHandle, expected window: NormalizedWindow) async throws {}
+  public func validateIdentity(of handle: WindowGeometryHandle, expected window: NormalizedWindow)
+    async throws
+  {}
   public func focus(_ handle: WindowGeometryHandle) async throws {
     throw WindowGeometryAdapterError.notControllable
   }
@@ -165,6 +168,8 @@ public protocol WindowGeometryEffects: Sendable {
   func fit(window: NormalizedWindow, within frame: InventoryRect) async throws -> InventoryRect
   func park(window: NormalizedWindow, frame: InventoryRect) async throws -> InventoryRect
   func setPosition(window: NormalizedWindow, frame: InventoryRect) async throws -> InventoryRect
+  func setPositionAllowingClamping(window: NormalizedWindow, frame: InventoryRect) async throws
+    -> InventoryRect
   func probeCapabilities(window: NormalizedWindow) async throws -> GeometryCapabilityProbeResult
 }
 
@@ -376,7 +381,21 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
     }
   }
 
-  public func setPosition(window: NormalizedWindow, frame: InventoryRect) async throws -> InventoryRect {
+  public func setPosition(
+    window: NormalizedWindow, frame: InventoryRect
+  ) async throws -> InventoryRect {
+    try await setPosition(window: window, frame: frame, allowClamping: false)
+  }
+
+  public func setPositionAllowingClamping(
+    window: NormalizedWindow, frame: InventoryRect
+  ) async throws -> InventoryRect {
+    try await setPosition(window: window, frame: frame, allowClamping: true)
+  }
+
+  private func setPosition(
+    window: NormalizedWindow, frame: InventoryRect, allowClamping: Bool
+  ) async throws -> InventoryRect {
     try requireMovable(window)
     guard WindowCapabilityPolicy.effective(window.geometryCapabilities.position) != .fixed else {
       throw WindowGeometryFailure(
@@ -390,7 +409,9 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
     do {
       try await adapter.write(.position, frame: requested, to: handle)
       let observed = try await settle(handle, requested: requested, tolerance: 1).frame
-      guard abs(observed.x - requested.x) <= 1, abs(observed.y - requested.y) <= 1,
+      guard
+        allowClamping
+          || (abs(observed.x - requested.x) <= 1 && abs(observed.y - requested.y) <= 1),
         abs(observed.width - original.width) <= 1, abs(observed.height - original.height) <= 1
       else {
         throw WindowGeometryFailure(
@@ -465,11 +486,16 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
           try await adapter.write(component, frame: requested, to: handle)
           changedComponents.insert(component)
           try await adapter.validateIdentity(of: handle, expected: window)
-          let observed = try await adapter.settle(handle, requested: requested, tolerance: 0.25).frame
+          let observed = try await adapter.settle(handle, requested: requested, tolerance: 0.25)
+            .frame
           let changed = componentChanged(component, original, observed)
           let matched = componentMatches(component, requested, observed)
-          let crossChanged = componentChanged(component == .position ? .size : .position, original, observed)
-          attempts.append(.init(dimension: dimension, requestedFrame: requested.protocolFrame, observedFrame: observed.protocolFrame, changed: changed, matchedRequest: matched))
+          let crossChanged = componentChanged(
+            component == .position ? .size : .position, original, observed)
+          attempts.append(
+            .init(
+              dimension: dimension, requestedFrame: requested.protocolFrame,
+              observedFrame: observed.protocolFrame, changed: changed, matchedRequest: matched))
           if component == .position {
             positionSupported = positionSupported || changed && matched && !crossChanged
             positionUncertain = positionUncertain || crossChanged || changed && !matched
@@ -495,7 +521,8 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
           throw CancellationError()
         } catch {
           let message = String(describing: error)
-          attempts.append(.init(dimension: dimension, requestedFrame: requested.protocolFrame, error: message))
+          attempts.append(
+            .init(dimension: dimension, requestedFrame: requested.protocolFrame, error: message))
           errors.append("\(dimension.rawValue): \(message)")
           if component == .position {
             positionUncertain = true
@@ -545,15 +572,20 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
   private func probeCapability(
     supported: Bool, uncertain: Bool, fixed: Bool = false
   ) -> GeometryCapability {
-    let state: GeometryCapabilityState = fixed ? .fixed : supported && !uncertain ? .supported : .inconclusive
+    let state: GeometryCapabilityState =
+      fixed ? .fixed : supported && !uncertain ? .supported : .inconclusive
     return .init(confirmed: state, evidence: [.init(source: .behavioralProbe, state: state)])
   }
 
-  private func componentChanged(_ component: WindowGeometryComponent, _ lhs: InventoryRect, _ rhs: InventoryRect) -> Bool {
+  private func componentChanged(
+    _ component: WindowGeometryComponent, _ lhs: InventoryRect, _ rhs: InventoryRect
+  ) -> Bool {
     !componentMatches(component, lhs, rhs)
   }
 
-  private func componentMatches(_ component: WindowGeometryComponent, _ lhs: InventoryRect, _ rhs: InventoryRect) -> Bool {
+  private func componentMatches(
+    _ component: WindowGeometryComponent, _ lhs: InventoryRect, _ rhs: InventoryRect
+  ) -> Bool {
     switch component {
     case .position: abs(lhs.x - rhs.x) <= 0.25 && abs(lhs.y - rhs.y) <= 0.25
     case .size: abs(lhs.width - rhs.width) <= 0.25 && abs(lhs.height - rhs.height) <= 0.25
@@ -577,7 +609,8 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
     _ components: Set<WindowGeometryComponent>, original: InventoryRect,
     handle: WindowGeometryHandle, window: NormalizedWindow
   ) async throws {
-    for component in [WindowGeometryComponent.position, .size] where components.contains(component) {
+    for component in [WindowGeometryComponent.position, .size] where components.contains(component)
+    {
       try await restore(component, original: original, handle: handle, window: window)
     }
   }
@@ -586,7 +619,8 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
     _ components: Set<WindowGeometryComponent>, original: InventoryRect,
     handle: WindowGeometryHandle, window: NormalizedWindow
   ) async {
-    for component in [WindowGeometryComponent.position, .size] where components.contains(component) {
+    for component in [WindowGeometryComponent.position, .size] where components.contains(component)
+    {
       do {
         try await restore(component, original: original, handle: handle, window: window)
       } catch {}

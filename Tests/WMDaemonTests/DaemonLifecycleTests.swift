@@ -202,6 +202,11 @@ private actor DirectionalGeometry: WindowGeometryEffects {
     frames[window.id] = positioned
     return positioned
   }
+  func setPositionAllowingClamping(window: NormalizedWindow, frame: InventoryRect) async throws
+    -> InventoryRect
+  {
+    try await setPosition(window: window, frame: frame)
+  }
   func probeCapabilities(window: NormalizedWindow) async throws -> GeometryCapabilityProbeResult {
     let frame = (frames[window.id] ?? window.frame!).protocolFrame
     return .init(
@@ -254,6 +259,141 @@ private func response(_ text: String) throws -> Response {
       == .init(
         maximumAttempts: 5, mode: .optimisticIdealFirst
       ))
+}
+
+@Test func pendingParkingSurvivesRawInventoryRefresh() throws {
+  let window = NormalizedWindow(
+    id: "window:1", pid: 1, appName: "Test",
+    frame: .init(x: 0, y: 0, width: 100, height: 100), classification: .normal,
+    management: .unmanaged, rejectionReasons: [], joinConfidence: .exact, joinSignals: [],
+    health: .healthy, healthIssues: [])
+  var retained = window
+  retained.management = .managed
+  let workspace = WMWorkspace.WorkspaceState(workspaces: [
+    .init(
+      name: "hidden", origin: .runtime, displayID: "display:1", visible: false,
+      windowIDs: [window.id])
+  ])
+  let lifetime = WindowLifetime(windowID: window.id, pid: window.pid)
+
+  let pending = DaemonHandler.reconciledPendingParking(
+    [lifetime], state: workspace,
+    inventory: InventorySnapshot(
+      timestamp: .init(), durationMilliseconds: 0, displays: [], rawAXWindows: [], rawCGWindows: [],
+      windows: [window], rejectedAXWindows: [], joinDecisions: [], sourceHealth: [], appScans: []),
+    retainedWindows: [window.id: retained])
+
+  #expect(pending == [lifetime])
+}
+
+@Test func committedParkingAuditUsesRetainedManagementAuthority() {
+  var raw = inventory(["window:1"])
+  raw.windows[0].management = .unmanaged
+  var retained = raw.windows[0]
+  retained.management = .managed
+  var state = WorkspaceState()
+  _ = try? state.focusWorkspace(named: "hidden", displayID: "display:1")
+  _ = try? state.adoptUnassignedWindows([retained.id], displayID: "display:1")
+  _ = try? state.focusWorkspace(named: "visible", displayID: "display:1")
+
+  #expect(
+    WorkspaceIntentAudit(
+      state: state, inventory: raw, retainedWindows: [retained.id: retained]
+    ).park == [retained.id])
+
+  retained.pid += 1
+  #expect(
+    WorkspaceIntentAudit(
+      state: state, inventory: raw, retainedWindows: [retained.id: retained]
+    ).park.isEmpty)
+  retained.pid = raw.windows[0].pid
+  retained.management = .unmanaged
+  #expect(
+    WorkspaceIntentAudit(
+      state: state, inventory: raw, retainedWindows: [retained.id: retained]
+    ).park.isEmpty)
+}
+
+@Test func parkingProbeUsesRawObservationAndRetainedManagementAuthority() async throws {
+  let (handler, _) = try daemonHandler()
+  var raw = inventory(["window:1"])
+  raw.windows[0].management = .unmanaged
+  raw.windows[0].frame = .init(x: 10, y: 20, width: 300, height: 200)
+  let lifetime = WindowLifetime(windowID: raw.windows[0].id, pid: raw.windows[0].pid)
+  var retained = raw.windows[0]
+  retained.management = .managed
+  retained.frame = .init(x: 1, y: 2, width: 3, height: 4)
+  try await handler.reconcileObservedWindows(lifecycleInventory(retained), displayID: "display:1")
+
+  let probe = await handler.parkingProbe(for: lifetime, inventory: raw)
+
+  #expect(probe?.management == .managed)
+  #expect(probe?.frame == raw.windows[0].frame)
+
+  var wrongPID = raw
+  wrongPID.windows[0].pid += 1
+  #expect(await handler.parkingProbe(for: lifetime, inventory: wrongPID) == nil)
+
+  let (unmanagedHandler, _) = try daemonHandler()
+  #expect(await unmanagedHandler.parkingProbe(for: lifetime, inventory: raw) == nil)
+}
+
+@Test func inactiveGeometryIsNotAuthoritativeExternalFocus() {
+  var inactive = recoveryWindow(id: "inactive", bundleID: "test", displayID: "display:1")
+  inactive.pid = 10
+  inactive.focused = true
+
+  #expect(
+    !DaemonHandler.isAuthoritativeExternalFocus(
+      windowID: inactive.id, frontmostPID: nil, windows: [inactive]))
+  #expect(
+    !DaemonHandler.isAuthoritativeExternalFocus(
+      windowID: inactive.id, frontmostPID: 20, windows: [inactive]))
+  #expect(
+    DaemonHandler.isAuthoritativeExternalFocus(
+      windowID: inactive.id, frontmostPID: inactive.pid, windows: [inactive]))
+}
+
+@Test func authoritativeParkingAuditIncludesEveryHiddenWorkspace() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let controller = try WorkspaceController(
+    buildVersion: "test", stateURL: directory.appendingPathComponent("state.json"))
+  let state = WorkspaceState(
+    workspaces: [
+      .init(
+        name: "visible", origin: .configured, displayID: "display:1", visible: true,
+        focused: true, windowIDs: ["visible"], bsp: .init(root: .leaf(windowID: "visible"))),
+      .init(
+        name: "hidden-a", origin: .configured, displayID: "display:1",
+        windowIDs: ["hidden-a"], bsp: .init(root: .leaf(windowID: "hidden-a"))),
+      .init(
+        name: "hidden-b", origin: .configured, displayID: "display:2",
+        windowIDs: ["hidden-b"], bsp: .init(root: .leaf(windowID: "hidden-b"))),
+    ], focusedWorkspaceName: "visible",
+    displays: ["display:1": .init(visibleWorkspaceName: "visible")])
+  try await controller.commit(state)
+  let handler = DaemonHandler(
+    state: .init(
+      provider: SystemInventoryProvider(
+        scanner: .init(
+          sources: .init(
+            displays: StubDisplays(), accessibility: StubAX(), coreGraphics: StubCG())))),
+    workspaces: controller)
+  let windows = ["visible", "hidden-a", "hidden-b"].map {
+    recoveryWindow(id: $0, bundleID: "test", displayID: nil)
+  }
+  try await handler.reconcileObservedWindows(lifecycleInventory(windows), displayID: "display:1")
+
+  let audit = await handler.authoritativeParkingLifetimes(
+    state: state, inventory: lifecycleInventory(windows))
+
+  #expect(
+    audit == [
+      WindowLifetime(windowID: "hidden-a", pid: 1),
+      WindowLifetime(windowID: "hidden-b", pid: 1),
+    ])
 }
 
 @Test func debugEngineSwitchIsInspectableAndMutable() async throws {
@@ -337,16 +477,29 @@ private func response(_ text: String) throws -> Response {
 @Test func geometryProbeIsBlockedWhilePaused() async throws {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-  let scanner = InventoryScanner(sources: .init(displays: StubDisplays(), accessibility: WindowAX(titles: ["One"]), coreGraphics: WindowCG(titles: ["One"])))
+  let scanner = InventoryScanner(
+    sources: .init(
+      displays: StubDisplays(), accessibility: WindowAX(titles: ["One"]),
+      coreGraphics: WindowCG(titles: ["One"])))
   let state = DaemonHandler.State(provider: SystemInventoryProvider(scanner: scanner))
-  let handler = DaemonHandler(state: state, workspaces: try WorkspaceController(buildVersion: "test", stateURL: directory.appendingPathComponent("state.json")))
+  let handler = DaemonHandler(
+    state: state,
+    workspaces: try WorkspaceController(
+      buildVersion: "test", stateURL: directory.appendingPathComponent("state.json")))
   let snapshot = try await state.refresh()
   let id = try #require(snapshot.snapshot.inventory.windows.first?.id)
   let client = UUID()
-  let paused = await handler.handle(text: try clientMessage(.request(.init(requestId: "pause", method: .daemonPause))), clientID: client)
+  let paused = await handler.handle(
+    text: try clientMessage(.request(.init(requestId: "pause", method: .daemonPause))),
+    clientID: client)
   #expect(try response(paused[0]).result == .object(["paused": .bool(true)]))
   #expect(await handler.isPaused())
-  let replies = await handler.handle(text: try clientMessage(.request(.init(requestId: "probe", method: .geometryCapabilityProbe, params: ["window_id": .string(id)]))), clientID: client)
+  let replies = await handler.handle(
+    text: try clientMessage(
+      .request(
+        .init(
+          requestId: "probe", method: .geometryCapabilityProbe, params: ["window_id": .string(id)]))
+    ), clientID: client)
   let probeResponse = try response(replies[0])
   #expect(probeResponse.error?.code == .paused)
 }
@@ -355,9 +508,10 @@ private func response(_ text: String) throws -> Response {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
   defer { try? FileManager.default.removeItem(at: directory) }
-  let scanner = InventoryScanner(sources: .init(
-    displays: StubDisplays(), accessibility: WindowAX(titles: ["One"]),
-    coreGraphics: WindowCG(titles: ["One"])))
+  let scanner = InventoryScanner(
+    sources: .init(
+      displays: StubDisplays(), accessibility: WindowAX(titles: ["One"]),
+      coreGraphics: WindowCG(titles: ["One"])))
   let state = DaemonHandler.State(provider: SystemInventoryProvider(scanner: scanner))
   let workspaces = try WorkspaceController(
     buildVersion: "test", stateURL: directory.appendingPathComponent("state.json"))
@@ -370,9 +524,11 @@ private func response(_ text: String) throws -> Response {
   try await handler.reconcileObservedWindows(observedInventory, displayID: "display:main")
 
   let replies = await handler.handle(
-    text: try clientMessage(.request(.init(
-      requestId: "probe", method: .geometryCapabilityProbe,
-      params: ["window_id": .string(window.id), "return_mode": .string("completion")]))),
+    text: try clientMessage(
+      .request(
+        .init(
+          requestId: "probe", method: .geometryCapabilityProbe,
+          params: ["window_id": .string(window.id), "return_mode": .string("completion")]))),
     clientID: UUID())
   #expect(try response(replies[0]).error == nil)
   let workspace = try #require(await workspaces.snapshot().workspaces.first)
@@ -388,9 +544,11 @@ private func response(_ text: String) throws -> Response {
   #expect(periodicWorkspace.bsp.root == nil)
 
   let focus = await handler.handle(
-    text: try clientMessage(.request(.init(
-      requestId: "focus", method: .workspaceFocus,
-      params: ["name": .string(periodicWorkspace.name), "return_mode": .string("completion")]))),
+    text: try clientMessage(
+      .request(
+        .init(
+          requestId: "focus", method: .workspaceFocus,
+          params: ["name": .string(periodicWorkspace.name), "return_mode": .string("completion")]))),
     clientID: UUID())
   #expect(try response(focus[0]).error == nil)
   let focusedWorkspace = try #require(await workspaces.snapshot().workspaces.first)
@@ -404,7 +562,8 @@ private func response(_ text: String) throws -> Response {
   var futureInventory = inventory([])
   futureInventory.windows = [future]
   let merged = await profiles.mergingCapabilities(into: futureInventory)
-  #expect(WindowCapabilityPolicy.admission(for: merged.windows[0].geometryCapabilities) == .floating)
+  #expect(
+    WindowCapabilityPolicy.admission(for: merged.windows[0].geometryCapabilities) == .floating)
 }
 
 @Test func geometryPolicyRuntimeUpdatesGlobalAndWorkspaceSettings() async throws {
@@ -760,9 +919,8 @@ private func response(_ text: String) throws -> Response {
   #expect(committed[workspace: "destination"]?.windowIDs == ["window:cg:3", "window:cg:1"])
   let operations = await geometry.operations
   #expect(
-    operations == [
-      .park("window:cg:2"), .set("window:cg:1"), .set("window:cg:3"), .focus("window:cg:1"),
-    ])
+    operations.prefix(3) == [.set("window:cg:1"), .set("window:cg:3"), .focus("window:cg:1")])
+  #expect(!operations.contains(.park("window:cg:1")))
 
   let observed = await handler.handle(
     text: try clientMessage(

@@ -17,6 +17,7 @@ let package = Package(
         .library(name: "WMCLI", targets: ["WMCLI"]),
         .library(name: "WMLifecycle", targets: ["WMLifecycle"]),
         .library(name: "WMPermissions", targets: ["WMPermissions"]),
+        .library(name: "WMDiagnostics", targets: ["WMDiagnostics"]),
         .executable(name: "wm-geometry-fake-verify", targets: ["WMGeometryFakeVerify"]),
         .executable(name: "wm-workspace-layout-verify", targets: ["WMWorkspaceLayoutVerify"]),
     ],
@@ -24,7 +25,7 @@ let package = Package(
         .target(name: "WMProtocol"),
         .target(
             name: "WMInventory",
-            dependencies: ["WMProtocol"]
+            dependencies: ["WMProtocol", "WMDiagnostics"]
         ),
         .target(
             name: "WMWorkspace",
@@ -32,7 +33,7 @@ let package = Package(
         ),
         .target(
             name: "WMPersistence",
-            dependencies: ["WMProtocol", "WMWorkspace", "WMInventory"]
+            dependencies: ["WMProtocol", "WMWorkspace", "WMInventory", "WMDiagnostics"]
         ),
         .target(
             name: "WMCore",
@@ -45,6 +46,7 @@ let package = Package(
             linkerSettings: [.linkedFramework("SystemConfiguration")]
         ),
         .target(name: "WMPermissions"),
+        .target(name: "WMDiagnostics"),
         .target(
             name: "WMWebSocket",
             dependencies: ["WMProtocol", "WMCore"]
@@ -55,7 +57,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "wm",
-            dependencies: ["WMCLI", "WMConfiguration", "WMCore", "WMInventory", "WMLifecycle", "WMPermissions", "WMPersistence", "WMProtocol", "WMWebSocket", "WMWorkspace"]
+            dependencies: ["WMCLI", "WMConfiguration", "WMCore", "WMDiagnostics", "WMInventory", "WMLifecycle", "WMPermissions", "WMPersistence", "WMProtocol", "WMWebSocket", "WMWorkspace"]
         ),
         .executableTarget(
             name: "WMGeometryFakeVerify",
@@ -75,6 +77,7 @@ let package = Package(
         .testTarget(name: "WMCLITests", dependencies: ["WMCLI", "WMConfiguration", "WMProtocol"]),
         .testTarget(name: "WMLifecycleTests", dependencies: ["WMLifecycle"]),
         .testTarget(name: "WMPermissionsTests", dependencies: ["WMPermissions"]),
+        .testTarget(name: "WMDiagnosticsTests", dependencies: ["WMDiagnostics"]),
         .testTarget(name: "WMDaemonTests", dependencies: ["wm", "WMInventory", "WMPersistence", "WMWorkspace"]),
     ]
 )

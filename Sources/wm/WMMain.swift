@@ -4,6 +4,7 @@ import Foundation
 import WMCLI
 import WMConfiguration
 import WMCore
+import WMDiagnostics
 import WMInventory
 import WMLifecycle
 import WMPermissions
@@ -87,7 +88,8 @@ import WMWorkspace
     }
     let handler = DaemonHandler(
       state: state, workspaces: workspaces,
-      geometryProfiles: .init(catalog: profileCatalog, persistence: profileStore)
+      geometryProfiles: .init(catalog: profileCatalog, persistence: profileStore),
+      diagnostics: .init(persistence: DiagnosticStore())
     )
     let configPath = ConfigurationFile.path()
     do {

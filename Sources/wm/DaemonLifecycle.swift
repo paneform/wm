@@ -211,8 +211,16 @@ struct WorkspaceIntentAudit: Equatable {
   var park: Set<String>
   var reconcileVisible: Set<String>
 
-  init(state: WMWorkspace.WorkspaceState, inventory: InventorySnapshot) {
+  init(
+    state: WMWorkspace.WorkspaceState, inventory: InventorySnapshot,
+    retainedWindows: [String: NormalizedWindow]? = nil
+  ) {
     let live = Dictionary(uniqueKeysWithValues: inventory.windows.map { ($0.id, $0) })
+    func isManaged(_ window: NormalizedWindow) -> Bool {
+      guard let retainedWindows else { return window.management == .managed }
+      return retainedWindows[window.id]?.pid == window.pid
+        && retainedWindows[window.id]?.management == .managed
+    }
     restore = [:]
     park = []
     reconcileVisible = []
@@ -220,16 +228,13 @@ struct WorkspaceIntentAudit: Equatable {
       if workspace.visible {
         reconcileVisible.insert(workspace.name)
         for id in workspace.windowIDs where state.parkedWindowFrames[id] != nil {
-          if let window = live[id], window.classification == .normal,
-            window.management == .managed
-          {
+          if let window = live[id], window.classification == .normal, isManaged(window) {
             restore[id] = state.parkedWindowFrames[id]?.inventoryRect
           }
         }
       } else {
         for id in workspace.windowIDs {
-          guard let window = live[id], window.classification == .normal,
-            window.management == .managed
+          guard let window = live[id], window.classification == .normal, isManaged(window)
           else { continue }
           park.insert(id)
         }
@@ -266,10 +271,11 @@ struct StartupIntentAudit {
       do {
         let result = try candidate.reconcileObservedWindows(
           [],
-          floatingWindowIDs: Set(inventory.windows.compactMap {
-            WindowCapabilityPolicy.admission(for: $0.geometryCapabilities) == .floating
-              ? $0.id : nil
-          }),
+          floatingWindowIDs: Set(
+            inventory.windows.compactMap {
+              WindowCapabilityPolicy.admission(for: $0.geometryCapabilities) == .floating
+                ? $0.id : nil
+            }),
           replacements: replacements, defaultDisplayID: displayID)
         candidate = result.workspaceState
       } catch {

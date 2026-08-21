@@ -540,6 +540,18 @@ final class WindowGeometryTests: XCTestCase {
       XCTAssertEqual(failure.code, .geometryVerificationFailed)
     }
   }
+
+  func testPositionOnlyWriteCanReturnClampEvidenceWithoutAllowingSizeDrift() async throws {
+    var positionOnly = window
+    positionOnly.geometryCapabilities = .init(
+      position: .init(confirmed: .supported), size: .init(confirmed: .fixed))
+    let clamping = ProbeGeometryAdapter(frame: initialFrame, behavior: .clamped)
+
+    let observed = try await WindowGeometryService(adapter: clamping).setPositionAllowingClamping(
+      window: positionOnly, frame: .init(x: 50, y: 60, width: 1, height: 1))
+
+    XCTAssertEqual(observed, .init(x: 53, y: 63, width: 400, height: 300))
+  }
 }
 
 private actor ProbeGeometryAdapter: WindowGeometryAdapter {
@@ -593,14 +605,16 @@ private actor ProbeGeometryAdapter: WindowGeometryAdapter {
     case .clamped:
       frame =
         component == .position
-        ? .init(x: requested.x + 3, y: requested.y + 3, width: requested.width, height: requested.height)
+        ? .init(
+          x: requested.x + 3, y: requested.y + 3, width: requested.width, height: requested.height)
         : .init(
           x: requested.x, y: requested.y, width: requested.width + 3,
           height: requested.height + 3)
     case .stale where writes > 1: throw WindowGeometryAdapterError.stale
     case .cancelled: frame = requested
     case .crossComponent:
-      frame = component == .position
+      frame =
+        component == .position
         ? .init(x: original.x, y: original.y, width: original.width + 1, height: original.height)
         : .init(x: original.x + 1, y: original.y, width: original.width, height: original.height)
     default: frame = requested
@@ -616,7 +630,9 @@ private actor ProbeGeometryAdapter: WindowGeometryAdapter {
     if behavior == .stale, writes > 0 { throw WindowGeometryAdapterError.stale }
     frame = requested
   }
-  func settle(_ handle: WindowGeometryHandle, requested: InventoryRect, tolerance: Double) throws -> WindowGeometrySettlement {
+  func settle(_ handle: WindowGeometryHandle, requested: InventoryRect, tolerance: Double) throws
+    -> WindowGeometrySettlement
+  {
     if behavior == .cancelled, writes == 1 { throw CancellationError() }
     return .init(frame: frame, reads: 1)
   }
