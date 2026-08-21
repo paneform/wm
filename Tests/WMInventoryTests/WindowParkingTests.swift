@@ -204,34 +204,6 @@ final class WindowParkingTests: XCTestCase {
       isCenteredOnDisplay(.init(x: -1472, y: 950, width: 1512, height: 950), displays: [display]))
   }
 
-  func testBinarySearchFindsMaximumRetainedProgress() async throws {
-    let result = try await ParkingLimitDiscovery().maximumAcceptedProgress(distance: 600) {
-      $0 <= 548
-    }
-    XCTAssertEqual(result, 548)
-  }
-
-  func testBinarySearchReturnsIdealVisibilityWithoutSearching() async throws {
-    let attempts = AttemptCounter()
-    let result = try await ParkingLimitDiscovery().maximumAcceptedProgress(distance: 600) { value in
-      await attempts.record(value)
-      return true
-    }
-    XCTAssertEqual(result, 600)
-    let values = await attempts.values
-    XCTAssertEqual(values, [0, 600])
-  }
-
-  func testBinarySearchRejectsUnstableBoundary() async {
-    let attempts = AttemptCounter()
-    await XCTAssertThrowsErrorAsync {
-      _ = try await ParkingLimitDiscovery().maximumAcceptedProgress(distance: 100) { value in
-        let count = await attempts.recordAndCount(value)
-        return value <= 90 && !(value == 90 && count > 1)
-      }
-    }
-  }
-
   func testClampSeedExcludesEndpointAndDoesNotReturnToVisibleAnchor() throws {
     let bounds = try ParkingLimitDiscovery().clampedAxisBounds(
       observed: -747, endpoint: -800, direction: -1)
@@ -267,97 +239,248 @@ final class WindowParkingTests: XCTestCase {
     XCTAssertEqual(increasing.acceptedCoordinate, 1867)
   }
 
-  func testClampSeededSearchIsBoundedAndReconfirmsAcceptedCoordinate() async throws {
-    let attempts = AttemptCounter()
-    let result = try await ParkingLimitDiscovery().maximumAcceptedProgress(distance: 52) { value in
-      await attempts.record(value)
-      return value <= 51
+  func testJointSearchTestsAdjacentPointThenBinarySearches() async throws {
+    let discovery = ParkingLimitDiscovery()
+    let endpointObserved = try discovery.boundsIfClamped(
+      observed: -550, endpoint: -600, direction: -1)
+    let bounds = try XCTUnwrap(endpointObserved)
+    XCTAssertEqual(bounds.acceptedCoordinate, -550)
+    XCTAssertEqual(bounds.rejectedCoordinate, -599)
+
+    let log = RequestLog()
+    let resolved = try await ParkingJointDiscovery.search(
+      base: InventoryRect(x: -600, y: 982, width: 600, height: 950), xAxis: bounds, yAxis: nil
+    ) { target in
+      await log.append(target.x)
+      return InventoryRect(
+        x: target.x < -575 ? -550 : target.x, y: target.y,
+        width: target.width, height: target.height)
     }
 
-    XCTAssertEqual(result, 51)
-    let values = await attempts.values
-    XCTAssertEqual(values.last, 51)
-    XCTAssertLessThanOrEqual(values.count, 10)
+    let requests = await log.recordedDoubles
+    XCTAssertEqual(requests.first, -551, "second probe must test one point past the clamp")
+    XCTAssertEqual(resolved.x, -575)
+    XCTAssertNil(resolved.y)
+    XCTAssertEqual(requests.last, -575, "winning combined frame must be re-probed for verification")
   }
 
-  func testExactLiveClampSequenceSearchesAxesIndependentlyAndPersistsSafeCoordinates() async throws
-  {
+  func testJointSearchFindsDeepBoundaryPastInitialClamp() async throws {
+    // X starts at 0 with endpoint -600. Values beyond -593 clamp back to -550, so the true
+    // maximally off-screen retained position is exactly -593 despite the coarse initial clamp.
     let discovery = ParkingLimitDiscovery()
-    let xBounds = try discovery.clampedAxisBounds(
-      observed: -1472, endpoint: -1512, direction: -1)
-    let yBounds = try discovery.clampedAxisBounds(observed: 32, endpoint: 982, direction: 1)
+    let bounds = try discovery.clampedAxisBounds(observed: -550, endpoint: -600, direction: -1)
 
-    let x = try await discovery.furthestRetainedCoordinate(bounds: xBounds) { $0 }
-    let y = try await discovery.furthestRetainedCoordinate(bounds: yBounds) { requested in
-      min(requested, 918)
+    let log = RequestLog()
+    let resolved = try await ParkingJointDiscovery.search(
+      base: InventoryRect(x: -600, y: 982, width: 600, height: 950), xAxis: bounds, yAxis: nil
+    ) { target in
+      await log.append(target.x)
+      return InventoryRect(
+        x: target.x < -593 ? -550 : target.x, y: target.y,
+        width: target.width, height: target.height)
     }
 
-    XCTAssertEqual(x, -1511)
-    XCTAssertEqual(y, 918)
+    XCTAssertEqual(resolved.x, -593)
+    let requests = await log.recordedDoubles
+    XCTAssertEqual(requests.first, -551, "second probe must test one point past the clamp")
+    XCTAssertEqual(requests.last, -593, "winning combined frame must be re-probed for verification")
+  }
+
+  func testExactLiveClampSequenceSearchesAxesIndependentlyAndPersistsSafeCoordinates() async throws {
+    let discovery = ParkingLimitDiscovery()
+    let xBounds = try discovery.clampedAxisBounds(observed: -1472, endpoint: -1512, direction: -1)
+    let yBounds = try discovery.clampedAxisBounds(observed: 32, endpoint: 982, direction: 1)
+
+    let log = RequestLog()
+    let resolved = try await ParkingJointDiscovery.search(
+      base: InventoryRect(x: -1512, y: 982, width: 1512, height: 950),
+      xAxis: xBounds, yAxis: yBounds
+    ) { target in
+      await log.append(target)
+      return InventoryRect(
+        x: target.x, y: min(target.y, 918), width: target.width, height: target.height)
+    }
+
+    let lastRequest = await log.lastFrame
+    XCTAssertEqual(resolved.x, -1511)
+    XCTAssertEqual(resolved.y, 918)
+    XCTAssertEqual(lastRequest?.x, -1511)
+    XCTAssertEqual(lastRequest?.y, 918)
     XCTAssertEqual(
       WindowParkingPlan.visibility(
         for: .bottomLeft, display: .init(x: 0, y: 0, width: 1512, height: 982),
-        accepted: .init(x: x, y: y, width: 1512, height: 950)),
+        accepted: .init(x: resolved.x!, y: resolved.y!, width: 1512, height: 950)),
       .init(horizontal: 1, vertical: 64))
   }
 
-  func testMonotonicAxisSearchHandlesBothDirectionSigns() async throws {
+  func testMonotonicJointSearchHandlesBothDirectionSigns() async throws {
     let discovery = ParkingLimitDiscovery()
-    let decreasing = try discovery.clampedAxisBounds(
-      observed: -1472, endpoint: -1512, direction: -1)
-    let increasing = try discovery.clampedAxisBounds(observed: 918, endpoint: 982, direction: 1)
+    let xBounds = try discovery.clampedAxisBounds(observed: -1472, endpoint: -1512, direction: -1)
+    let yBounds = try discovery.clampedAxisBounds(observed: 918, endpoint: 982, direction: 1)
 
-    let left = try await discovery.furthestRetainedCoordinate(bounds: decreasing) { requested in
-      max(requested, -1500)
-    }
-    let bottom = try await discovery.furthestRetainedCoordinate(bounds: increasing) { requested in
-      min(requested, 950)
+    let resolved = try await ParkingJointDiscovery.search(
+      base: InventoryRect(x: -1512, y: 982, width: 1512, height: 950),
+      xAxis: xBounds, yAxis: yBounds
+    ) { target in
+      InventoryRect(
+        x: max(target.x, -1500), y: min(target.y, 950),
+        width: target.width, height: target.height)
     }
 
-    XCTAssertEqual(left, -1500)
-    XCTAssertEqual(bottom, 950)
+    XCTAssertEqual(resolved.x, -1500)
+    XCTAssertEqual(resolved.y, 950)
   }
 
-  func testGeneratedAxisDiscoveryMatchesExhaustiveOracle() async throws {
-    var random = SeededRandom(seed: 0xA572_0156_F115)
+  func testJointSearchHoldsEndpointForRetainedAxis() async throws {
     let discovery = ParkingLimitDiscovery()
-    for caseIndex in 0..<1_000 {
+    let yBounds = try discovery.clampedAxisBounds(observed: 900, endpoint: 982, direction: 1)
+
+    let log = RequestLog()
+    let resolved = try await ParkingJointDiscovery.search(
+      base: InventoryRect(x: -1512, y: 982, width: 800, height: 600), xAxis: nil, yAxis: yBounds
+    ) { target in
+      await log.append(target)
+      return InventoryRect(
+        x: target.x, y: min(target.y, 940), width: target.width, height: target.height)
+    }
+
+    XCTAssertNil(resolved.x)
+    XCTAssertEqual(resolved.y, 940)
+    let requests = await log.recordedRects
+    XCTAssertTrue(requests.allSatisfy { $0.x == -1512 })
+  }
+
+  func testJointSearchRejectsUnstableFinalFrame() async throws {
+    let discovery = ParkingLimitDiscovery()
+    let xBounds = try discovery.clampedAxisBounds(observed: -1472, endpoint: -1512, direction: -1)
+    let seen = RequestRecorder()
+
+    await XCTAssertThrowsErrorAsync {
+      _ = try await ParkingJointDiscovery.search(
+        base: InventoryRect(x: -1512, y: 982, width: 800, height: 600), xAxis: xBounds, yAxis: nil
+      ) { target in
+        // Retains every first-time request; the verification re-probe necessarily repeats a
+        // coordinate and drifts, so joint retention cannot be confirmed.
+        let drifted = await seen.isRepeat(target.x)
+        await seen.record(target.x)
+        return InventoryRect(
+          x: drifted ? -1400 : target.x, y: target.y,
+          width: target.width, height: target.height)
+      }
+    }
+  }
+
+  func testJointSearchDetectsCoupledAxesAsUnstable() async throws {
+    let discovery = ParkingLimitDiscovery()
+    let xBounds = try discovery.clampedAxisBounds(observed: -1400, endpoint: -1512, direction: -1)
+    let yBounds = try discovery.clampedAxisBounds(observed: 900, endpoint: 982, direction: 1)
+
+    await XCTAssertThrowsErrorAsync {
+      _ = try await ParkingJointDiscovery.search(
+        base: InventoryRect(x: -1512, y: 982, width: 800, height: 600),
+        xAxis: xBounds, yAxis: yBounds
+      ) { target in
+        // Non-Cartesian platform: Y retains only while X stays shallow.
+        InventoryRect(
+          x: target.x, y: target.x >= -1420 ? target.y : min(target.y, 900),
+          width: target.width, height: target.height)
+      }
+    }
+  }
+
+  func testGeneratedJointDiscoveryMatchesExhaustiveOracle() async throws {
+    var random = SeededRandom(seed: 0xA572_0156_F116)
+    let discovery = ParkingLimitDiscovery()
+
+    struct AxisCase: Sendable {
+      var anchor: Double
+      var direction: Double
+      var distance: Int
+      var retainedAtEndpoint: Bool
+      var optimalProgress: Int
+      var clampCoordinate: Double
+    }
+
+    func makeAxis(_ random: inout SeededRandom) -> AxisCase {
       let direction = random.bool() ? 1.0 : -1.0
       let distance = random.int(in: 1...2_048)
       let anchor = Double(random.int(in: -4_000...4_000))
       let endpoint = anchor + direction * Double(distance)
-      let optimalProgress = random.int(in: 0...distance)
-      let clampProgress = random.int(in: 0...optimalProgress)
+      if random.bool() { return .init(anchor: anchor, direction: direction, distance: distance, retainedAtEndpoint: true, optimalProgress: distance, clampCoordinate: endpoint) }
+      let optimal = random.int(in: 0...max(0, distance - 1))
+      let clampProgress = random.int(in: 0...optimal)
       let fraction = [0.0, 0.25, 0.75][random.int(in: 0...2)]
-      let endpointObserved =
-        optimalProgress == distance
-        ? endpoint : anchor + direction * (Double(clampProgress) + fraction)
-      let seedProgress = random.int(in: 0...optimalProgress)
-      let seed =
-        caseIndex.isMultiple(of: 3)
-        ? nil : anchor + direction * Double(seedProgress)
-      let bounds = try discovery.boundsIfClamped(
-        observed: endpointObserved, endpoint: endpoint, direction: direction,
-        acceptedSeed: seed)
+      return .init(
+        anchor: anchor, direction: direction, distance: distance, retainedAtEndpoint: false,
+        optimalProgress: optimal,
+        clampCoordinate: anchor + direction * (Double(clampProgress) + fraction))
+    }
 
-      if optimalProgress == distance {
-        XCTAssertNil(bounds, "case \(caseIndex)")
-        continue
+    for caseIndex in 0..<500 {
+      var xCase = makeAxis(&random)
+      var yCase = makeAxis(&random)
+      if caseIndex.isMultiple(of: 7) { xCase.retainedAtEndpoint = true }
+      if caseIndex.isMultiple(of: 11) { yCase.retainedAtEndpoint = true }
+      let seedProgressX = random.int(in: 0...max(1, xCase.optimalProgress))
+      let seedProgressY = random.int(in: 0...max(1, yCase.optimalProgress))
+
+      let xEndpoint = xCase.anchor + xCase.direction * Double(xCase.distance)
+      let yEndpoint = yCase.anchor + yCase.direction * Double(yCase.distance)
+      let base = InventoryRect(
+        x: xEndpoint, y: yEndpoint, width: Double(random.int(in: 200...800)),
+        height: Double(random.int(in: 200...600)))
+
+      @Sendable func observeCoordinate(_ requested: Double, _ axis: AxisCase) -> Double {
+        guard !axis.retainedAtEndpoint else { return requested }
+        let progress = Int(((requested - axis.anchor) * axis.direction).rounded())
+        return progress <= axis.optimalProgress ? requested : axis.clampCoordinate
       }
-      let searchBounds = try XCTUnwrap(bounds, "case \(caseIndex)")
-      let attempts = CoordinateAttemptCounter()
-      let result = try await discovery.furthestRetainedCoordinate(bounds: searchBounds) {
-        requested in
-        await attempts.record(requested)
-        let progress = Int(((requested - anchor) * direction).rounded())
-        return progress <= optimalProgress
-          ? requested : anchor + direction * (Double(clampProgress) + fraction)
+
+      let xCaseValue = xCase
+      let yCaseValue = yCase
+      let probeCounter = ProbeCounter()
+
+      let xObserved =
+        xCase.retainedAtEndpoint
+        ? xEndpoint : xCase.anchor + xCase.direction * Double(random.int(in: 0...xCase.optimalProgress))
+      let yObserved =
+        yCase.retainedAtEndpoint
+        ? yEndpoint : yCase.anchor + yCase.direction * Double(random.int(in: 0...yCase.optimalProgress))
+
+      let xBounds = try discovery.boundsIfClamped(
+        observed: xObserved, endpoint: xEndpoint, direction: xCase.direction,
+        acceptedSeed: random.bool() ? xCase.anchor + xCase.direction * Double(seedProgressX) : nil)
+      let yBounds = try discovery.boundsIfClamped(
+        observed: yObserved, endpoint: yEndpoint, direction: yCase.direction,
+        acceptedSeed: random.bool() ? yCase.anchor + yCase.direction * Double(seedProgressY) : nil)
+
+      if xBounds == nil && yBounds == nil { continue }
+
+      let resolved = try await ParkingJointDiscovery.search(
+        base: base, xAxis: xBounds, yAxis: yBounds
+      ) { target in
+        await probeCounter.increment()
+        return InventoryRect(
+          x: observeCoordinate(target.x, xCaseValue), y: observeCoordinate(target.y, yCaseValue),
+          width: target.width, height: target.height)
       }
-      let exhaustive = (0...distance).last(where: { $0 <= optimalProgress })!
-      XCTAssertEqual(result, anchor + direction * Double(exhaustive), "case \(caseIndex)")
-      let sampleCount = await attempts.count
-      let logarithmicBound = Int(ceil(log2(Double(max(1, searchBounds.distance))))) + 5
-      XCTAssertLessThanOrEqual(sampleCount, logarithmicBound, "case \(caseIndex)")
+
+      if xCase.retainedAtEndpoint {
+        XCTAssertNil(resolved.x, "case \(caseIndex)")
+      } else {
+        let exhaustive = min(xCase.optimalProgress, max(0, xCase.distance - 1))
+        XCTAssertEqual(resolved.x, xCase.anchor + xCase.direction * Double(exhaustive), "case \(caseIndex)")
+      }
+      if yCase.retainedAtEndpoint {
+        XCTAssertNil(resolved.y, "case \(caseIndex)")
+      } else {
+        let exhaustive = min(yCase.optimalProgress, max(0, yCase.distance - 1))
+        XCTAssertEqual(resolved.y, yCase.anchor + yCase.direction * Double(exhaustive), "case \(caseIndex)")
+      }
+      let maximumDistance = max(xCase.distance, yCase.distance, 1)
+      let bound = 2 * (Int(ceil(log2(Double(maximumDistance)))) + 3) + 3
+      let probeCount = await probeCounter.count
+      XCTAssertLessThanOrEqual(probeCount, bound, "case \(caseIndex)")
     }
   }
 
@@ -510,18 +633,25 @@ private func XCTAssertThrowsErrorAsync(
   } catch {}
 }
 
-private actor AttemptCounter {
-  var values: [Int] = []
-  func record(_ value: Int) { values.append(value) }
-  func recordAndCount(_ value: Int) -> Int {
-    values.append(value)
-    return values.filter { $0 == value }.count
-  }
+private actor RequestLog {
+  private var doubles: [Double] = []
+  private var rects: [InventoryRect] = []
+  func append(_ value: Double) { doubles.append(value) }
+  func append(_ frame: InventoryRect) { rects.append(frame) }
+  var recordedDoubles: [Double] { doubles }
+  var recordedRects: [InventoryRect] { rects }
+  var lastFrame: InventoryRect? { rects.last }
 }
 
-private actor CoordinateAttemptCounter {
+private actor ProbeCounter {
   private(set) var count = 0
-  func record(_: Double) { count += 1 }
+  func increment() { count += 1 }
+}
+
+private actor RequestRecorder {
+  private var seen: Set<Double> = []
+  func isRepeat(_ value: Double) -> Bool { seen.contains(value) }
+  func record(_ value: Double) { seen.insert(value) }
 }
 
 private struct SeededRandom {

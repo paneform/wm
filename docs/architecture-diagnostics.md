@@ -88,10 +88,15 @@ whose workspace became visible returns to its saved visible restore frame.
 
 The zero-visible endpoint request produces independent X and Y evidence. An axis retained exactly at its
 endpoint is complete with zero visibility. A clamped axis rounds fractional observed evidence toward the
-visible side, combines it with any closer retained parked seed, and binary-searches only that axis while
-holding the other at a known safe retained coordinate. Every request remains position-only, preserves the
-fixed dimensions, and is rejected if its requested or observed frame intersects another display. A clamp
-on one axis never causes the other axis to be classified as clamped.
+visible side, combines it with any closer retained parked seed, and then searches with shared probes: every
+probe requests one combined frame reflecting both axes' current best coordinates, and each response updates
+each axis independently, so a clamp on one axis never fails the other. Each searched axis first probes
+exactly one point past its clamp seed, then binary-searches the inclusive remaining interval — including its
+upper bound — until the maximally off-screen retained coordinate is known. After all axes converge, the
+winning combined frame is re-probed once and must be jointly retained; coupled platform behavior that
+prevents joint retention is reported inconclusive rather than persisted. Every request remains
+position-only, preserves the fixed dimensions, and is rejected if its requested or observed frame
+intersects another display.
 
 Before mutating a probe, diagnostics reject a corner whose fixed-size swept region from its usable seeded
 start (or visible anchor fallback) to the zero-visible endpoint intersects another display. Individual

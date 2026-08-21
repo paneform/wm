@@ -157,61 +157,26 @@ actor DaemonHandler: WebSocketRequestHandler {
     let endpointObservation = try await self.setParkingProbePosition(
       probe, target: endpoint, original: original, otherDisplays: otherDisplays,
       displayID: displayID, displays: displays, generation: generation)
-    var accepted = endpoint
     let discovery = ParkingLimitDiscovery()
-    let xDirection = WindowParkingPlan.axisDirection(from: start, to: endpoint, horizontal: true)
-    let yDirection = WindowParkingPlan.axisDirection(from: start, to: endpoint, horizontal: false)
     let xBounds = try discovery.boundsIfClamped(
-      observed: endpointObservation.x, endpoint: endpoint.x, direction: xDirection,
+      observed: endpointObservation.x, endpoint: endpoint.x,
+      direction: WindowParkingPlan.axisDirection(from: start, to: endpoint, horizontal: true),
       acceptedSeed: seeded.x)
     let yBounds = try discovery.boundsIfClamped(
-      observed: endpointObservation.y, endpoint: endpoint.y, direction: yDirection,
+      observed: endpointObservation.y, endpoint: endpoint.y,
+      direction: WindowParkingPlan.axisDirection(from: start, to: endpoint, horizontal: false),
       acceptedSeed: seeded.y)
-    var seed = endpointObservation
-    seed.x = xBounds?.acceptedCoordinate ?? endpoint.x
-    seed.y = yBounds?.acceptedCoordinate ?? endpoint.y
-    if xBounds != nil {
-      accepted.x = try await self.discoverParkingAxis(
-        probe: probe, original: original, seed: seed, endpoint: endpoint,
-        horizontal: true, otherDisplays: otherDisplays, displayID: displayID, displays: displays,
-        generation: generation)
-      seed.x = accepted.x
-    }
-    if yBounds != nil {
-      accepted.y = try await self.discoverParkingAxis(
-        probe: probe, original: original, seed: seed, endpoint: endpoint,
-        horizontal: false, otherDisplays: otherDisplays, displayID: displayID, displays: displays,
-        generation: generation)
-    }
-    return accepted
-  }
-
-  private func discoverParkingAxis(
-    probe: NormalizedWindow, original: InventoryRect, seed: InventoryRect,
-    endpoint: InventoryRect, horizontal: Bool, otherDisplays: [InventoryRect], displayID: String,
-    displays: [DisplayObservation], generation: UInt64
-  ) async throws -> Double {
-    let observed = horizontal ? seed.x : seed.y
-    let endpointCoordinate = horizontal ? endpoint.x : endpoint.y
-    let direction = WindowParkingPlan.axisDirection(
-      from: seed, to: endpoint, horizontal: horizontal)
-    let discovery = ParkingLimitDiscovery()
-    let bounds = try discovery.clampedAxisBounds(
-      observed: observed, endpoint: endpointCoordinate, direction: direction)
-    return try await discovery.furthestRetainedCoordinate(bounds: bounds) { coordinate in
-      var target = seed
-      if horizontal { target.x = coordinate } else { target.y = coordinate }
-      let observed = try await self.setParkingProbePosition(
+    let resolved = try await ParkingJointDiscovery.search(
+      base: endpoint, xAxis: xBounds, yAxis: yBounds
+    ) { target in
+      try await self.setParkingProbePosition(
         probe, target: target, original: original, otherDisplays: otherDisplays,
-        displayID: displayID,
-        displays: displays, generation: generation)
-      guard abs(observed.width - original.width) <= 1,
-        abs(observed.height - original.height) <= 1
-      else {
-        throw WMInventory.ParkingDiagnosticError.inconclusiveObservation
-      }
-      return horizontal ? observed.x : observed.y
+        displayID: displayID, displays: displays, generation: generation)
     }
+    var accepted = endpoint
+    if let x = resolved.x { accepted.x = x }
+    if let y = resolved.y { accepted.y = y }
+    return accepted
   }
 
   private func setParkingProbePosition(
@@ -2485,57 +2450,51 @@ actor DaemonHandler: WebSocketRequestHandler {
       }
     }
     do {
-      let inventory = try await state.refresh().snapshot.inventory
-      guard generation == parkingTaskGeneration, !Task.isCancelled else { return }
-      let committed = await workspaces.snapshot()
-      let hidden = authoritativeParkingLifetimes(state: committed, inventory: inventory)
-      pendingParking = hidden
-      guard !hidden.isEmpty else { return }
-      try await parkAuthoritativeHiddenWindows(
-        hidden, state: committed, inventory: inventory, generation: generation)
-      let remaining = authoritativeParkingLifetimes(state: committed, inventory: inventory)
-      pendingParking = remaining
-      let missingDisplayIDs = Set(
-        remaining.compactMap { lifetime in
-          guard let workspace = committed.workspaceName(containing: lifetime.windowID) else {
-            return nil
+      while !Task.isCancelled {
+        guard generation == parkingTaskGeneration else { return }
+        let inventory = try await state.refresh().snapshot.inventory
+        let committed = await workspaces.snapshot()
+        let hidden = authoritativeParkingLifetimes(state: committed, inventory: inventory)
+        pendingParking = hidden
+        guard !hidden.isEmpty else { return }
+        try await parkAuthoritativeHiddenWindows(
+          hidden, state: committed, inventory: inventory, generation: generation)
+        let remaining = authoritativeParkingLifetimes(state: committed, inventory: inventory)
+        pendingParking = remaining
+        let missingDisplayIDs = Set(
+          remaining.compactMap { lifetime in
+            guard let workspace = committed.workspaceName(containing: lifetime.windowID) else {
+              return nil
+            }
+            return committed[workspace: workspace]?.displayID
           }
-          return committed[workspace: workspace]?.displayID
+        ).filter { parkingDiagnoses[$0] == nil }
+        guard let displayID = missingDisplayIDs.sorted().first else { return }
+        let candidates = parkingProbeCandidates(
+          for: displayID, lifetimes: remaining, state: committed, inventory: inventory,
+          preferredWindowID: parkingProbePriority[displayID])
+        var lastProbeError: Error?
+        for candidate in candidates {
+          parkingProbe = (candidate.window, candidate.currentFrame, generation)
+          do {
+            try await resolveParkingDiagnosis(
+              inventory, displayID: displayID, probe: candidate.window,
+              currentFrame: candidate.currentFrame, restoreFrame: candidate.restoreFrame,
+              generation: generation)
+            parkingProbe = nil
+            lastProbeError = nil
+            break
+          } catch {
+            parkingProbe = nil
+            if error is CancellationError { throw error }
+            lastProbeError = error
+          }
         }
-      ).filter { parkingDiagnoses[$0] == nil }
-      guard let displayID = missingDisplayIDs.sorted().first else { return }
-      let candidates = parkingProbeCandidates(
-        for: displayID, lifetimes: remaining, state: committed, inventory: inventory,
-        preferredWindowID: parkingProbePriority[displayID])
-      var lastProbeError: Error?
-      for candidate in candidates {
-        parkingProbe = (candidate.window, candidate.currentFrame, generation)
-        do {
-          try await resolveParkingDiagnosis(
-            inventory, displayID: displayID, probe: candidate.window,
-            currentFrame: candidate.currentFrame, restoreFrame: candidate.restoreFrame,
-            generation: generation)
-          parkingProbe = nil
-          lastProbeError = nil
-          break
-        } catch {
-          parkingProbe = nil
-          if error is CancellationError { throw error }
-          lastProbeError = error
+        guard parkingDiagnoses[displayID] != nil else {
+          throw lastProbeError ?? ParkingDiagnosticError.noProbeWindow
         }
+        parkingProbePriority[displayID] = nil
       }
-      guard parkingDiagnoses[displayID] != nil else {
-        throw lastProbeError ?? ParkingDiagnosticError.noProbeWindow
-      }
-      guard generation == parkingTaskGeneration, !Task.isCancelled else { return }
-      let refreshed = try await state.refresh().snapshot.inventory
-      let authoritative = await workspaces.snapshot()
-      let authoritativeHidden = authoritativeParkingLifetimes(
-        state: authoritative, inventory: refreshed)
-      pendingParking = authoritativeHidden
-      try await parkAuthoritativeHiddenWindows(
-        authoritativeHidden, state: authoritative, inventory: refreshed, generation: generation)
-      if parkingDiagnoses[displayID] != nil { parkingProbePriority[displayID] = nil }
     } catch is CancellationError {
     } catch {
       internalErrorReporter?(
