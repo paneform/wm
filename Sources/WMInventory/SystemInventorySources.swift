@@ -4,50 +4,213 @@ import CoreGraphics
 import Foundation
 import WMProtocol
 
-public struct AppKitDisplayInventorySource: DisplayInventorySource {
+public protocol CGDisplayEnumerator: Sendable {
+    /// Returns the online display IDs, or nil when the CG query itself failed.
+    /// The online list is authoritative for hot-plug: it tracks connect/disconnect
+    /// without an AppKit event loop and includes sleeping/clamshell displays.
+    func onlineDisplayList() -> [CGDirectDisplayID]?
+    func isActive(_ displayID: CGDirectDisplayID) -> Bool
+    func isBuiltin(_ displayID: CGDirectDisplayID) -> Bool
+    func isMain(_ displayID: CGDirectDisplayID) -> Bool
+    func bounds(of displayID: CGDirectDisplayID) -> CGRect
+    func pixelWidth(of displayID: CGDirectDisplayID) -> Int
+    func vendorNumber(of displayID: CGDirectDisplayID) -> UInt32
+    func modelNumber(of displayID: CGDirectDisplayID) -> UInt32
+    func serialNumber(of displayID: CGDirectDisplayID) -> UInt32
+    func uuidString(for displayID: CGDirectDisplayID) -> String?
+}
+
+public struct CoreGraphicsDisplayEnumerator: CGDisplayEnumerator {
     public init() {}
+
+    public func onlineDisplayList() -> [CGDirectDisplayID]? {
+        var capacity: UInt32 = 8
+        while true {
+            var ids = [CGDirectDisplayID](repeating: 0, count: Int(capacity))
+            var count: UInt32 = 0
+            guard CGGetOnlineDisplayList(capacity, &ids, &count) == .success else { return nil }
+            guard count > capacity else { return Array(ids.prefix(Int(count))) }
+            capacity = count
+        }
+    }
+
+    public func isActive(_ displayID: CGDirectDisplayID) -> Bool { CGDisplayIsActive(displayID) != 0 }
+    public func isBuiltin(_ displayID: CGDirectDisplayID) -> Bool { CGDisplayIsBuiltin(displayID) != 0 }
+    public func isMain(_ displayID: CGDirectDisplayID) -> Bool { CGDisplayIsMain(displayID) != 0 }
+    public func bounds(of displayID: CGDirectDisplayID) -> CGRect { CGDisplayBounds(displayID) }
+
+    public func pixelWidth(of displayID: CGDirectDisplayID) -> Int {
+        let width = CGDisplayPixelsWide(displayID)
+        return width > 0 ? Int(width) : 0
+    }
+
+    public func vendorNumber(of displayID: CGDirectDisplayID) -> UInt32 { CGDisplayVendorNumber(displayID) }
+    public func modelNumber(of displayID: CGDirectDisplayID) -> UInt32 { CGDisplayModelNumber(displayID) }
+    public func serialNumber(of displayID: CGDirectDisplayID) -> UInt32 { CGDisplaySerialNumber(displayID) }
+
+    public func uuidString(for displayID: CGDirectDisplayID) -> String? {
+        guard let value = CGDisplayCreateUUIDFromDisplayID(displayID)?.takeRetainedValue() else { return nil }
+        return CFUUIDCreateString(nil, value) as String
+    }
+}
+
+/// AppKit-side enrichment for a display, snapshotted from one `NSScreen`.
+/// Frames are in NSScreen space (bottom-left origin, y-up) and are converted to
+/// canonical OS space relative to their own display's frame during enrichment.
+struct NSScreenSnapshot: Equatable, Sendable {
+    var displayID: CGDirectDisplayID
+    var name: String
+    var frame: CGRect
+    var visibleFrame: CGRect
+    var backingScale: CGFloat
+}
+
+public enum DisplayCoordinateConversion {
+    /// `CGDisplayBounds` already uses canonical OS space: top-left origin of the
+    /// primary display, y-down — identical to AX global coordinates.
+    public static func cgBoundsToOS(_ bounds: CGRect) -> CGRect { bounds }
+
+    /// Converts an NSScreen-space rect (bottom-left origin, y-up, primary bottom
+    /// at y=0) into canonical OS space, given the primary display's top edge in
+    /// NSScreen space (`primaryTop == primary.frame.maxY`).
+    public static func nsScreenRectToOS(_ rect: CGRect, primaryTop: CGFloat) -> CGRect {
+        CGRect(x: rect.origin.x, y: primaryTop - rect.maxY, width: rect.width, height: rect.height)
+    }
+
+    /// Converts an NSScreen-space rect belonging to a specific display into
+    /// canonical OS space. Horizontal position is shared between both conventions;
+    /// vertical position is preserved relative to the display's own frame and
+    /// re-anchored at the display's OS-frame top edge. Avoids needing global
+    /// primary geometry for per-display enrichment.
+    public static func nsScreenRectToOS(
+        _ rect: CGRect, displayNSFrame: CGRect, displayOSFrame: CGRect
+    ) -> CGRect {
+        let localTopOffset = displayNSFrame.height - (rect.maxY - displayNSFrame.minY)
+        return CGRect(
+            x: rect.minX, y: displayOSFrame.minY + localTopOffset,
+            width: rect.width, height: rect.height)
+    }
+}
+
+/// CG-driven display inventory.
+///
+/// `NSScreen.screens` is a process-lifetime cache that never refreshes in this
+/// daemon because no AppKit event loop runs, so enumeration is anchored on
+/// `CGGetOnlineDisplayList` (fresh on every poll) and AppKit is only used to
+/// enrich fields CG cannot provide. Online-but-inactive displays (sleeping
+/// clamshell lid, mirrored-off) are deliberately kept in the inventory so
+/// topology reconciliation does not migrate their workspaces during sleep.
+public struct SystemDisplayInventorySource: DisplayInventorySource {
+    let enumerator: any CGDisplayEnumerator
+
+    public init(enumerator: any CGDisplayEnumerator = CoreGraphicsDisplayEnumerator()) {
+        self.enumerator = enumerator
+    }
 
     @MainActor
     public func displays() async -> SourceResult<[DisplayObservation]> {
-        let screens = NSScreen.screens
-        let observations = screens.map { screen in
-            let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
-            let displayID = number?.uint32Value
-            let uuid = displayID.flatMap { displayID -> String? in
-                guard let value = CGDisplayCreateUUIDFromDisplayID(displayID)?.takeRetainedValue() else { return nil }
-                return CFUUIDCreateString(nil, value) as String
-            }
-            let identifiers = DisplayIdentifiers(
-                nsscreenNumber: number?.stringValue,
-                cgDirectDisplayID: displayID.map(String.init),
-                uuid: uuid,
-                vendorID: displayID.map { String(CGDisplayVendorNumber($0)) },
-                productID: displayID.map { String(CGDisplayModelNumber($0)) },
-                serialNumber: displayID.map { String(CGDisplaySerialNumber($0)) }
-            )
-            let canonical = uuid.map { "display:\($0.lowercased())" }
-                ?? displayID.map { "display:\($0)" }
-                ?? "display:nsscreen:\(screens.firstIndex(of: screen) ?? 0)"
-            return DisplayObservation(
-                id: canonical,
+        Self.result(enumerator: enumerator, screens: Self.screenSnapshots(NSScreen.screens))
+    }
+
+    @MainActor
+    static func screenSnapshots(_ screens: [NSScreen]) -> [NSScreenSnapshot] {
+        screens.compactMap { screen in
+            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
+            return NSScreenSnapshot(
+                displayID: number.uint32Value,
                 name: screen.localizedName,
-                isBuiltin: displayID.map { CGDisplayIsBuiltin($0) != 0 } ?? false,
-                isPrimary: displayID.map { CGDisplayIsMain($0) != 0 } ?? false,
-                frame: InventoryRect(screen.frame),
-                visibleFrame: InventoryRect(screen.visibleFrame),
-                backingScale: screen.backingScaleFactor,
-                identifiers: identifiers
+                frame: screen.frame,
+                visibleFrame: screen.visibleFrame,
+                backingScale: screen.backingScaleFactor
             )
         }
+    }
+
+    static func result(
+        enumerator: some CGDisplayEnumerator,
+        screens: [NSScreenSnapshot]
+    ) -> SourceResult<[DisplayObservation]> {
+        guard let online = enumerator.onlineDisplayList() else {
+            return SourceResult(
+                value: [],
+                health: SourceHealth(
+                    source: .displays,
+                    status: .unhealthy,
+                    permissionGranted: nil,
+                    issues: ["CGGetOnlineDisplayList failed"]
+                )
+            )
+        }
+        let observations = observations(from: online, enumerator: enumerator, screens: screens)
         return SourceResult(
             value: observations,
             health: SourceHealth(
                 source: .displays,
                 status: observations.isEmpty ? .unhealthy : .healthy,
                 permissionGranted: nil,
-                issues: observations.isEmpty ? ["AppKit reported no connected displays"] : []
+                issues: observations.isEmpty ? ["CoreGraphics reported no online displays"] : []
             )
         )
+    }
+
+    static func observations(
+        from online: [CGDirectDisplayID],
+        enumerator: some CGDisplayEnumerator,
+        screens: [NSScreenSnapshot]
+    ) -> [DisplayObservation] {
+        let screensByDisplayID = Dictionary(
+            screens.map { ($0.displayID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let displays = online.map { displayID -> DisplayObservation in
+            let uuid = enumerator.uuidString(for: displayID)
+            let identifiers = DisplayIdentifiers(
+                nsscreenNumber: String(displayID),
+                cgDirectDisplayID: String(displayID),
+                uuid: uuid,
+                vendorID: String(enumerator.vendorNumber(of: displayID)),
+                productID: String(enumerator.modelNumber(of: displayID)),
+                serialNumber: String(enumerator.serialNumber(of: displayID))
+            )
+            // Stability across reconnects depends on this canonical form.
+            let canonical = uuid.map { "display:\($0.lowercased())" } ?? "display:\(displayID)"
+            // CGDisplayBounds is already in canonical OS space.
+            let frame = DisplayCoordinateConversion.cgBoundsToOS(enumerator.bounds(of: displayID))
+            let isBuiltin = enumerator.isBuiltin(displayID)
+            let screen = screensByDisplayID[displayID]
+            // Fallbacks cover the hot-plug window where AppKit's cached screen list
+            // does not yet (or ever) include the display: full-frame work area,
+            // generic name, and a scale derived from CG pixel geometry.
+            let name = screen?.name ?? (isBuiltin ? "Built-in Display" : "External Display")
+            let visibleFrame =
+                screen.map {
+                    DisplayCoordinateConversion.nsScreenRectToOS(
+                        $0.visibleFrame, displayNSFrame: $0.frame, displayOSFrame: frame)
+                } ?? frame
+            let backingScale: Double
+            if let screen {
+                backingScale = Double(screen.backingScale)
+            } else {
+                let pixels = enumerator.pixelWidth(of: displayID)
+                backingScale = pixels > 0 && frame.width > 0 ? Double(pixels) / frame.width : 1
+            }
+            return DisplayObservation(
+                id: canonical,
+                name: name,
+                isBuiltin: isBuiltin,
+                isPrimary: enumerator.isMain(displayID),
+                frame: InventoryRect(frame),
+                visibleFrame: InventoryRect(visibleFrame),
+                backingScale: backingScale,
+                identifiers: identifiers
+            )
+        }
+        return displays.sorted { lhs, rhs in
+            if lhs.isPrimary != rhs.isPrimary { return lhs.isPrimary }
+            if lhs.frame.x != rhs.frame.x { return lhs.frame.x < rhs.frame.x }
+            if lhs.frame.y != rhs.frame.y { return lhs.frame.y < rhs.frame.y }
+            return lhs.id < rhs.id
+        }
     }
 }
 

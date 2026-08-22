@@ -140,10 +140,13 @@ final class WindowParkingTests: XCTestCase {
   }
 
   func testConvertsDellAboveBuiltinToNegativeAXCoordinates() {
+    // Observations arrive already canonicalized in AX global space (the platform
+    // source converts NSScreen frames at enumeration time), so a display above
+    // the primary simply has a negative OS y and axFrames is a direct lookup.
     let builtin = observedDisplay(
       id: "builtin", primary: true, frame: .init(x: 0, y: 0, width: 1512, height: 982))
     let dell = observedDisplay(
-      id: "dell", primary: false, frame: .init(x: -1030, y: 982, width: 3440, height: 1440))
+      id: "dell", primary: false, frame: .init(x: -1030, y: -1440, width: 3440, height: 1440))
     let frames = axDisplayFrames([builtin, dell])
 
     XCTAssertEqual(frames["builtin"], .init(x: 0, y: 0, width: 1512, height: 982))

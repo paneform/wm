@@ -59,6 +59,10 @@ public struct DisplayIdentifiers: Codable, Hashable, Sendable {
 }
 
 public struct DisplayObservation: Codable, Hashable, Sendable, Identifiable {
+    /// Display and work-area frames in canonical OS space: AX global coordinates,
+    /// top-left origin of the primary display, y-axis pointing down. This is the same
+    /// space window frames are observed and applied in, so no per-use conversion is
+    /// needed. Platform sources convert once at enumeration time.
     public var id: String
     public var name: String
     public var isBuiltin: Bool
@@ -105,34 +109,44 @@ public struct DisplayTopologySnapshot: Equatable, Sendable {
     }
 
     public var displayIDs: Set<String> { Set(displays.map(\.id)) }
+
+    /// Display frames in canonical OS (AX global) space. Observations are already
+    /// canonicalized at the platform boundary; this is a direct lookup.
     public var axFrames: [String: InventoryRect] {
-        guard let primaryTop = displays.first(where: \.isPrimary).map({ $0.frame.y + $0.frame.height }) else {
-            return [:]
-        }
-        return Dictionary(uniqueKeysWithValues: displays.map { display in
-            let frame = display.frame
-            return (display.id, InventoryRect(
-                x: frame.x,
-                y: primaryTop - frame.y - frame.height,
-                width: frame.width,
-                height: frame.height
-            ))
-        })
+        Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0.frame) })
     }
 
+    /// Work areas in canonical OS (AX global) space. Direct lookup.
     public var axWorkAreas: [String: InventoryRect] {
-        guard let primaryTop = displays.first(where: \.isPrimary).map({ $0.frame.y + $0.frame.height }) else {
-            return [:]
-        }
-        return Dictionary(uniqueKeysWithValues: displays.map { display in
-            let frame = display.visibleFrame
-            return (display.id, InventoryRect(
-                x: frame.x,
-                y: primaryTop - frame.y - frame.height,
-                width: frame.width,
-                height: frame.height
-            ))
-        })
+        Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0.visibleFrame) })
+    }
+
+    public func axFrame(of displayID: String) -> InventoryRect? {
+        axFrames[displayID]
+    }
+
+    public func axWorkArea(of displayID: String) -> InventoryRect? {
+        axWorkAreas[displayID]
+    }
+
+    /// Projects an engine-local frame (y-down, origin at the display's work-area
+    /// top-left) into canonical OS coordinates. The single projection for both
+    /// single-display and multi-display setups: multi-display is encoded entirely
+    /// in each display's work-area origin.
+    public func project(_ local: InventoryRect, onDisplay displayID: String) -> InventoryRect? {
+        guard let workArea = axWorkAreas[displayID] else { return nil }
+        return InventoryRect(
+            x: workArea.x + local.x, y: workArea.y + local.y,
+            width: local.width, height: local.height)
+    }
+
+    /// Inverse of `project`: converts an observed OS-space frame back into
+    /// engine-local coordinates relative to the display's work area.
+    public func unproject(_ os: InventoryRect, onDisplay displayID: String) -> InventoryRect? {
+        guard let workArea = axWorkAreas[displayID] else { return nil }
+        return InventoryRect(
+            x: os.x - workArea.x, y: os.y - workArea.y,
+            width: os.width, height: os.height)
     }
 }
 

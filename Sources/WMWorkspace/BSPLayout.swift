@@ -106,6 +106,7 @@ extension Workspace {
   ) -> WorkspaceLayoutResult {
     let minimumSizes = cooperation.mapValues(\.minimumSize)
     let maximumSizes = cooperation.mapValues(\.maximumSize)
+    let bspMembers = bsp.root?.windowIDs ?? []
     guard
       cooperation.values.contains(where: { !$0.isCooperative })
         || !canFit(in: bounds, minimumSizes: minimumSizes)
@@ -130,7 +131,7 @@ extension Workspace {
       if let frames = policyFrames(
         policy, bounds: bounds, content: content, cooperation: cooperation,
         minimumSizes: minimumSizes, maximumSizes: maximumSizes),
-        framesAreFeasible(frames, cooperation: cooperation) {
+        framesAreFeasible(frames, cooperation: cooperation, expected: Set(bspMembers)) {
         return .init(requestedChain: layoutPolicy, attemptedChain: attempted, effectivePolicy: policy,
           plan: .frames(frames), fallbackOccurred: attempted.count > 1)
       }
@@ -204,11 +205,15 @@ extension Workspace {
     })
   }
 
+  /// Feasibility is judged against the windows the policy actually frames (the BSP
+  /// members). Floating windows never receive tree frames, so including them here
+  /// would reject every greedy/overlap plan for workspaces with any floating window.
   private func framesAreFeasible(
     _ frames: [WorkspaceWindowID: WorkspaceLayoutRect],
-    cooperation: [WorkspaceWindowID: WorkspaceWindowCooperation]
+    cooperation: [WorkspaceWindowID: WorkspaceWindowCooperation],
+    expected: Set<WorkspaceWindowID>
   ) -> Bool {
-    Set(frames.keys) == Set(windowIDs) && frames.allSatisfy { id, frame in
+    Set(frames.keys) == expected && frames.allSatisfy { id, frame in
       let constraint = cooperation[id] ?? .init()
       return frame.x.isFinite && frame.y.isFinite && frame.width.isFinite && frame.height.isFinite
         && frame.width > 0 && frame.height > 0

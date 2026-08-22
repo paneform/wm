@@ -196,7 +196,7 @@ public struct CLIRunner<Client: CLIWebSocketClient>: Sendable {
         id: @escaping @Sendable () -> String = { UUID().uuidString },
         configPath: URL = ConfigurationFile.path(),
         displays: @escaping @Sendable () async -> [ConfigurationFile.ExampleDisplay] = {
-            let result = await AppKitDisplayInventorySource().displays()
+            let result = await SystemDisplayInventorySource().displays()
             return result.value.map { .init(id: $0.id, name: $0.name) }
         },
         lifecycle: LifecycleController? = nil,

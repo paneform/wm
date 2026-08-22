@@ -2739,8 +2739,12 @@ actor DaemonHandler: WebSocketRequestHandler {
     guard
       let workArea = DisplayTopologySnapshot(displays: inventory.displays).axWorkAreas[display.id]
     else { return }
-    let bounds = WorkspaceLayoutRect(
-      x: workArea.x, y: workArea.y, width: workArea.width, height: workArea.height)
+    // The layout engine computes display-locally (y-down, origin at the work-area
+    // top-left); the topology projection is the single translation into OS space.
+    let bounds = WorkspaceLayoutRect(x: 0, y: 0, width: workArea.width, height: workArea.height)
+    let projection = DisplayTopologySnapshot(displays: inventory.displays)
+    let osContent = projection.project(
+      inventoryRect(contentFrame(workspace, bounds)), onDisplay: display.id)
     retainSessionWindows(inventory.windows)
     let bspWindowIDs = workspace.bsp.root?.windowIDs ?? []
     let windows = bspWindowIDs.compactMap {
@@ -2761,9 +2765,15 @@ actor DaemonHandler: WebSocketRequestHandler {
     var replanCount = 0
     do {
       while replanCount <= windows.count {
-        let targets = try layoutTargets(
+        let localTargets = try layoutTargets(
           workspace, bounds: bounds, cooperation: cooperation, forceStack: forceStack
         )
+        let targets = Dictionary(
+          uniqueKeysWithValues: localTargets.compactMap { id, frame -> (String, WorkspaceLayoutRect)? in
+            projection.project(inventoryRect(frame), onDisplay: display.id).map {
+              (id, WorkspaceLayoutRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height))
+            }
+          })
         var shouldReplan = false
         let orderedWindows = windows.sorted {
           let leftPriority = priorityWindowIDs.contains($0.id)
@@ -2793,7 +2803,10 @@ actor DaemonHandler: WebSocketRequestHandler {
           case .constrained:
             let minimum = Self.constrainedMinimum(fitted: outcome.observedFrame, target: target)
             let maximum = Self.constrainedMaximum(fitted: outcome.observedFrame, target: target)
-            let content = contentFrame(workspace, bounds)
+            guard let content = osContent else { throw WindowGeometryFailure(
+              code: .geometryVerificationFailed,
+              message: "display disappeared during tiling")
+            }
             if outcome.observedFrame.x >= content.x - 1,
               outcome.observedFrame.y >= content.y - 1,
               outcome.observedFrame.x + outcome.observedFrame.width <= content.x + content.width
@@ -2824,7 +2837,10 @@ actor DaemonHandler: WebSocketRequestHandler {
             shouldReplan = true
           case .progressing, .failed:
             let minimum = Self.constrainedMinimum(fitted: outcome.observedFrame, target: target)
-            let content = contentFrame(workspace, bounds)
+            guard let content = osContent else { throw WindowGeometryFailure(
+              code: .geometryVerificationFailed,
+              message: "display disappeared during tiling")
+            }
             let centerX = outcome.observedFrame.x + outcome.observedFrame.width / 2
             let centerY = outcome.observedFrame.y + outcome.observedFrame.height / 2
             let known = cooperation[window.id] ?? .init()

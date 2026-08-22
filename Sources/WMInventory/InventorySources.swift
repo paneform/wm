@@ -41,7 +41,7 @@ public struct InventorySources: Sendable {
     @MainActor
     public static func system() -> Self {
         Self(
-            displays: AppKitDisplayInventorySource(),
+            displays: SystemDisplayInventorySource(),
             accessibility: SystemAccessibilityInventorySource(),
             coreGraphics: SystemCoreGraphicsInventorySource()
         )
