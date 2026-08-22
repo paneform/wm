@@ -2737,3 +2737,42 @@ private let parkingTestDisplay = DisplayObservation(
   frame: .init(x: 0, y: 0, width: 1_000, height: 800),
   visibleFrame: .init(x: 0, y: 0, width: 1_000, height: 800), backingScale: 1,
   identifiers: .init())
+
+@Test func explicitMoveOverridesPreferredDisplayAcrossResync() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  let displays = ToggleableDisplays()
+  let state = DaemonHandler.State(
+    provider: SystemInventoryProvider(
+      scanner: .init(
+        sources: .init(displays: displays, accessibility: StubAX(), coreGraphics: StubCG())
+      )))
+  let controller = try WorkspaceController(
+    buildVersion: "test", stateURL: directory.appendingPathComponent("state.json")
+  )
+  let handler = DaemonHandler(state: state, workspaces: controller)
+  let inventory = try await state.refresh().snapshot.inventory
+  _ = try await handler.loadConfiguration(
+    source: #"""
+      {
+        "workspaces":[{"name":"T","preferred_display":"display:external"}]
+      }
+      """#, inventory: inventory)
+  #expect(await controller.snapshot()[workspace: "T"]?.displayID == "display:external")
+
+  let replies = await handler.handle(
+    text: try clientMessage(
+      .request(
+        .init(
+          requestId: "move", method: .workspaceMoveDisplay,
+          params: ["workspace": .string("T"), "display_id": .string("display:built-in")]
+        ))), clientID: UUID())
+  #expect(try response(replies[0]).error == nil)
+  #expect(await controller.snapshot()[workspace: "T"]?.displayID == "display:built-in")
+
+  // A session resync re-applies per-display configuration; the explicit move
+  // must win over the configured preferred display.
+  try await handler.resynchronizeSession(.unlock)
+  #expect(await controller.snapshot()[workspace: "T"]?.displayID == "display:built-in")
+  try? FileManager.default.removeItem(at: directory)
+}

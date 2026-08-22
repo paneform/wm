@@ -159,6 +159,7 @@ extension WorkspaceState {
                 modified.insert(destinationVisible)
             }
             state.workspaces[movingIndex].displayID = destinationDisplayID
+            state.setVisible(name, true)
             state.displays[destinationDisplayID] = .init(
                 visibleWorkspaceName: name,
                 previousWorkspaceName: destinationVisible == name ? nil : destinationVisible
