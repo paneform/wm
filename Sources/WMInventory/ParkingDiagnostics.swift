@@ -17,8 +17,26 @@ public struct ParkingVisibility: Codable, Equatable, Sendable {
 
 public struct ParkingLimits: Codable, Equatable, Sendable {
   public var corners: [ParkingCorner: ParkingVisibility]
+  /// Per-corner axis clamping observed while probing; nil axes were retained at their endpoint.
+  public var clamps: [ParkingCorner: ParkingCornerClamps]?
 
-  public init(corners: [ParkingCorner: ParkingVisibility]) { self.corners = corners }
+  public init(
+    corners: [ParkingCorner: ParkingVisibility],
+    clamps: [ParkingCorner: ParkingCornerClamps]? = nil
+  ) {
+    self.corners = corners
+    self.clamps = clamps
+  }
+}
+
+public struct ParkingCornerClamps: Codable, Equatable, Sendable {
+  public var x: ParkingAxisBounds?
+  public var y: ParkingAxisBounds?
+
+  public init(x: ParkingAxisBounds?, y: ParkingAxisBounds?) {
+    self.x = x
+    self.y = y
+  }
 }
 
 public enum ParkingDiagnosticError: Error, Equatable {
@@ -29,11 +47,20 @@ public enum ParkingDiagnosticError: Error, Equatable {
   case inconclusiveObservation
 }
 
-public struct ParkingAxisBounds: Equatable, Sendable {
+public struct ParkingAxisBounds: Codable, Equatable, Sendable {
   public var acceptedCoordinate: Double
   public var rejectedCoordinate: Double
   public var direction: Double
   public var distance: Int
+
+  public init(
+    acceptedCoordinate: Double, rejectedCoordinate: Double, direction: Double, distance: Int
+  ) {
+    self.acceptedCoordinate = acceptedCoordinate
+    self.rejectedCoordinate = rejectedCoordinate
+    self.direction = direction
+    self.distance = distance
+  }
 
   public func coordinate(at progress: Int) -> Double {
     acceptedCoordinate + Double(progress) * direction
@@ -115,6 +142,15 @@ struct ParkingJointAxisSearch: Sendable {
         * bounds.direction).rounded())
     if tightened > acceptedProgress, tightened < requested { acceptedProgress = tightened }
   }
+
+  /// Bounds of the finally accepted clamp position, including the last known rejected position.
+  func resolvedBounds() -> ParkingAxisBounds {
+    var updated = bounds
+    updated.acceptedCoordinate = coordinate(at: acceptedProgress)
+    updated.rejectedCoordinate = coordinate(at: rejectedProgress)
+    updated.distance = max(0, rejectedProgress - acceptedProgress)
+    return updated
+  }
 }
 
 public enum ParkingJointDiscovery {
@@ -127,6 +163,17 @@ public enum ParkingJointDiscovery {
     base: InventoryRect, xAxis: ParkingAxisBounds?, yAxis: ParkingAxisBounds?,
     observe: @escaping @Sendable (InventoryRect) async throws -> InventoryRect
   ) async throws -> (x: Double?, y: Double?) {
+    let resolved = try await searchWithClamps(
+      base: base, xAxis: xAxis, yAxis: yAxis, observe: observe)
+    return (x: resolved.x?.acceptedCoordinate, y: resolved.y?.acceptedCoordinate)
+  }
+
+  /// Joint axis search returning the finally accepted clamp bounds per axis. A nil axis was
+  /// retained at its endpoint during the initial corner request and holds that coordinate.
+  public static func searchWithClamps(
+    base: InventoryRect, xAxis: ParkingAxisBounds?, yAxis: ParkingAxisBounds?,
+    observe: @escaping @Sendable (InventoryRect) async throws -> InventoryRect
+  ) async throws -> (x: ParkingAxisBounds?, y: ParkingAxisBounds?) {
     var x = xAxis.map(ParkingJointAxisSearch.init)
     var y = yAxis.map(ParkingJointAxisSearch.init)
     let maximumDistance = max(x?.bounds.distance ?? 0, y?.bounds.distance ?? 0, 1)
@@ -159,19 +206,27 @@ public enum ParkingJointDiscovery {
     }
 
     var result = base
-    if let x { result.x = x.coordinate(at: x.acceptedProgress) }
-    if let y { result.y = y.coordinate(at: y.acceptedProgress) }
+    var xBounds: ParkingAxisBounds?
+    var yBounds: ParkingAxisBounds?
+    if let x {
+      result.x = x.coordinate(at: x.acceptedProgress)
+      xBounds = x.resolvedBounds()
+    }
+    if let y {
+      result.y = y.coordinate(at: y.acceptedProgress)
+      yBounds = y.resolvedBounds()
+    }
     let verified = try await observe(result)
     let xMatches = x == nil ? verified.x == base.x : verified.x == result.x
     let yMatches = y == nil ? verified.y == base.y : verified.y == result.y
     guard xMatches, yMatches else { throw ParkingDiagnosticError.unstableBoundary }
-    return (x: x.map { _ in result.x }, y: y.map { _ in result.y })
+    return (x: xBounds, y: yBounds)
   }
 }
 
 public enum ParkingDiagnosticIdentity {
   public static let id = "parking-limits"
-  public static let revision = 7
+  public static let revision = 8
 
   /// Diagnosed parking extents are display-local OS properties, so the fingerprint scopes to the
   /// assigned display's own identity and geometry. Neighbor arrangement changes affect plan-time

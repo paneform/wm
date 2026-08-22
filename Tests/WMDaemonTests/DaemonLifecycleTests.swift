@@ -346,7 +346,7 @@ private func response(_ text: String) throws -> Response {
 
 @Test func revisionCacheMissPrefersAlreadyParkedCandidateAndKeepsVisibleRestoreFrame() async throws
 {
-  #expect(ParkingDiagnosticIdentity.revision == 7)
+  #expect(ParkingDiagnosticIdentity.revision == 8)
   let store = TransientDiagnosticStore()
   let fingerprint = "parked-candidate"
   try store.save(

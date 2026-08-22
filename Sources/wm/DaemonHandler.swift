@@ -113,6 +113,7 @@ actor DaemonHandler: WebSocketRequestHandler {
         throw WMInventory.ParkingDiagnosticError.noTopologySafeCorner
       }
       var results: [ParkingCorner: ParkingVisibility] = [:]
+      var clamps: [ParkingCorner: ParkingCornerClamps] = [:]
       var lastProbeError: Error?
       for corner in corners {
         do {
@@ -121,12 +122,13 @@ actor DaemonHandler: WebSocketRequestHandler {
             avoiding: Array(others))
           let endpoint = WindowParkingPlan.offscreenEndpoint(
             for: corner, display: display, window: currentFrame)
-          let accepted = try await self.probeParkingCorner(
+          let probed = try await self.probeParkingCorner(
             probe: probe, original: currentFrame, start: start, endpoint: endpoint,
             otherDisplays: Array(others), displayID: displayID, displays: inventory.displays,
             generation: generation)
           results[corner] = WindowParkingPlan.visibility(
-            for: corner, display: display, accepted: accepted)
+            for: corner, display: display, accepted: probed.frame)
+          clamps[corner] = probed.clamps
         } catch {
           lastProbeError = error
         }
@@ -143,7 +145,7 @@ actor DaemonHandler: WebSocketRequestHandler {
       if results.isEmpty {
         throw lastProbeError ?? WMInventory.ParkingDiagnosticError.noAcceptedPosition
       }
-      return ParkingLimits(corners: results)
+      return ParkingLimits(corners: results, clamps: clamps)
     }
   }
 
@@ -151,7 +153,7 @@ actor DaemonHandler: WebSocketRequestHandler {
     probe: NormalizedWindow, original: InventoryRect, start: InventoryRect,
     endpoint: InventoryRect, otherDisplays: [InventoryRect], displayID: String,
     displays: [DisplayObservation], generation: UInt64
-  ) async throws -> InventoryRect {
+  ) async throws -> (frame: InventoryRect, clamps: ParkingCornerClamps) {
     let seeded = try await self.setParkingProbePosition(
       probe, target: start, original: original, otherDisplays: otherDisplays,
       displayID: displayID, displays: displays, generation: generation)
@@ -167,7 +169,7 @@ actor DaemonHandler: WebSocketRequestHandler {
       observed: endpointObservation.y, endpoint: endpoint.y,
       direction: WindowParkingPlan.axisDirection(from: start, to: endpoint, horizontal: false),
       acceptedSeed: seeded.y)
-    let resolved = try await ParkingJointDiscovery.search(
+    let resolved = try await ParkingJointDiscovery.searchWithClamps(
       base: endpoint, xAxis: xBounds, yAxis: yBounds
     ) { target in
       try await self.setParkingProbePosition(
@@ -175,9 +177,9 @@ actor DaemonHandler: WebSocketRequestHandler {
         displayID: displayID, displays: displays, generation: generation)
     }
     var accepted = endpoint
-    if let x = resolved.x { accepted.x = x }
-    if let y = resolved.y { accepted.y = y }
-    return accepted
+    if let x = resolved.x { accepted.x = x.acceptedCoordinate }
+    if let y = resolved.y { accepted.y = y.acceptedCoordinate }
+    return (frame: accepted, clamps: ParkingCornerClamps(x: resolved.x, y: resolved.y))
   }
 
   private func setParkingProbePosition(

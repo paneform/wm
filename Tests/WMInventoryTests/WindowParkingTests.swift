@@ -264,6 +264,33 @@ final class WindowParkingTests: XCTestCase {
     XCTAssertEqual(requests.last, -575, "winning combined frame must be re-probed for verification")
   }
 
+  func testJointSearchWithClampsReturnsResolvedAxisBounds() async throws {
+    let discovery = ParkingLimitDiscovery()
+    let xBounds = try discovery.clampedAxisBounds(observed: -1472, endpoint: -1512, direction: -1)
+    // Consistent OS clamp: anything past -1490 is pulled back to exactly -1490.
+    let observeClosure = { @Sendable (target: InventoryRect) in
+      InventoryRect(
+        x: max(target.x, -1490), y: target.y, width: target.width, height: target.height)
+    }
+
+    let clamps = try await ParkingJointDiscovery.searchWithClamps(
+      base: InventoryRect(x: -1512, y: 982, width: 600, height: 950), xAxis: xBounds, yAxis: nil,
+      observe: observeClosure)
+
+    let x = try XCTUnwrap(clamps.x)
+    XCTAssertEqual(x.acceptedCoordinate, -1490)
+    XCTAssertEqual(x.direction, -1)
+    XCTAssertLessThanOrEqual(x.distance, xBounds.distance)
+    XCTAssertEqual(x.coordinate(at: 0), x.acceptedCoordinate)
+    XCTAssertNil(clamps.y, "retained axis must not report clamp bounds")
+
+    // The coordinate projection used by the plain search agrees with the bounds.
+    let projected = try await ParkingJointDiscovery.search(
+      base: InventoryRect(x: -1512, y: 982, width: 600, height: 950), xAxis: xBounds, yAxis: nil,
+      observe: observeClosure)
+    XCTAssertEqual(projected.x, x.acceptedCoordinate)
+  }
+
   func testJointSearchFindsDeepBoundaryPastInitialClamp() async throws {
     // X starts at 0 with endpoint -600. Values beyond -593 clamp back to -550, so the true
     // maximally off-screen retained position is exactly -593 despite the coarse initial clamp.
