@@ -658,6 +658,12 @@ actor DaemonHandler: WebSocketRequestHandler {
     _ = try candidate.reconcileDisplayTopology(
       connectedDisplayIDs: Set(inventory.displays.map(\.id)), fallbackDisplayID: displayID
     )
+    if let currentConfiguration = await configuration.snapshot().configuration {
+      candidate = await workspaces.configuredState(
+        currentConfiguration, defaultDisplayID: displayID,
+        displays: inventory.displays, state: candidate
+      )
+    }
     try await auditCommittedIntent(inventory, state: candidate)
     try requireCurrentSessionGeneration(generation)
     try await workspaces.commit(candidate)
@@ -1424,6 +1430,16 @@ actor DaemonHandler: WebSocketRequestHandler {
         result = workspaceList(await workspaces.snapshot())
       case .workspaceFocus:
         let params = try decodeParams(WorkspaceFocusParams.self, from: .object(request.params))
+        if try await reconcileDisconnectedDisplayTopology(
+          workspaceName: params.name, requestedDisplayID: params.displayId,
+          inventory: snapshot.inventory)
+        {
+          committed = try await state.refresh()
+          snapshot = committed.snapshot
+          snapshot.inventory = await geometryProfiles.mergingCapabilities(into: snapshot.inventory)
+          snapshot.windows = snapshot.inventory.windows.map { .init(id: $0.id, value: $0) }
+          retainSessionWindows(snapshot.inventory.windows)
+        }
         let before = await workspaces.snapshot()
         func reconcileFocus(_ inventory: InventorySnapshot) async throws
           -> (WMWorkspace.WorkspaceMutationResult, Set<WindowLifetime>)
@@ -2119,6 +2135,53 @@ actor DaemonHandler: WebSocketRequestHandler {
           ])
         }),
     ])
+  }
+
+  /// Focus-time topology guard: confirms the displays relevant to a workspace focus request are
+  /// still connected. If a relevant display is absent from the (possibly stale) inventory, the
+  /// inventory is refreshed and workspaces stranded on disconnected displays are migrated to a
+  /// connected display before the focus resolves. Returns true when state changed.
+  func reconcileDisconnectedDisplayTopology(
+    workspaceName: String, requestedDisplayID: String?, inventory: InventorySnapshot
+  ) async throws -> Bool {
+    let connectedIDs = Set(inventory.displays.map(\.id))
+    var suspects: Set<String> = []
+    if let requestedDisplayID, !connectedIDs.contains(requestedDisplayID) {
+      suspects.insert(requestedDisplayID)
+    }
+    let workspaceState = await workspaces.snapshot()
+    if let workspace = workspaceState[workspace: workspaceName],
+      !connectedIDs.contains(workspace.displayID)
+    {
+      suspects.insert(workspace.displayID)
+    }
+    guard !suspects.isEmpty else { return false }
+    let refreshed = try await state.refresh()
+    let freshInventory = await geometryProfiles.mergingCapabilities(into: refreshed.snapshot.inventory)
+    guard
+      let fallback =
+        freshInventory.displays.first(where: \.isPrimary) ?? freshInventory.displays.first
+    else {
+      throw WorkspaceRequestError.displayRequired
+    }
+    var candidate = await workspaces.snapshot()
+    var result = try candidate.reconcileDisplayTopology(
+      connectedDisplayIDs: Set(freshInventory.displays.map(\.id)), fallbackDisplayID: fallback.id)
+    if let currentConfiguration = await configuration.snapshot().configuration {
+      result.workspaceState = await workspaces.configuredState(
+        currentConfiguration, defaultDisplayID: fallback.id,
+        displays: freshInventory.displays, state: result.workspaceState
+      )
+    }
+    try await workspaces.commitFocus(result)
+    await publishSessionEvent(
+      .displayTopologyChanged,
+      data: .object([
+        "changed_display_ids": .array(suspects.sorted().map(JSONValue.string)),
+        "attached_displays": .number(Double(freshInventory.displays.count)),
+        "migrated_workspaces": .array(result.modifiedWorkspaces.map(JSONValue.string)),
+      ]))
+    return true
   }
 
   private func resolveDisplay(

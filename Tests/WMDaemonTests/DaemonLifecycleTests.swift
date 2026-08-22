@@ -60,6 +60,32 @@ private struct TwoDisplays: DisplayInventorySource {
   }
 }
 
+private actor ToggleableDisplays: DisplayInventorySource {
+  private var externalConnected = true
+  func setExternalConnected(_ connected: Bool) { externalConnected = connected }
+  func displays() async -> SourceResult<[DisplayObservation]> {
+    var value = [
+      DisplayObservation(
+        id: "display:built-in", name: "Built-in Retina Display", isBuiltin: true, isPrimary: true,
+        frame: .init(x: 0, y: 0, width: 1000, height: 800),
+        visibleFrame: .init(x: 0, y: 0, width: 1000, height: 780), backingScale: 2,
+        identifiers: .init(nsscreenNumber: "1", cgDirectDisplayID: "1", uuid: "built-in")
+      )
+    ]
+    if externalConnected {
+      value.append(
+        DisplayObservation(
+          id: "display:external", name: "Studio Display", isBuiltin: false, isPrimary: false,
+          frame: .init(x: 1000, y: 0, width: 1200, height: 900),
+          visibleFrame: .init(x: 1000, y: 0, width: 1200, height: 860), backingScale: 2,
+          identifiers: .init(nsscreenNumber: "2", cgDirectDisplayID: "7", uuid: "external")
+        ))
+    }
+    return .init(
+      value: value, health: .init(source: .displays, status: .healthy, permissionGranted: nil))
+  }
+}
+
 private struct StubCG: CoreGraphicsInventorySource {
   func windows() async -> SourceResult<[WMInventory.RawCGWindow]> {
     .init(
@@ -1191,6 +1217,88 @@ private func response(_ text: String) throws -> Response {
     configuration, defaultDisplayID: "display:1", displays: displays, state: returned
   )
   #expect(returned[workspace: "B"]?.margin.top == 0)
+}
+
+@Test func workspaceFocusMigrationReappliesDestinationDisplayOverrides() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  let displays = ToggleableDisplays()
+  let state = DaemonHandler.State(
+    provider: SystemInventoryProvider(
+      scanner: .init(
+        sources: .init(displays: displays, accessibility: StubAX(), coreGraphics: StubCG())
+      )))
+  let controller = try WorkspaceController(
+    buildVersion: "test", stateURL: directory.appendingPathComponent("state.json")
+  )
+  let handler = DaemonHandler(state: state, workspaces: controller)
+  let inventory = try await state.refresh().snapshot.inventory
+  _ = try await handler.loadConfiguration(
+    source: #"""
+      {
+        "defaults":{"margin":{"top":5},"gap":3},
+        "displays":[{"display":{"ns_screen_number":"2"},"margin":{"top":32},"gap":7}],
+        "workspaces":[{"name":"T","preferred_display":"display:external"}]
+      }
+      """#, inventory: inventory)
+  let before = try #require(await controller.snapshot()[workspace: "T"])
+  #expect(before.displayID == "display:external")
+  #expect(before.margin.top == 32)
+  #expect(before.gap == 7)
+
+  await displays.setExternalConnected(false)
+  _ = try await state.refresh()
+  let replies = await handler.handle(
+    text: try clientMessage(
+      .request(
+        .init(
+          requestId: "focus", method: .workspaceFocus,
+          params: ["name": .string("T"), "return_mode": .string("completion")]
+        ))), clientID: UUID())
+  #expect(try response(replies[0]).error == nil)
+
+  let migrated = try #require(await controller.snapshot()[workspace: "T"])
+  #expect(migrated.displayID == "display:built-in")
+  #expect(migrated.margin.top == 5)
+  #expect(migrated.gap == 3)
+  try? FileManager.default.removeItem(at: directory)
+}
+
+@Test func sessionResyncMigrationReappliesDestinationDisplayOverrides() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  let displays = ToggleableDisplays()
+  let state = DaemonHandler.State(
+    provider: SystemInventoryProvider(
+      scanner: .init(
+        sources: .init(displays: displays, accessibility: StubAX(), coreGraphics: StubCG())
+      )))
+  let controller = try WorkspaceController(
+    buildVersion: "test", stateURL: directory.appendingPathComponent("state.json")
+  )
+  let handler = DaemonHandler(state: state, workspaces: controller)
+  let inventory = try await state.refresh().snapshot.inventory
+  _ = try await handler.loadConfiguration(
+    source: #"""
+      {
+        "defaults":{"margin":{"top":5},"gap":3},
+        "displays":[{"display":{"ns_screen_number":"2"},"margin":{"top":32},"gap":7}],
+        "workspaces":[{"name":"T","preferred_display":"display:external"}]
+      }
+      """#, inventory: inventory)
+  let before = try #require(await controller.snapshot()[workspace: "T"])
+  #expect(before.displayID == "display:external")
+  #expect(before.margin.top == 32)
+  #expect(before.gap == 7)
+
+  await displays.setExternalConnected(false)
+  try await handler.resynchronizeSession(.unlock)
+
+  let migrated = try #require(await controller.snapshot()[workspace: "T"])
+  #expect(migrated.displayID == "display:built-in")
+  #expect(migrated.margin.top == 5)
+  #expect(migrated.gap == 3)
+  try? FileManager.default.removeItem(at: directory)
 }
 
 @Test func wildcardDisplayLayoutOverridesApplyToEveryConnectedDisplay() async throws {

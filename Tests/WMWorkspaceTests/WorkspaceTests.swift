@@ -380,6 +380,36 @@ import Testing
   try state.validate()
 }
 
+@Test func topologyMigrationRetargetsRuntimeDisplayAssignments() throws {
+  var state = WorkspaceState(
+    workspaces: [
+      tiled("left", display: "d1", windows: ["left-window"], visible: true, focused: true),
+      tiled("pinned", display: "d2", windows: ["pinned-window"], visible: true),
+      tiled("unpinned", display: "d2", windows: ["unpinned-window"]),
+    ],
+    focusedWorkspaceName: "left",
+    displays: [
+      "d1": .init(visibleWorkspaceName: "left"),
+      "d2": .init(visibleWorkspaceName: "pinned"),
+    ],
+    runtimeDisplayAssignments: ["pinned": "d2"]
+  )
+
+  _ = try state.reconcileDisplayTopology(connectedDisplayIDs: ["d1"], fallbackDisplayID: "d1")
+
+  #expect(state[workspace: "pinned"]?.displayID == "d1")
+  #expect(state.runtimeDisplayAssignments["pinned"] == "d1")
+  #expect(state.runtimeDisplayAssignments["unpinned"] == nil)
+  try state.validate()
+
+  _ = try state.reconcileDisplayTopology(
+    connectedDisplayIDs: ["d1", "d2"], fallbackDisplayID: "d1")
+
+  #expect(state[workspace: "pinned"]?.displayID == "d2")
+  #expect(state.runtimeDisplayAssignments["pinned"] == "d2")
+  try state.validate()
+}
+
 @Test func observedWindowReconciliationPreservesMissingAssignmentsAndAdoptsIntoFocusedWorkspace() throws {
   var state = WorkspaceState(
     workspaces: [
@@ -503,6 +533,22 @@ import Testing
   guard case .frames(let frames) = plan else { Issue.record("expected frames"); return }
   #expect(frames["settings"]?.width == 723)
   #expect(frames["peer"]?.width == 781)
+}
+
+@Test func floatingWindowDoesNotForceStackFallback() {
+  var workspace = tiled("tile", display: "d", windows: ["safari", "ghostty"])
+  workspace.floatingWindowIDs = ["panel"]
+  workspace.windowIDs.append("panel")
+  workspace.layoutPolicy = [.greedy, .overlap, .stack, .overflow]
+
+  let result = workspace.layoutResult(
+    in: .init(x: 0, y: 0, width: 3_440, height: 1_408), cooperation: [:])
+
+  #expect(result.effectivePolicy == .greedy)
+  #expect(!result.fallbackOccurred)
+  guard case .frames(let frames) = result.plan else { Issue.record("expected frames"); return }
+  // Only BSP members receive tree frames; the floating window is not tiled.
+  #expect(Set(frames.keys) == ["safari", "ghostty"])
 }
 
 @Test func invalidNestedMaximumAllocationFallsBackToStack() {

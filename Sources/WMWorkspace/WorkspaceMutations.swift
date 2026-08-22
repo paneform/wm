@@ -373,6 +373,9 @@ private extension WorkspaceState {
                     displays[temporaryDisplay]?.visibleWorkspaceName = nil
                 }
                 workspaces[index].displayID = displayID
+                if runtimeDisplayAssignments[name] != nil {
+                    runtimeDisplayAssignments[name] = displayID
+                }
                 workspaces[index].visible = false
             }
             let visible = saved.visibleWorkspaceName.flatMap { self[workspace: $0]?.displayID == displayID ? $0 : nil }
@@ -403,6 +406,9 @@ private extension WorkspaceState {
                 guard let index = index(of: name) else { continue }
                 let shouldReveal = workspaces[index].visible && !fallbackHasVisible
                 workspaces[index].displayID = fallbackDisplayID
+                if runtimeDisplayAssignments[name] != nil {
+                    runtimeDisplayAssignments[name] = fallbackDisplayID
+                }
                 workspaces[index].visible = shouldReveal
                 if shouldReveal {
                     displays[fallbackDisplayID, default: .init()].visibleWorkspaceName = name
