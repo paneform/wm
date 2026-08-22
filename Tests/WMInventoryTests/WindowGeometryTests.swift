@@ -234,6 +234,47 @@ final class WindowGeometryTests: XCTestCase {
     XCTAssertEqual(profile?.minimumWidth, 800)
   }
 
+  func testWorkAreaClampedStableOutcomeIsNotPersistedAsAppConstraint() async throws {
+    let recorder = WindowGeometryProfileRecorder()
+    let workArea = InventoryRect(x: 0, y: 25, width: 1_512, height: 982)
+    let requested = InventoryRect(x: 756, y: 25, width: 900, height: 982)
+    let clamped = InventoryRect(x: 756, y: 25, width: 756, height: 982)
+    for _ in 0..<3 {
+      let adapter = FakeGeometryAdapter(frame: workArea, transform: { _, _ in clamped })
+      let outcome = try await WindowGeometryService(adapter: adapter, profiles: recorder)
+        .setGeometry(
+          window: window,
+          request: .init(
+            frame: requested, policy: .init(maximumAttempts: 3), workArea: workArea)
+        )
+      XCTAssertEqual(outcome.classification, .failed)
+    }
+
+    let profile = await recorder.profile(for: window)
+    XCTAssertNil(profile?.maximumWidth)
+    XCTAssertEqual(profile?.pendingMaximumWidthSamples, 0)
+    XCTAssertNil(profile?.minimumHeight)
+    XCTAssertEqual(profile?.pendingMinimumHeightSamples, 0)
+  }
+
+  func testInteriorConstrainedOutcomeStillPersistsWithWorkAreaKnown() async throws {
+    let recorder = WindowGeometryProfileRecorder()
+    let workArea = InventoryRect(x: 0, y: 0, width: 3_440, height: 1_440)
+    let requested = InventoryRect(x: 756, y: 32, width: 900, height: 982)
+    let clamped = InventoryRect(x: 756, y: 32, width: 700, height: 982)
+    let adapter = FakeGeometryAdapter(frame: requested, transform: { _, _ in clamped })
+    let outcome = try await WindowGeometryService(adapter: adapter, profiles: recorder)
+      .setGeometry(
+        window: window,
+        request: .init(
+          frame: requested, policy: .init(maximumAttempts: 5), workArea: workArea)
+      )
+
+    XCTAssertEqual(outcome.classification, .constrained)
+    let profile = await recorder.profile(for: window)
+    XCTAssertEqual(profile?.maximumWidth, 700)
+  }
+
   func testUnchangedInitialFrameIsNotLearnedAsMinimum() async throws {
     let recorder = WindowGeometryProfileRecorder()
     let fullscreen = InventoryRect(x: 100, y: 100, width: 1_512, height: 700)

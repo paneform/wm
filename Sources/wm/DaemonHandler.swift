@@ -2793,7 +2793,8 @@ actor DaemonHandler: WebSocketRequestHandler {
           try requireCurrentSessionGeneration(sessionGeneration)
           let outcome = try await geometry.setGeometry(
             window: window,
-            request: .init(frame: inventoryRect(target), policy: retryPolicy)
+            request: .init(
+              frame: inventoryRect(target), policy: retryPolicy, workArea: workArea)
           )
           try requireCurrentSessionGeneration(sessionGeneration)
           if movedIDs.insert(window.id).inserted { moved.append(window) }
@@ -2801,8 +2802,8 @@ actor DaemonHandler: WebSocketRequestHandler {
           case .exact:
             continue
           case .constrained:
-            let minimum = Self.constrainedMinimum(fitted: outcome.observedFrame, target: target)
-            let maximum = Self.constrainedMaximum(fitted: outcome.observedFrame, target: target)
+            let learned = Self.learnableConstraints(
+              fitted: outcome.observedFrame, target: target, workArea: workArea)
             guard let content = osContent else { throw WindowGeometryFailure(
               code: .geometryVerificationFailed,
               message: "display disappeared during tiling")
@@ -2823,20 +2824,19 @@ actor DaemonHandler: WebSocketRequestHandler {
             {
               continue
             }
-            guard minimum != .init() || maximum != .init() else { continue }
-            if minimum != .init() { windowMinimumSizes[window.id] = minimum }
+            guard learned.minimum != .init() || learned.maximum != .init() else { continue }
+            if learned.minimum != .init() { windowMinimumSizes[window.id] = learned.minimum }
             let previous = cooperation[window.id] ?? .init()
             cooperation[window.id] = .init(
               minimumSize: .init(
-                width: max(previous.minimumSize.width, minimum.width),
-                height: max(previous.minimumSize.height, minimum.height)),
+                width: max(previous.minimumSize.width, learned.minimum.width),
+                height: max(previous.minimumSize.height, learned.minimum.height)),
               maximumSize: .init(
-                width: maximum.width ?? previous.maximumSize.width,
-                height: maximum.height ?? previous.maximumSize.height),
+                width: learned.maximum.width ?? previous.maximumSize.width,
+                height: learned.maximum.height ?? previous.maximumSize.height),
               isCooperative: false)
             shouldReplan = true
           case .progressing, .failed:
-            let minimum = Self.constrainedMinimum(fitted: outcome.observedFrame, target: target)
             guard let content = osContent else { throw WindowGeometryFailure(
               code: .geometryVerificationFailed,
               message: "display disappeared during tiling")
@@ -2857,7 +2857,8 @@ actor DaemonHandler: WebSocketRequestHandler {
               try requireCurrentSessionGeneration(sessionGeneration)
               let correction = try await geometry.setGeometry(
                 window: window,
-                request: .init(frame: inventoryRect(corrected), policy: retryPolicy))
+                request: .init(
+                  frame: inventoryRect(corrected), policy: retryPolicy, workArea: workArea))
               try requireCurrentSessionGeneration(sessionGeneration)
               let correctedFrame = correction.observedFrame
               if correctedFrame.x >= content.x - 1,
@@ -2872,9 +2873,12 @@ actor DaemonHandler: WebSocketRequestHandler {
             {
               continue
             }
-            if minimum != .init() {
-              windowMinimumSizes[window.id] = minimum
-              cooperation[window.id] = .init(minimumSize: minimum, isCooperative: false)
+            let sanitizedMinimum = Self.learnableConstraints(
+              fitted: outcome.observedFrame, target: target, workArea: workArea
+            ).minimum
+            if sanitizedMinimum != .init() {
+              windowMinimumSizes[window.id] = sanitizedMinimum
+              cooperation[window.id] = .init(minimumSize: sanitizedMinimum, isCooperative: false)
             }
             throw WindowGeometryFailure(
               code: .geometryVerificationFailed,
@@ -2937,14 +2941,17 @@ actor DaemonHandler: WebSocketRequestHandler {
         continue
       }
       let learned = WorkspaceMinimumSize(
-        width: profile.minimumWidth ?? 0, height: profile.minimumHeight ?? 0
+        width: Self.viableProfileMinimum(profile.minimumWidth, observed: window.frame?.width) ?? 0,
+        height: Self.viableProfileMinimum(profile.minimumHeight, observed: window.frame?.height)
+          ?? 0
       )
       let minimum = WorkspaceMinimumSize(
         width: max(sessionMinimum.width, learned.width),
         height: max(sessionMinimum.height, learned.height)
       )
       let maximum = WorkspaceMaximumSize(
-        width: profile.maximumWidth, height: profile.maximumHeight)
+        width: Self.viableProfileMaximum(profile.maximumWidth, observed: window.frame?.width),
+        height: Self.viableProfileMaximum(profile.maximumHeight, observed: window.frame?.height))
       result[id] = .init(
         minimumSize: minimum,
         maximumSize: maximum,
@@ -3034,6 +3041,50 @@ actor DaemonHandler: WebSocketRequestHandler {
     .init(
       width: fitted.width < target.width ? fitted.width : nil,
       height: fitted.height < target.height ? fitted.height : nil)
+  }
+
+  static func learnableConstraintAxes(
+    observed: InventoryRect, workArea: InventoryRect,
+    tolerance: Double = WindowGeometryObservation.workAreaFlushTolerance
+  ) -> (width: Bool, height: Bool) {
+    let widthFlush =
+      abs(observed.x - workArea.x) <= tolerance
+      || abs(observed.x + observed.width - workArea.x - workArea.width) <= tolerance
+    let heightFlush =
+      abs(observed.y - workArea.y) <= tolerance
+      || abs(observed.y + observed.height - workArea.y - workArea.height) <= tolerance
+    return (width: !widthFlush, height: !heightFlush)
+  }
+
+  static func learnableConstraints(
+    fitted: InventoryRect, target: WorkspaceLayoutRect, workArea: InventoryRect,
+    tolerance: Double = WindowGeometryObservation.workAreaFlushTolerance
+  ) -> (minimum: WorkspaceMinimumSize, maximum: WorkspaceMaximumSize) {
+    var minimum = constrainedMinimum(fitted: fitted, target: target)
+    var maximum = constrainedMaximum(fitted: fitted, target: target)
+    let axes = learnableConstraintAxes(
+      observed: fitted, workArea: workArea, tolerance: tolerance)
+    if !axes.width {
+      minimum.width = 0
+      maximum.width = nil
+    }
+    if !axes.height {
+      minimum.height = 0
+      maximum.height = nil
+    }
+    return (minimum, maximum)
+  }
+
+  static func viableProfileMinimum(_ bound: Double?, observed: Double?) -> Double? {
+    guard let bound else { return nil }
+    guard let observed, observed + 1 < bound else { return bound }
+    return nil
+  }
+
+  static func viableProfileMaximum(_ bound: Double?, observed: Double?) -> Double? {
+    guard let bound else { return nil }
+    guard let observed, observed - 1 > bound else { return bound }
+    return nil
   }
 
   private func workspacePolicies(_ policies: [WMProtocol.LayoutPolicy]) -> [WMWorkspace

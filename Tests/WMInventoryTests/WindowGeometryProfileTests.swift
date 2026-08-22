@@ -132,6 +132,57 @@ final class WindowGeometryProfileTests: XCTestCase {
         XCTAssertEqual(profile?.pendingMinimumWidthSamples, 0)
     }
 
+    func testWorkAreaFlushObservationsDoNotLearnConstraints() async throws {
+        let recorder = WindowGeometryProfileRecorder()
+        let workArea = InventoryRect(x: 0, y: 25, width: 1_512, height: 982)
+        for _ in 0..<3 {
+            try await recorder.record(.init(
+                window: profileWindow(), context: .init(),
+                requested: .init(x: 756, y: 25, width: 900, height: 950),
+                observed: .init(x: 756, y: 25, width: 756, height: 982), attempts: 1,
+                outcome: .constrained, observedAt: .distantPast, workArea: workArea
+            ))
+        }
+        let profile = await recorder.profile(for: profileWindow())
+        XCTAssertEqual(profile?.sampleCount, 3)
+        XCTAssertNil(profile?.maximumWidth)
+        XCTAssertEqual(profile?.pendingMaximumWidthSamples, 0)
+        XCTAssertNil(profile?.minimumHeight)
+        XCTAssertEqual(profile?.pendingMinimumHeightSamples, 0)
+    }
+
+    func testLeftFlushObservationDoesNotLearnMinimum() async throws {
+        let recorder = WindowGeometryProfileRecorder()
+        let workArea = InventoryRect(x: 0, y: 0, width: 1_512, height: 982)
+        for _ in 0..<3 {
+            try await recorder.record(.init(
+                window: profileWindow(), context: .init(),
+                requested: .init(x: 0, y: 0, width: 300, height: 500),
+                observed: .init(x: 0, y: 0, width: 480, height: 500), attempts: 1,
+                outcome: .constrained, observedAt: .distantPast, workArea: workArea
+            ))
+        }
+        let profile = await recorder.profile(for: profileWindow())
+        XCTAssertNil(profile?.minimumWidth)
+        XCTAssertEqual(profile?.pendingMinimumWidthSamples, 0)
+    }
+
+    func testInteriorObservationsStillLearnWithWorkAreaPresent() async throws {
+        let recorder = WindowGeometryProfileRecorder()
+        let workArea = InventoryRect(x: 0, y: 0, width: 3_440, height: 1_440)
+        for _ in 0..<3 {
+            try await recorder.record(.init(
+                window: profileWindow(), context: .init(),
+                requested: .init(x: 756, y: 0, width: 300, height: 500),
+                observed: .init(x: 760, y: 10, width: 480, height: 510), attempts: 1,
+                outcome: .constrained, observedAt: .distantPast, workArea: workArea
+            ))
+        }
+        let profile = await recorder.profile(for: profileWindow())
+        XCTAssertEqual(profile?.minimumWidth, 480)
+        XCTAssertEqual(profile?.minimumHeight, 510)
+    }
+
     func testCapabilityPrecedenceAndProfileMerge() async throws {
         var reportedFixed = profileWindow()
         reportedFixed.geometryCapabilities.position.reported = .fixed

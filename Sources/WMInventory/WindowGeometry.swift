@@ -125,14 +125,17 @@ public struct WindowGeometrySetRequest: Equatable, Sendable {
   public var frame: InventoryRect
   public var tolerance: Double
   public var policy: WindowGeometryRetryPolicy
+  public var workArea: InventoryRect?
 
   public init(
     frame: InventoryRect, tolerance: Double = 1,
-    policy: WindowGeometryRetryPolicy = .init()
+    policy: WindowGeometryRetryPolicy = .init(),
+    workArea: InventoryRect? = nil
   ) {
     self.frame = frame
     self.tolerance = tolerance
     self.policy = policy
+    self.workArea = workArea
   }
 }
 
@@ -267,7 +270,7 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
       if usesProfiles && stableClamp && lastClassification == .failed {
         try await observe(
           window, requested, observed, index + 1, lastClassification,
-          stableClamp: true
+          stableClamp: true, workArea: request.workArea
         )
         profile = await profiles?.profile(for: window, context: context)
         lastClassification = classify(
@@ -279,7 +282,7 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
         if usesProfiles && !stableClamp {
           try await observe(
             window, requested, observed, index + 1, lastClassification,
-            stableClamp: stableClamp
+            stableClamp: stableClamp, workArea: request.workArea
           )
         }
         return .init(
@@ -292,7 +295,7 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
     if usesProfiles {
       try await observe(
         window, requested, observed, attemptLimit, lastClassification,
-        stableClamp: stableClamp
+        stableClamp: stableClamp, workArea: request.workArea
       )
     }
     return .init(
@@ -769,12 +772,13 @@ public struct WindowGeometryService<Adapter: WindowGeometryAdapter>: Sendable {
   private func observe(
     _ window: NormalizedWindow, _ requested: InventoryRect, _ observed: InventoryRect,
     _ attempts: Int, _ outcome: WindowGeometryAttemptOutcome,
-    stableClamp: Bool
+    stableClamp: Bool, workArea: InventoryRect?
   ) async throws {
     try await profiles?.record(
       .init(
         window: window, context: profileContext(window), requested: requested, observed: observed,
-        attempts: attempts, outcome: outcome, stableClamp: stableClamp, observedAt: now()
+        attempts: attempts, outcome: outcome, stableClamp: stableClamp, observedAt: now(),
+        workArea: workArea
       ))
   }
 

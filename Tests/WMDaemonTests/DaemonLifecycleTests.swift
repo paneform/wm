@@ -275,6 +275,83 @@ private func response(_ text: String) throws -> Response {
     ) == .init())
 }
 
+@Test func workAreaFlushedConstraintsAreNotLearnedFromSessionObservations() {
+  let workArea = InventoryRect(x: 0, y: 32, width: 1_512, height: 950)
+  let target = WorkspaceLayoutRect(x: 756, y: 32, width: 800, height: 1_000)
+  let fitted = InventoryRect(x: 756, y: 32, width: 756, height: 950)
+
+  let learned = DaemonHandler.learnableConstraints(
+    fitted: fitted, target: target, workArea: workArea)
+
+  #expect(learned.maximum.width == nil)
+  #expect(learned.maximum.height == nil)
+  #expect(learned.minimum == WorkspaceMinimumSize())
+}
+
+@Test func flushedOversizedObservationDoesNotBecomeSessionMinimum() {
+  let workArea = InventoryRect(x: 0, y: 32, width: 1_512, height: 950)
+  let target = WorkspaceLayoutRect(x: 32, y: 32, width: 700, height: 886)
+  let fitted = InventoryRect(x: 0, y: 32, width: 1_512, height: 950)
+
+  let learned = DaemonHandler.learnableConstraints(
+    fitted: fitted, target: target, workArea: workArea)
+
+  #expect(learned.minimum == WorkspaceMinimumSize())
+  #expect(learned.maximum.width == nil)
+  #expect(learned.maximum.height == nil)
+}
+
+@Test func interiorConstraintsAreStillLearnedWhenWorkAreaKnown() {
+  let workArea = InventoryRect(x: 0, y: 0, width: 3_440, height: 1_440)
+  let target = WorkspaceLayoutRect(x: 756, y: 32, width: 800, height: 1_000)
+  let fitted = InventoryRect(x: 756, y: 32, width: 700, height: 950)
+
+  let learned = DaemonHandler.learnableConstraints(
+    fitted: fitted, target: target, workArea: workArea)
+
+  #expect(learned.maximum.width == 700)
+  #expect(learned.maximum.height == 950)
+  #expect(learned.minimum == WorkspaceMinimumSize())
+}
+
+@Test func interiorOversizedObservationStillBecomesSessionMinimum() {
+  let workArea = InventoryRect(x: 0, y: 0, width: 3_440, height: 1_440)
+  let target = WorkspaceLayoutRect(x: 32, y: 32, width: 700, height: 886)
+  let fitted = InventoryRect(x: 10, y: 40, width: 1_600, height: 1_000)
+
+  let learned = DaemonHandler.learnableConstraints(
+    fitted: fitted, target: target, workArea: workArea)
+
+  #expect(learned.minimum.width == 1_600)
+  #expect(learned.minimum.height == 1_000)
+}
+
+@Test func flushToleranceDistinguishesNearEdgeObservations() {
+  let workArea = InventoryRect(x: 0, y: 0, width: 1_512, height: 950)
+  let target = WorkspaceLayoutRect(x: 756, y: 0, width: 762, height: 950)
+  let twoPointsInside = InventoryRect(x: 756, y: 0, width: 754, height: 950)
+  let threePointsInside = InventoryRect(x: 756, y: 0, width: 753, height: 950)
+
+  #expect(
+    DaemonHandler.learnableConstraints(
+      fitted: twoPointsInside, target: target, workArea: workArea
+    ).maximum.width == nil)
+  #expect(
+    DaemonHandler.learnableConstraints(
+      fitted: threePointsInside, target: target, workArea: workArea
+    ).maximum.width == 753)
+}
+
+@Test func profileBoundsContradictedByCurrentFrameAreDiscardedAtUseTime() {
+  #expect(DaemonHandler.viableProfileMinimum(2_434, observed: 800) == nil)
+  #expect(DaemonHandler.viableProfileMinimum(2_434, observed: 2_500) == 2_434)
+  #expect(DaemonHandler.viableProfileMinimum(480, observed: nil) == 480)
+  #expect(DaemonHandler.viableProfileMinimum(nil, observed: 800) == nil)
+  #expect(DaemonHandler.viableProfileMaximum(700, observed: 900) == nil)
+  #expect(DaemonHandler.viableProfileMaximum(900, observed: 800) == 900)
+  #expect(DaemonHandler.viableProfileMaximum(nil, observed: 900) == nil)
+}
+
 @Test func workspaceGeometryPolicyTranslatesToEngineRetryPolicy() {
   #expect(
     DaemonHandler.geometryRetryPolicy(retries: 2, mode: .store)

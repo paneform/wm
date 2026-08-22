@@ -138,6 +138,8 @@ public struct WindowGeometryProfileCatalog: Codable, Equatable, Sendable {
 }
 
 public struct WindowGeometryObservation: Sendable {
+    public static let workAreaFlushTolerance: Double = 2
+
     public var window: NormalizedWindow
     public var context: WindowGeometryProfileContext
     public var requested: InventoryRect
@@ -146,12 +148,13 @@ public struct WindowGeometryObservation: Sendable {
     public var outcome: WindowGeometryAttemptOutcome
     public var stableClamp: Bool
     public var observedAt: Date
+    public var workArea: InventoryRect?
 
     public init(
         window: NormalizedWindow, context: WindowGeometryProfileContext,
         requested: InventoryRect, observed: InventoryRect, attempts: Int,
         outcome: WindowGeometryAttemptOutcome, stableClamp: Bool = false,
-        observedAt: Date
+        observedAt: Date, workArea: InventoryRect? = nil
     ) {
         self.window = window
         self.context = context
@@ -161,6 +164,23 @@ public struct WindowGeometryObservation: Sendable {
         self.outcome = outcome
         self.stableClamp = stableClamp
         self.observedAt = observedAt
+        self.workArea = workArea
+    }
+
+    public func widthFlushesWithWorkArea(
+        tolerance: Double = WindowGeometryObservation.workAreaFlushTolerance
+    ) -> Bool {
+        guard let workArea else { return false }
+        return abs(observed.x - workArea.x) <= tolerance
+            || abs(observed.x + observed.width - workArea.x - workArea.width) <= tolerance
+    }
+
+    public func heightFlushesWithWorkArea(
+        tolerance: Double = WindowGeometryObservation.workAreaFlushTolerance
+    ) -> Bool {
+        guard let workArea else { return false }
+        return abs(observed.y - workArea.y) <= tolerance
+            || abs(observed.y + observed.height - workArea.y - workArea.height) <= tolerance
     }
 }
 
@@ -205,25 +225,27 @@ public actor WindowGeometryProfileRecorder {
         }
         profile.lastObservedAt = observation.observedAt
         if observation.outcome == .constrained || observation.stableClamp {
-            if observation.observed.width > observation.requested.width {
+            let widthLearnable = !observation.widthFlushesWithWorkArea()
+            let heightLearnable = !observation.heightFlushesWithWorkArea()
+            if widthLearnable, observation.observed.width > observation.requested.width {
                 updateMinimum(
                     observation.observed.width, pending: &profile.pendingMinimumWidth,
                     samples: &profile.pendingMinimumWidthSamples, learned: &profile.minimumWidth
                 )
             }
-            if observation.observed.height > observation.requested.height {
+            if heightLearnable, observation.observed.height > observation.requested.height {
                 updateMinimum(
                     observation.observed.height, pending: &profile.pendingMinimumHeight,
                     samples: &profile.pendingMinimumHeightSamples, learned: &profile.minimumHeight
                 )
             }
-            if observation.observed.width < observation.requested.width {
+            if widthLearnable, observation.observed.width < observation.requested.width {
                 updateMaximum(
                     observation.observed.width, pending: &profile.pendingMaximumWidth,
                     samples: &profile.pendingMaximumWidthSamples, learned: &profile.maximumWidth
                 )
             }
-            if observation.observed.height < observation.requested.height {
+            if heightLearnable, observation.observed.height < observation.requested.height {
                 updateMaximum(
                     observation.observed.height, pending: &profile.pendingMaximumHeight,
                     samples: &profile.pendingMaximumHeightSamples, learned: &profile.maximumHeight
