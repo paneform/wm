@@ -2151,6 +2151,67 @@ private func response(_ text: String) throws -> Response {
   try? FileManager.default.removeItem(at: directory)
 }
 
+@Test func startupAuditPurgesLegacyPhantomDisplaysFromPersistedState() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let builtin = "display:built-in-uuid"
+  let legacy = "display:2"
+  let store = WorkspaceStateStore<WMWorkspace.WorkspaceState>(
+    stateURL: directory.appendingPathComponent("state.json"), buildVersion: "test"
+  ) { try $0.validate() }
+  let persisted = WMWorkspace.WorkspaceState(
+    workspaces: [
+      .init(
+        name: "1", origin: .configured, displayID: builtin, visible: true,
+        windowIDs: ["window:cg:155"], focusedWindowID: "window:cg:155",
+        bsp: .init(root: .leaf(windowID: "window:cg:155"))
+      ),
+      .init(name: "T", origin: .runtime, displayID: legacy, visible: true, focused: true),
+    ],
+    focusedWorkspaceName: "T",
+    displays: [builtin: .init(visibleWorkspaceName: "1"), legacy: .init(visibleWorkspaceName: "T")],
+    runtimeDisplayAssignments: ["T": legacy]
+  )
+  try store.save(persisted)
+  let controller = WorkspaceController(
+    store: store, state: persisted
+  )
+  let handler = DaemonHandler(
+    state: .init(
+      provider: SystemInventoryProvider(
+        scanner: .init(
+          sources: .init(
+            displays: StubDisplays(), accessibility: StubAX(), coreGraphics: StubCG()
+          )))),
+    workspaces: controller, geometryEffects: DirectionalGeometry(frames: [:])
+  )
+  var inventory = completeInventory(["window:cg:155"])
+  inventory.displays = [
+    .init(
+      id: builtin, name: "Built-in Retina Display", isBuiltin: true, isPrimary: true,
+      frame: .init(x: 0, y: 0, width: 1_000, height: 800),
+      visibleFrame: .init(x: 0, y: 0, width: 1_000, height: 780), backingScale: 2,
+      identifiers: .init(uuid: "built-in-uuid"))
+  ]
+
+  try await handler.auditStartupIntent(inventory)
+
+  let state = await controller.snapshot()
+  try state.validate()
+  let referenced = Set(state.workspaces.map(\.displayID))
+    .union(state.displays.keys)
+    .union(state.runtimeDisplayAssignments.values)
+  #expect(referenced == [builtin])
+  #expect(state[workspace: "T"]?.displayID == builtin)
+  guard case .loaded(let reloaded) = try store.load() else {
+    Issue.record("expected loaded persisted state")
+    return
+  }
+  try reloaded.validate()
+  #expect(reloaded.displays[legacy] == nil)
+}
+
 @Test func periodicFocusSkipsGeometryForRetainedOmittedWindows() async throws {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

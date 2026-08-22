@@ -423,7 +423,11 @@ actor DaemonHandler: WebSocketRequestHandler {
   func auditStartupIntent(_ inventory: InventorySnapshot) async throws {
     let inventory = await geometryProfiles.mergingCapabilities(into: inventory)
     let committed = await workspaces.snapshot()
-    let candidate = StartupIntentAudit.candidate(state: committed, inventory: inventory)
+    var candidate = StartupIntentAudit.candidate(state: committed, inventory: inventory)
+    if let fallback = inventory.displays.first(where: \.isPrimary) ?? inventory.displays.first {
+      _ = try candidate.reconcileDisplayTopology(
+        connectedDisplayIDs: Set(inventory.displays.map(\.id)), fallbackDisplayID: fallback.id)
+    }
     try await auditCommittedIntent(inventory, state: candidate)
     try await workspaces.commit(candidate)
   }

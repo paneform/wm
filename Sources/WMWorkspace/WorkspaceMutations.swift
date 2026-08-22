@@ -313,6 +313,7 @@ extension WorkspaceState {
             let before = state
             state.restoreReconnectedDisplays(connectedDisplayIDs)
             state.migrateDisconnectedDisplays(connectedDisplayIDs, fallbackDisplayID: fallbackDisplayID)
+            state.purgeUnresolvedDisplays(connectedDisplayIDs)
             let modified = state.workspaces.compactMap { workspace in
                 before[workspace: workspace.name] == workspace ? nil : workspace.name
             }.sorted()
@@ -416,6 +417,12 @@ private extension WorkspaceState {
                     fallbackHasVisible = true
                 }
             }
+            displays.removeValue(forKey: displayID)
+        }
+    }
+
+    mutating func purgeUnresolvedDisplays(_ connected: Set<WorkspaceDisplayID>) {
+        for displayID in displays.keys where !connected.contains(displayID) {
             displays.removeValue(forKey: displayID)
         }
     }

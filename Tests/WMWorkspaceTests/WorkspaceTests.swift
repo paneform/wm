@@ -410,6 +410,61 @@ import Testing
   try state.validate()
 }
 
+@Test func topologyReconciliationDropsPhantomDisplayEntriesWithoutWorkspaces() throws {
+  var state = WorkspaceState(
+    workspaces: [
+      tiled("1", display: "display:uuid-a", windows: [], visible: true, focused: true)
+    ],
+    focusedWorkspaceName: "1",
+    displays: [
+      "display:uuid-a": .init(visibleWorkspaceName: "1"),
+      "display:2": .init(),
+    ]
+  )
+
+  _ = try state.reconcileDisplayTopology(
+    connectedDisplayIDs: ["display:uuid-a"], fallbackDisplayID: "display:uuid-a")
+
+  #expect(Set(state.displays.keys) == ["display:uuid-a"])
+  try state.validate()
+}
+
+@Test func topologyReconciliationMigratesLegacyDisplayIDsAndDropsStaleEntries() throws {
+  let builtin = "display:uuid-a"
+  let legacy = "display:2"
+  var state = WorkspaceState(
+    workspaces: [
+      tiled("1", display: builtin, windows: [], visible: true),
+      tiled("T", display: legacy, windows: ["t-window"], visible: true, focused: true),
+    ],
+    focusedWorkspaceName: "T",
+    displays: [
+      builtin: .init(visibleWorkspaceName: "1"),
+      legacy: .init(visibleWorkspaceName: "T"),
+    ],
+    runtimeDisplayAssignments: ["T": legacy]
+  )
+  try state.validate()
+
+  _ = try state.reconcileDisplayTopology(connectedDisplayIDs: [builtin], fallbackDisplayID: builtin)
+
+  #expect(state[workspace: "T"]?.displayID == builtin)
+  #expect(state[workspace: "T"]?.visible == false)
+  #expect(state.runtimeDisplayAssignments["T"] == builtin)
+  let referenced = Set(state.workspaces.map(\.displayID))
+    .union(state.displays.keys)
+    .union(state.runtimeDisplayAssignments.values)
+  #expect(referenced == [builtin])
+  try state.validate()
+
+  _ = try state.reconcileDisplayTopology(
+    connectedDisplayIDs: [builtin, legacy], fallbackDisplayID: builtin)
+
+  #expect(Set(state.displays.keys) == [builtin, legacy])
+  #expect(state.disconnectedDisplays.isEmpty)
+  try state.validate()
+}
+
 @Test func observedWindowReconciliationPreservesMissingAssignmentsAndAdoptsIntoFocusedWorkspace() throws {
   var state = WorkspaceState(
     workspaces: [
