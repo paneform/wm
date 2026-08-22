@@ -124,6 +124,16 @@ public enum WindowNormalizer {
 
     private static func classify(_ window: RawAXWindow) -> Classification {
         var reasons = window.readErrors
+        let structurallyIgnoredBundles = ["com.apple.AutoFillPanelService"]
+        if let bundleID = window.bundleID, structurallyIgnoredBundles.contains(bundleID) {
+            reasons.append("structurally ignored bundle: \(bundleID)")
+            return Classification(classification: .systemUI, management: .ineligible, reasons: reasons)
+        }
+        let structurallyIgnoredAppNames = ["AutoFillPanelService"]
+        if window.bundleID == nil, structurallyIgnoredAppNames.contains(window.appName) {
+            reasons.append("structurally ignored application: \(window.appName)")
+            return Classification(classification: .systemUI, management: .ineligible, reasons: reasons)
+        }
         guard window.role == "AXWindow" else {
             reasons.append(window.role == nil ? "AX role is unavailable" : "AX role is not AXWindow")
             return Classification(classification: .uncertain, management: .ineligible, reasons: reasons)

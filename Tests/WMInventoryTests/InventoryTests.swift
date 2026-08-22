@@ -138,6 +138,64 @@ final class InventoryTests: XCTestCase {
         XCTAssertTrue(result.windows[1].rejectionReasons.contains("window has an AX parent"))
     }
 
+    func testAutoFillPanelServiceBundleIsStructurallyIgnored() throws {
+        let frame = InventoryRect(x: 4, y: 4, width: 2, height: 21)
+        let autofill = RawAXWindow(
+            pid: 42, appName: "AutoFillPanelService", bundleID: "com.apple.AutoFillPanelService",
+            role: "AXWindow", subrole: "AXStandardWindow", frame: frame)
+        let surface = RawCGWindow(cgWindowID: 3819, pid: 42, ownerName: "AutoFillPanelService", layer: 0, frame: frame)
+        let ordinary = RawAXWindow(
+            pid: 7, appName: "Safari", bundleID: "com.apple.Safari",
+            role: "AXWindow", subrole: "AXStandardWindow",
+            frame: .init(x: 0, y: 0, width: 100, height: 100))
+        let ordinarySurface = RawCGWindow(cgWindowID: 8, pid: 7, ownerName: "Safari", layer: 0, frame: ordinary.frame)
+
+        let result = WindowNormalizer.normalize(ax: [autofill, ordinary], cg: [surface, ordinarySurface])
+
+        let ignored = try XCTUnwrap(result.windows.first { $0.id == "window:cg:3819" })
+        XCTAssertEqual(ignored.classification, .systemUI)
+        XCTAssertEqual(ignored.management, .ineligible)
+        XCTAssertTrue(ignored.rejectionReasons.contains("structurally ignored bundle: com.apple.AutoFillPanelService"))
+        XCTAssertEqual(result.rejected.first { $0.window.pid == 42 }?.window.bundleID, "com.apple.AutoFillPanelService")
+        let managed = try XCTUnwrap(result.windows.first { $0.id == "window:cg:8" })
+        XCTAssertEqual(managed.classification, .normal)
+    }
+
+    func testAutoFillPanelServiceAppNameFallbackIsStructurallyIgnored() {
+        let autofill = RawAXWindow(
+            pid: 43, appName: "AutoFillPanelService", role: "AXWindow",
+            subrole: "AXStandardWindow", frame: .init(x: 0, y: 0, width: 2, height: 18))
+
+        let result = WindowNormalizer.normalize(ax: [autofill], cg: [])
+
+        XCTAssertEqual(result.windows.map(\.classification), [.systemUI])
+        XCTAssertEqual(result.windows.map(\.management), [.ineligible])
+        XCTAssertTrue(result.windows[0].rejectionReasons.contains("structurally ignored application: AutoFillPanelService"))
+        XCTAssertEqual(result.rejected.count, 1)
+    }
+
+    func testUnrelatedBundleWithMatchingAppNameIsNotIgnored() {
+        let app = RawAXWindow(
+            pid: 44, appName: "AutoFillPanelService", bundleID: "com.example.other",
+            role: "AXWindow", subrole: "AXStandardWindow",
+            frame: .init(x: 0, y: 0, width: 100, height: 100))
+
+        let result = WindowNormalizer.normalize(ax: [app], cg: [RawCGWindow(cgWindowID: 9, pid: 44, layer: 0, frame: app.frame)])
+
+        XCTAssertEqual(result.windows.map(\.classification), [.normal])
+    }
+
+    func testCGOnlyAutoFillSurfaceNeverBecomesManageable() {
+        let surface = RawCGWindow(
+            cgWindowID: 3820, pid: 45, ownerName: "AutoFillPanelService", layer: 0,
+            frame: .init(x: 0, y: 0, width: 2, height: 18))
+
+        let result = WindowNormalizer.normalize(ax: [], cg: [surface])
+
+        XCTAssertTrue(result.windows.isEmpty)
+        XCTAssertEqual(result.decisions.map(\.confidence), [.cgOnly])
+    }
+
     func testScannerIsolatesFailedApplication() async {
         let good = ApplicationObservation(pid: 1, name: "Good")
         let bad = ApplicationObservation(pid: 2, name: "Bad")

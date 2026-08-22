@@ -58,6 +58,27 @@ final class ManagedWindowLifecycleTests: XCTestCase {
     XCTAssertTrue(update.verifiedClosedLifetimes.isEmpty)
   }
 
+  func testAutoFillIdentityClassifiedIgnoredByNormalizerEvictsMembership() {
+    var lifecycle = ManagedWindowLifecycle()
+    var previouslyManaged = window("window:cg:3819", pid: 42)
+    previouslyManaged.bundleID = "com.apple.AutoFillPanelService"
+    _ = lifecycle.reconcile(snapshot(windows: [previouslyManaged], pids: [42]))
+
+    let ax = RawAXWindow(
+      pid: 42, appName: "AutoFillPanelService", bundleID: "com.apple.AutoFillPanelService",
+      role: "AXWindow", subrole: "AXStandardWindow", frame: .init(x: 0, y: 0, width: 2, height: 21))
+    let cg = RawCGWindow(
+      cgWindowID: 3819, pid: 42, ownerName: "AutoFillPanelService", layer: 0,
+      frame: .init(x: 0, y: 0, width: 2, height: 21))
+    let normalized = WindowNormalizer.normalize(ax: [ax], cg: [cg]).windows
+    XCTAssertEqual(normalized.map(\.management), [.ineligible])
+
+    let update = lifecycle.reconcile(snapshot(windows: normalized, pids: [42]))
+
+    XCTAssertEqual(update.newlyUnmanagedWindowIDs, ["window:cg:3819"])
+    XCTAssertTrue(update.windows.isEmpty)
+  }
+
   func testCoordinatedOmissionDoesNotCloseRetainedWindows() {
     var lifecycle = ManagedWindowLifecycle()
     _ = lifecycle.reconcile(
