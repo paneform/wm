@@ -158,7 +158,9 @@ enum WindowSource {
         let parent: AXUIElement? = readOptional(element, kAXParentAttribute)
         let parentRole: String? = parent.flatMap { readOptional($0, kAXRoleAttribute) }
         let movable: Bool? = readOptional(element, "AXMovable")
+            ?? attributeSettable(element, kAXPositionAttribute)
         let resizable: Bool? = readOptional(element, "AXResizable")
+            ?? attributeSettable(element, kAXSizeAttribute)
         let cgWindowID: UInt32? = read(element, "AXWindowNumber", errors: &errors)
             .flatMap { (numberValue: NSNumber) in numberValue.uint32Value }
         return RawAXWindow(
@@ -188,6 +190,14 @@ enum WindowSource {
             return nil
         }
         return value as? T
+    }
+
+    private static func attributeSettable(_ element: AXUIElement, _ attribute: String) -> Bool? {
+        var settable = DarwinBoolean(false)
+        guard AXUIElementIsAttributeSettable(element, attribute as CFString, &settable) == .success else {
+            return nil
+        }
+        return settable.boolValue
     }
 
     private static func read<T>(_ element: AXUIElement, _ attribute: String, errors: inout [String]) -> T? {

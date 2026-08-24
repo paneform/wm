@@ -100,6 +100,27 @@ final class SidecarServer {
         case "ping":
             send(ResultMessage(reqId: requestId(request), result: .pong(version: Wire.version)))
 
+        case "permissionsStatus":
+            send(ResultMessage(reqId: requestId(request), result: .permissions(Permissions.current)))
+
+        case "requestPermissions":
+            // TCC prompts MUST originate from this executable to be attributed
+            // to wm-sidecar; both calls are idempotent when already granted.
+            _ = Permissions.requestAccessibility()
+            _ = Permissions.requestScreenRecording()
+            send(ResultMessage(reqId: requestId(request), result: .permissions(Permissions.current)))
+
+        case "openPermissionsSettings":
+            guard let target = request.target else {
+                return sendError(request, code: "invalid_request",
+                                 detail: "openPermissionsSettings requires \"target\"")
+            }
+            guard Permissions.openSettings(target: target) else {
+                return sendError(request, code: "invalid_request",
+                                 detail: "unknown settings target \(target)")
+            }
+            send(ResultMessage(reqId: requestId(request), result: .opened))
+
         case "subscribe":
             subscribed = true
             send(ResultMessage(reqId: requestId(request), result: .subscribed))

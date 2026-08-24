@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+SIDECAR=${WM_SIDECAR:-"$ROOT/packages/platform-macos/sidecar/.build/release/wm-sidecar"}
+
+if [ ! -x "$SIDECAR" ]; then
+  printf '%s\n' "wm-sidecar not built at $SIDECAR" >&2
+  printf '%s\n' "Run: swift build -c release --package-path $ROOT/packages/platform-macos/sidecar" >&2
+  exit 1
+fi
+
+exec node "$ROOT/packages/node-host/src/cli.ts" "$@" --sidecar "$SIDECAR"

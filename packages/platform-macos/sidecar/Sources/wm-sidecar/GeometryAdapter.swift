@@ -109,7 +109,9 @@ final class GeometryAdapter {
         let fullscreen: Bool? = Self.optionalRead(element, "AXFullScreen")
         let focused: Bool? = Self.optionalRead(element, kAXFocusedAttribute)
         let movable: Bool? = Self.optionalRead(element, "AXMovable")
+            ?? Self.attributeSettable(element, kAXPositionAttribute)
         let resizable: Bool? = Self.optionalRead(element, "AXResizable")
+            ?? Self.attributeSettable(element, kAXSizeAttribute)
         return WindowValue(
             id: meta.id,
             pid: Int(meta.pid),
@@ -311,6 +313,14 @@ final class GeometryAdapter {
 
     private func frontmostPid() -> Int32? {
         NSWorkspace.shared.frontmostApplication?.processIdentifier
+    }
+
+    private static func attributeSettable(_ element: AXUIElement, _ attribute: String) -> Bool? {
+        var settable = DarwinBoolean(false)
+        guard AXUIElementIsAttributeSettable(element, attribute as CFString, &settable) == .success else {
+            return nil
+        }
+        return settable.boolValue
     }
 
     // MARK: Element resolution (ground-truth `resolve`)

@@ -1,7 +1,11 @@
 import type { Command } from "@wm/engine";
 
+/** Commands executed locally (sidecar spawn) instead of over the daemon WebSocket. */
+export type LocalCommand = "doctor" | "permissions-request";
+
 export interface ParsedArgs {
   command: Command | null;
+  localCommand: LocalCommand | null;
   positional: string[];
   flags: Record<string, string | boolean>;
   help: boolean;
@@ -68,11 +72,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const positional: string[] = [];
   let serve = false;
   let help = false;
+  let localCommand: LocalCommand | null = null;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === "--help" || arg === "-h") help = true;
     else if (arg === "--port") flags["port"] = argv[++i] ?? "";
     else if (arg === "--url") flags["url"] = argv[++i] ?? "";
+    else if (arg === "--sidecar") flags["sidecar"] = argv[++i] ?? "";
     else if (arg.startsWith("--")) flags[arg.slice(2)] = true;
     else positional.push(arg);
   }
@@ -80,9 +86,16 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (verb === "serve") {
     serve = true;
     positional.shift();
+  } else if (verb === "doctor") {
+    localCommand = "doctor";
+  } else if (verb === "permissions" && positional[1] === "request") {
+    localCommand = "permissions-request";
   }
-  const command = verb === undefined || help || serve ? null : buildCommand(verb, positional.slice(1));
-  return { command, positional, flags, help, serve };
+  const command =
+    verb === undefined || help || serve || localCommand !== null ?
+      null
+    : buildCommand(verb, positional.slice(1));
+  return { command, localCommand, positional, flags, help, serve };
 }
 
 export const USAGE = `wm — macOS window manager
@@ -96,8 +109,15 @@ Commands:
   workspace focus NAME | workspace move-window ID NAME | workspace move-display WS DISPLAY
   retile [WS] | reconcile | pause | resume
   validate-config | reload-config [delta|full]
+Local (no daemon required):
+  wm doctor                  Report macOS permissions as JSON; read-only
+  wm permissions request     Trigger TCC prompts via the sidecar, then report status
+                             (--open-settings deep links System Settings panes)
 Daemon:
-  wm serve [--port N]
+  wm serve [--port N] [--observe-only] [--sidecar PATH]
 Flags:
-  --port N   Daemon WebSocket port (default from config or 17832)
-  --help     Show this help`;
+  --port N        Daemon WebSocket port (default from config or 17832)
+  --sidecar PATH  Explicit wm-sidecar executable for local commands
+  --observe-only  Start paused: observe/query state without platform mutations
+  --url WS-URL    Daemon WebSocket URL for client commands
+  --help          Show this help`;

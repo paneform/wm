@@ -5,7 +5,7 @@
   "scripts": {
     "build": "tsc --noEmit && swift build --package-path sidecar",
     "typecheck": "tsc --noEmit",
-    "test": "echo \"sidecar validated via swift build + smoke script\" && swift build --package-path sidecar",
+    "test": "swift build --package-path sidecar && vitest run",
     "lint": "eslint src"
   },
   "dependencies": {

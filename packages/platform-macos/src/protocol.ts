@@ -32,7 +32,16 @@ export type SidecarRequest =
   | { readonly op: "getWindow"; readonly reqId: string; readonly id: string }
   | SetWindowFrameRequest
   | { readonly op: "focusWindow"; readonly reqId: string; readonly id: string }
-  | { readonly op: "ping"; readonly reqId: string };
+  | { readonly op: "ping"; readonly reqId: string }
+  | { readonly op: "permissionsStatus"; readonly reqId: string }
+  | { readonly op: "requestPermissions"; readonly reqId: string }
+  | {
+      readonly op: "openPermissionsSettings";
+      readonly reqId: string;
+      readonly target: SettingsTarget;
+    };
+
+export type SettingsTarget = "accessibility" | "screenRecording";
 
 // ---------------------------------------------------------------------------
 // Sidecar → engine: handshake
@@ -59,6 +68,9 @@ export type ResultSchemaFor = {
   getWindow: typeof WindowResult;
   setWindowFrame: typeof WriteObservation;
   focusWindow: typeof FocusResult;
+  permissionsStatus: typeof PermissionsResult;
+  requestPermissions: typeof PermissionsResult;
+  openPermissionsSettings: typeof OpenedResult;
 };
 
 export const PingResult = Schema.Struct({
@@ -77,6 +89,20 @@ export const WindowResult = Schema.Struct({
   window: Schema.NullOr(WindowObservation),
 });
 export const FocusResult = Schema.Struct({ focused: Schema.Literal(true) });
+
+// ---------------------------------------------------------------------------
+// Permissions (TCC). Status/request responses share one shape; the request
+// invocation itself is owned by the sidecar executable.
+// ---------------------------------------------------------------------------
+
+export const PermissionStatus = Schema.Struct({
+  accessibility: Schema.Boolean,
+  screenRecording: Schema.Boolean,
+});
+export interface PermissionStatus extends Schema.Schema.Type<typeof PermissionStatus> {}
+
+export const PermissionsResult = Schema.Struct({ permissions: PermissionStatus });
+export const OpenedResult = Schema.Struct({ opened: Schema.Literal(true) });
 
 export const ErrorBody = Schema.Struct({
   code: Schema.String,

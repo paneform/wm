@@ -54,6 +54,12 @@ struct TopologyValue: Codable, Equatable, Sendable {
     var displays: [DisplayValue]
 }
 
+/// Mirrors the engine's PermissionStatus schema exactly.
+struct PermissionsValue: Codable, Equatable, Sendable {
+    var accessibility: Bool
+    var screenRecording: Bool
+}
+
 /// Mirrors the engine's WriteObservation schema exactly.
 struct WriteValue: Codable, Equatable, Sendable {
     var requested: FrameValue
@@ -79,6 +85,8 @@ enum ResultPayload: Encodable {
     case window(WindowValue?)
     case write(WriteValue)
     case focused
+    case permissions(PermissionsValue)
+    case opened
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
@@ -97,6 +105,10 @@ enum ResultPayload: Encodable {
             try container.encode(write)
         case .focused:
             try container.encode(FocusedPayload(focused: true))
+        case .permissions(let permissions):
+            try container.encode(PermissionsPayload(permissions: permissions))
+        case .opened:
+            try container.encode(OpenedPayload(opened: true))
         }
     }
 
@@ -132,6 +144,14 @@ enum ResultPayload: Encodable {
 
     private struct FocusedPayload: Encodable {
         let focused: Bool
+    }
+
+    private struct PermissionsPayload: Encodable {
+        let permissions: PermissionsValue
+    }
+
+    private struct OpenedPayload: Encodable {
+        let opened: Bool
     }
 }
 
@@ -202,6 +222,8 @@ struct RequestMessage: Decodable, Sendable {
     var frame: FrameValue?
     /// "frame" | "position" | "size"
     var mode: String?
+    /// "accessibility" | "screenRecording" (openPermissionsSettings)
+    var target: String?
 }
 
 // MARK: - Codec helpers

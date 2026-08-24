@@ -13,6 +13,7 @@ import {
   PlatformError as PlatformErrorClass,
   WriteObservation as WriteObservationSchema,
 } from "@wm/engine";
+import type { PermissionStatus, SettingsTarget } from "./protocol.ts";
 import { existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -21,6 +22,8 @@ import {
   ErrorEnvelope,
   FocusResult,
   mapErrorCode,
+  OpenedResult,
+  PermissionsResult,
   ReadyMessage,
   ResultEnvelope,
   SubscribeResult,
@@ -29,6 +32,13 @@ import {
   WindowsResult,
 } from "./protocol.ts";
 import { defaultSpawn, type SidecarProcess, type SpawnSidecar } from "./sidecar-process.ts";
+
+export {
+  OpenedResult,
+  PermissionStatus,
+  PermissionsResult,
+  type SettingsTarget,
+} from "./protocol.ts";
 
 // ---------------------------------------------------------------------------
 // Pushable async-iterator queue: bridge between raw protocol callbacks and
@@ -90,6 +100,20 @@ export interface MacOsSidecarAdapter extends PlatformAdapter {
     accessibility: boolean;
     screenRecording: boolean;
   }>;
+  /** Path the sidecar was spawned from (surfaced by CLI diagnostics). */
+  readonly sidecarPath: string;
+  /** Read-only TCC snapshot; never triggers prompts. */
+  readonly permissionsStatus: () => Effect.Effect<PermissionStatus, PlatformError>;
+  /**
+   * Asks the SIDECAR to trigger TCC prompts (AXIsProcessTrustedWithOptions
+   * with prompt + CGRequestScreenCaptureAccess) and returns current statuses.
+   * Idempotent for already-granted permissions.
+   */
+  readonly requestPermissions: () => Effect.Effect<PermissionStatus, PlatformError>;
+  /** Deep link into a System Settings privacy pane via the sidecar. */
+  readonly openPermissionsSettings: (
+    target: SettingsTarget,
+  ) => Effect.Effect<void, PlatformError>;
   /** Terminates the sidecar process and completes all streams. */
   stop(): void;
 }
@@ -284,14 +308,9 @@ export const createMacOsSidecarAdapter = (
         return;
       }
 
-      // Correlated results.
-      const envelope = Schema.decodeUnknownEither(ResultEnvelope)(raw);
-      if (Either.isRight(envelope)) {
-        onResult(envelope.right.reqId, envelope.right.result);
-        return;
-      }
-
-      // Correlated / uncorrelated errors.
+      // Correlated / uncorrelated errors. Checked BEFORE results: an error
+      // envelope carries no "result" key, but Schema.Unknown would otherwise
+      // accept its absence and misroute the message into onResult.
       const failure = Schema.decodeUnknownEither(ErrorEnvelope)(raw);
       if (Either.isRight(failure)) {
         const { code, detail } = failure.right.error;
@@ -304,6 +323,13 @@ export const createMacOsSidecarAdapter = (
           return;
         }
         issue(`uncorrelated sidecar error ${code}: ${detail ?? ""}`);
+        return;
+      }
+
+      // Correlated results.
+      const envelope = Schema.decodeUnknownEither(ResultEnvelope)(raw);
+      if (Either.isRight(envelope)) {
+        onResult(envelope.right.reqId, envelope.right.result);
         return;
       }
 
@@ -355,11 +381,32 @@ export const createMacOsSidecarAdapter = (
       setWindowFrame: (id: WindowId, frame: Frame) =>
         guarded(request("setWindowFrame", WriteObservationSchema, { id, frame, mode: "frame" })),
       setWindowPosition: (id: WindowId, point: Point) =>
-        guarded(request("setWindowFrame", WriteObservationSchema, { id, frame: point, mode: "position" })),
+        guarded(request("setWindowFrame", WriteObservationSchema, {
+          id,
+          frame: { ...point, width: 0, height: 0 },
+          mode: "position",
+        })),
       setWindowSize: (id: WindowId, size: Size) =>
-        guarded(request("setWindowFrame", WriteObservationSchema, { id, frame: size, mode: "size" })),
+        guarded(request("setWindowFrame", WriteObservationSchema, {
+          id,
+          frame: { x: 0, y: 0, ...size },
+          mode: "size",
+        })),
       focusWindow: (id: WindowId) =>
         Effect.asVoid(guarded(request("focusWindow", FocusResult, { id }))),
+      permissionsStatus: () =>
+        Effect.map(
+          guarded(request("permissionsStatus", PermissionsResult)),
+          ({ permissions }) => permissions,
+        ),
+      requestPermissions: () =>
+        Effect.map(
+          guarded(request("requestPermissions", PermissionsResult)),
+          ({ permissions }) => permissions,
+        ),
+      openPermissionsSettings: (target: SettingsTarget) =>
+        Effect.asVoid(guarded(request("openPermissionsSettings", OpenedResult, { target }))),
+      sidecarPath: path,
       whenReady,
       stop: () => {
         if (!alive) return;

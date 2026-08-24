@@ -75,6 +75,9 @@ Engine → sidecar:
 { "op": "setWindowFrame", "id": "...", "frame": {...}, "mode": "frame" | "position" | "size" }
 { "op": "focusWindow", "id": "..." }
 { "op": "ping" }
+{ "op": "permissionsStatus" }
+{ "op": "requestPermissions" }   // TCC prompts MUST be invoked by the sidecar executable
+{ "op": "openPermissionsSettings", "target": "accessibility" | "screenRecording" }
 ```
 
 Sidecar → engine:
@@ -119,7 +122,9 @@ implementation on `main`):
    Behavioral probing is ENGINE-driven via primitive writes (±1 pt nudges); the sidecar
    just executes them.
 9. **Permissions:** report accessibility/screen-recording status as part of `ready`;
-   degraded screen recording reduces CG metadata but does not kill the source.
+   degraded screen recording reduces CG metadata but does not kill the source. TCC
+   requests (`requestPermissions`) are invoked by the sidecar process itself so the
+   system attributes the prompt to it; status queries never prompt.
 10. **Bounded calls:** every AX call must be bounded (async with timeout); one hung app
     must never block the sidecar loop. Isolate per-app failures.
 11. **Topology events:** poll CGGetOnlineDisplayList (AppKit notifications are

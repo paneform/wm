@@ -88,6 +88,8 @@ export interface EngineOptions {
   adapter: PlatformAdapter;
   configSource: ConfigSource;
   clock: Clock;
+  /** Start observation/config/event processing while suppressing mutations. */
+  initiallyPaused?: boolean;
 }
 
 export interface Engine {
@@ -119,7 +121,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       focusedWorkspace: "1",
       profiles: new Map(),
       parkingFacts: [],
-      paused: false,
+      paused: options.initiallyPaused ?? false,
       epoch: 0,
     };
     let config: Config = {};
