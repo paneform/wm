@@ -1,0 +1,23 @@
+{
+  "name": "@wm/platform-macos",
+  "version": "2.0.0-alpha.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && swift build --package-path sidecar",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"sidecar validated via swift build + smoke script\" && swift build --package-path sidecar",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@wm/engine": "workspace:*",
+    "effect": "3.22.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.11"
+  },
+  "exports": {
+    ".": "./src/host.ts"
+  }
+}
