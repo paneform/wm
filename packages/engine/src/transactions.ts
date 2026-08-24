@@ -146,6 +146,47 @@ export const createTransactionQueue = (deps: {
       } satisfies Receipt;
     });
 
+  const executeWithDeadline = (unit: WorkUnit, start: number): Effect.Effect<Receipt> => {
+    // Both race sides use the SUCCESS channel: a failing winner in
+    // Effect.race can strand an uninterruptible loser fiber.
+    const timeoutSignal: { kind: "timeout" } = { kind: "timeout" };
+    return Effect.map(
+      Effect.either(
+        Effect.race(
+          runSteps(unit.id, unit.steps, start).pipe(
+            Effect.map(
+              (receipt): { kind: "receipt"; receipt: Receipt } => ({
+                kind: "receipt",
+                receipt,
+              }),
+            ),
+          ),
+          Effect.flatMap(deps.clock.sleep(TRANSACTION_TIMEOUT_MS), () =>
+            Effect.succeed(timeoutSignal),
+          ),
+        ),
+      ),
+      (outcome): Receipt =>
+        outcome._tag === "Left" || outcome.right.kind === "timeout"
+          ? {
+              id: unit.id,
+              status: "timeout",
+              appliedSteps: [],
+              error: { code: "timeout", message: "operation exceeded its time budget" },
+              startedAt: start,
+              finishedAt: deps.clock.now(),
+            }
+          : outcome.right.receipt,
+      );
+  };
+
+  const runInline = (unit: WorkUnit): Effect.Effect<Receipt> =>
+    Effect.gen(function* () {
+      const receipt = yield* executeWithDeadline(unit, deps.clock.now());
+      recordHistory(receipt);
+      return receipt;
+    });
+
   const processEntry = (entry: PendingEntry): Effect.Effect<void> =>
     Effect.gen(function* () {
       const start = deps.clock.now();
@@ -159,37 +200,7 @@ export const createTransactionQueue = (deps: {
         }
       }
 
-      // Both race sides use the SUCCESS channel: a failing winner in
-      // Effect.race can strand an uninterruptible loser fiber.
-      const timeoutSignal: { kind: "timeout" } = { kind: "timeout" };
-      const outcome = yield* Effect.either(
-        Effect.race(
-          runSteps(entry.unit.id, entry.unit.steps, start).pipe(
-            Effect.map(
-              (receipt): { kind: "receipt"; receipt: Receipt } => ({
-                kind: "receipt",
-                receipt,
-              }),
-            ),
-          ),
-          Effect.flatMap(deps.clock.sleep(TRANSACTION_TIMEOUT_MS), () =>
-            Effect.succeed(timeoutSignal),
-          ),
-        ),
-      );
-
-      const receipt: Receipt =
-        outcome._tag === "Left" || outcome.right.kind === "timeout"
-          ? {
-              id: entry.unit.id,
-              status: "timeout",
-              appliedSteps: [],
-              error: { code: "timeout", message: "operation exceeded its time budget" },
-              startedAt: start,
-              finishedAt: deps.clock.now(),
-            }
-          : outcome.right.receipt;
-
+      const receipt = yield* executeWithDeadline(entry.unit, start);
       recordHistory(receipt);
       yield* Deferred.succeed(entry.deferred, receipt);
     });
@@ -245,6 +256,12 @@ export const createTransactionQueue = (deps: {
         );
         if (existing !== undefined) return yield* Deferred.await(existing.deferred);
       }
+      // Nested submission from inside a running step (e.g. a reconcile plan
+      // produced by a command's own mutation): enqueueing would wait on the
+      // drain loop, which is blocked on this very step — a self-deadlock.
+      // The caller is already serialized by the running entry, so execute
+      // inline with identical deadline/history semantics.
+      if (processing) return yield* runInline(unit);
       const deferred = yield* enqueue(unit);
       return yield* Deferred.await(deferred);
     });
@@ -270,7 +287,9 @@ export const createTransactionQueue = (deps: {
       const steps = units.flatMap((unit) =>
         unit.steps.map((step) => ({ ...step, name: `${unit.id}/${step.name}` })),
       );
-      const deferred = yield* enqueue({ id: `batch:${units[0]!.id}`, steps });
+      const unit: WorkUnit = { id: `batch:${units[0]!.id}`, steps };
+      if (processing) return yield* runInline(unit);
+      const deferred = yield* enqueue(unit);
       return yield* Deferred.await(deferred);
     });
 

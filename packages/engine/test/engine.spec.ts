@@ -88,26 +88,20 @@ describe("engine pipeline (fake platform)", () => {
     );
     expect(attempted._tag).toBe("Failure");
 
-    // KNOWN ENGINE BUG (tracked for follow-up): resume -> gatedReconcile
-    // hangs (>15 s transaction deadline) when reconciling two displays with a
-    // managed window under the fake platform. The paused fast-fail above is
-    // verified; resume semantics are covered once the reconcile hang is fixed.
     expect(id).toBeTruthy();
   });
 
-  // KNOWN ENGINE BUG (see bean wm-9k5f): reconcile() hangs (>15 s deadline)
-// reconciling two displays + managed windows under the fake platform, so any
-// command whose steps end in gatedReconcile() cannot complete in tests yet.
-test.skip("move-window applies the requested frame through the adapter", async () => {
+  test("move-window applies the requested frame through the adapter", async () => {
     const h = await bootstrap();
     const id = h.fake.addWindow(makeWindow({ x: 50, y: 60 }));
+    await h.run({ type: "reconcile" });
     await h.run({ type: "moveWindow", windowId: id, point: { x: 200, y: 150 } });
     const frame = await frameOf(h, id);
     expect(frame?.x).toBe(200);
     expect(frame?.y).toBe(150);
   });
 
-  test.skip("fixed-size windows are quarantined out of the tree", async () => {
+  test("fixed-size windows are quarantined out of the tree", async () => {
     const h = await bootstrap();
     const fixed = h.fake.addWindow(
       makeWindow({ x: 10, y: 10, personality: { kind: "fixedSize" } }),
@@ -129,7 +123,7 @@ test.skip("move-window applies the requested frame through the adapter", async (
     }
   });
 
-  test.skip("display disconnect migrates stranded workspaces (bean wm-dm8l)", async () => {
+  test("display disconnect migrates stranded workspaces (bean wm-dm8l)", async () => {
     const h = await bootstrap();
     const id = h.fake.addWindow(makeWindow({ displayId: "display:sim-left", x: -1400, y: 100 }));
     // Focus the workspace that owns the left-display window so it is visible there.
@@ -148,7 +142,7 @@ test.skip("move-window applies the requested frame through the adapter", async (
     expect(h.fake.windowIds()).toContain(id);
   });
 
-  test.skip("workspace reveal parks and re-reveals without losing membership", async () => {
+  test("workspace reveal parks and re-reveals without losing membership", async () => {
     const h = await bootstrap();
     const a = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     await h.run({ type: "reconcile" });
