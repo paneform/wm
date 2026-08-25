@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect";
 import type { Clock } from "./platform.ts";
+import { Direction } from "./direction.ts";
 import {
   Capabilities,
   DisplayObservation,
@@ -93,6 +94,16 @@ export const Command = Schema.Union(
   Schema.Struct({ type: Schema.Literal("reconcile") }),
   Schema.Struct({ type: Schema.Literal("pause") }),
   Schema.Struct({ type: Schema.Literal("resume") }),
+  // skhd hotkey parity (bean wm-pmys): focused/focused-relative mutations the
+  // engine resolves against committed observations — the CLI only maps syntax.
+  Schema.Struct({ type: Schema.Literal("togglePause") }),
+  Schema.Struct({
+    type: Schema.Literal("moveFocusedWindowToWorkspace"),
+    workspace: Schema.String,
+  }),
+  Schema.Struct({ type: Schema.Literal("moveFocusedWorkspaceToNextDisplay") }),
+  Schema.Struct({ type: Schema.Literal("focusDirection"), direction: Direction }),
+  Schema.Struct({ type: Schema.Literal("moveDirection"), direction: Direction }),
   Schema.Struct({ type: Schema.Literal("validateConfig") }),
   Schema.Struct({
     type: Schema.Literal("reloadConfig"),
@@ -105,7 +116,10 @@ export const Command = Schema.Union(
 );
 export type Command = typeof Command.Type;
 
-/** Idempotent intents safe to coalesce while pending share a receipt. */
+/** Idempotent intents safe to coalesce while pending share a receipt.
+ * State-relative commands (togglePause, *Focused*, *Direction) are NEVER
+ * coalescable: each press re-resolves the current focus/state, so collapsing
+ * two pending presses would drop a toggle or a cycle step. */
 export function coalesceKeyFor(command: Command): string | undefined {
   switch (command.type) {
     case "focusWindow":
@@ -122,7 +136,8 @@ export function coalesceKeyFor(command: Command): string | undefined {
   }
 }
 
-/** Mutations rejected while paused; pause/resume/config/queries stay valid. */
+/** Mutations rejected while paused; pause/resume/togglePause/config/queries
+ * stay valid (the toggle must work exactly so the engine can be un-paused). */
 export function isBlockedWhenPaused(command: Command): boolean {
   switch (command.type) {
     case "focusWindow":
@@ -133,6 +148,10 @@ export function isBlockedWhenPaused(command: Command): boolean {
     case "tileWindow":
     case "retile":
     case "moveWorkspaceToDisplay":
+    case "moveFocusedWindowToWorkspace":
+    case "moveFocusedWorkspaceToNextDisplay":
+    case "focusDirection":
+    case "moveDirection":
       return true;
     default:
       return false;
@@ -198,6 +217,8 @@ export const WorkspaceSnapshot = Schema.Struct({
   visibleOnDisplay: Schema.NullOr(Schema.String),
   preferredDisplay: Schema.NullOr(Schema.String),
   pinnedDisplayOverride: Schema.NullOr(Schema.String),
+  /** Most recently focused member; omitted when unknown (null). */
+  lastFocusedMember: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export interface WorkspaceSnapshot extends Schema.Schema.Type<typeof WorkspaceSnapshot> {}
 
@@ -218,6 +239,8 @@ export const StateSnapshot = Schema.Struct({
   paused: Schema.Boolean,
   health: HealthState,
   focusedWorkspace: Schema.NullOr(Schema.String),
+  /** Effective engine window focus (intent or observed); optional for wire compat. */
+  focusedWindow: Schema.optional(Schema.NullOr(Schema.String)),
   topology: Schema.Array(DisplayObservation),
   windows: Schema.Array(ManagedWindowSnapshot),
   workspaces: Schema.Array(WorkspaceSnapshot),
@@ -296,6 +319,7 @@ export function projectSnapshot(
     visibleOnDisplay: ws.visibleOnDisplay,
     preferredDisplay: ws.preferredDisplay,
     pinnedDisplayOverride: ws.pinnedDisplayOverride,
+    ...(ws.lastFocusedMember !== null ? { lastFocusedMember: ws.lastFocusedMember } : {}),
   }));
 
   return {
@@ -303,6 +327,14 @@ export function projectSnapshot(
     paused: world.paused,
     health,
     focusedWorkspace: world.focusedWorkspace,
+    ...(world.focusIntent !== null
+      ? { focusedWindow: world.focusIntent.id }
+      : (() => {
+          for (const obs of world.windows.values()) {
+            if (obs.focused) return { focusedWindow: obs.id };
+          }
+          return {};
+        })()),
     topology: world.topology.displays.map((d) => ({ ...d })),
     windows,
     workspaces,
@@ -481,7 +513,7 @@ function mapSubmitError(error: import("./transactions.ts").SubmitError): Command
     : new CommandError({ code: "invalid_request", message: error.detail });
 }
 
-function mapStepCode(code: string | undefined): CommandErrorCode {
+export function mapStepCode(code: string | undefined): CommandErrorCode {
   switch (code) {
     case "geometry_rejected":
       return "geometry_rejected";
@@ -489,6 +521,10 @@ function mapStepCode(code: string | undefined): CommandErrorCode {
       return "geometry_verification_failed";
     case "window_not_found":
       return "window_not_found";
+    case "workspace_not_found":
+      return "workspace_not_found";
+    case "window_not_manageable":
+      return "window_not_manageable";
     case "window_not_controllable":
       return "window_not_controllable";
     case "topology_unstable":

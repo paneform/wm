@@ -17,6 +17,7 @@ import {
   wireResponseOk,
   wireSnapshot,
 } from "../src/transport.ts";
+import type { WireRequest } from "../src/transport.ts";
 
 const decoderOf = <A, I>(schema: Schema.Schema<A, I, never>) =>
   Schema.decodeUnknownSync(schema);
@@ -282,6 +283,55 @@ describe("wire message round-trips", () => {
     expect(
       decodeWireMessage('{"v":1,"type":"request","id":"r1","command":{"type":"pause"}}'),
     ).toEqual({ v: 1, type: "request", id: "r1", command: { type: "pause" } });
+  });
+});
+
+describe("hotkey parity commands — wire round-trips (bean wm-pmys)", () => {
+  const requestEnvelope = (command: Record<string, unknown>): string =>
+    encodeWireMessage({
+      v: 1,
+      type: "request",
+      id: "req-hotkey",
+      command: command as unknown as WireRequest["command"],
+    });
+
+  test("every new hotkey command survives a wire encode/decode round-trip", () => {
+    const commands = [
+      { type: "togglePause" },
+      { type: "moveFocusedWindowToWorkspace", workspace: "2" },
+      { type: "moveFocusedWorkspaceToNextDisplay" },
+      { type: "focusDirection", direction: "left" },
+      { type: "moveDirection", direction: "up" },
+    ];
+    for (const command of commands) {
+      expect(decodeWireMessage(requestEnvelope(command))).toEqual({
+        v: 1,
+        type: "request",
+        id: "req-hotkey",
+        command,
+      });
+    }
+  });
+
+  test("direction literals outside the closed union are rejected", () => {
+    for (const direction of ["diagonal", "LEFT", "", "north"]) {
+      expect(() =>
+        decodeWireMessage(
+          requestEnvelope({ type: "focusDirection", direction }),
+        ),
+      ).toThrow();
+      expect(() =>
+        decodeWireMessage(requestEnvelope({ type: "moveDirection", direction })),
+      ).toThrow();
+    }
+  });
+
+  test("missing or excess fields are rejected on the wire", () => {
+    expect(() => decodeWireMessage(requestEnvelope({ type: "togglePause", extra: 1 }))).toThrow();
+    expect(() =>
+      decodeWireMessage(requestEnvelope({ type: "moveFocusedWindowToWorkspace" })),
+    ).toThrow();
+    expect(() => decodeWireMessage(requestEnvelope({ type: "focusDirection" }))).toThrow();
   });
 });
 

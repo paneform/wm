@@ -99,6 +99,12 @@ export interface World {
   parkingFacts: readonly ParkingFact[];
   paused: boolean;
   epoch: number;
+  /**
+   * Engine-issued window-focus intent with a monotonic generation. It
+   * survives stale observation snapshots/reconciles until an authoritative
+   * newer platform focus event supersedes it or the window dies.
+   */
+  focusIntent: { id: WindowId; generation: number } | null;
 }
 
 /** Engine classification of a window from its observation attributes. */

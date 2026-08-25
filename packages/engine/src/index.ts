@@ -4,6 +4,7 @@ export * from "./world.ts";
 
 // Geometry & layout
 export * from "./geometry.ts";
+export * from "./direction.ts";
 export * as layout from "./layout/bsp.ts";
 
 // Actions, rules, probes, learning, parking

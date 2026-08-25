@@ -109,6 +109,24 @@ export const WriteErrorKind = Schema.Literal(
 );
 export type WriteErrorKind = typeof WriteErrorKind.Type;
 
+/**
+ * Identity precondition attached to generic write primitives: the adapter
+ * MUST atomically re-validate this against the live window immediately
+ * before any component mutation and abort with `PlatformError { stale }`
+ * (leaving the window untouched) on mismatch (contract §4).
+ *
+ * A single REQUIRED fingerprint deliberately avoids the absent-vs-null JSON
+ * ambiguity of optional metadata fields: it is
+ * `JSON.stringify([pid, role ?? null, subrole ?? null])`, so a replacement
+ * sharing pid+role but carrying ANY subrole (including null vs non-null)
+ * produces a different fingerprint and is rejected as stale.
+ */
+export const ExpectedWindowIdentity = Schema.Struct({
+  fingerprint: Schema.String,
+});
+export interface ExpectedWindowIdentity
+  extends Schema.Schema.Type<typeof ExpectedWindowIdentity> {}
+
 export const WriteObservation = Schema.Struct({
   requested: Frame,
   observed: Frame,

@@ -1,5 +1,6 @@
 import { Either, Effect, Schema, Stream } from "effect";
 import type {
+  ExpectedWindowIdentity,
   Frame,
   PlatformAdapter,
   PlatformEvent,
@@ -378,19 +379,26 @@ export const createMacOsSidecarAdapter = (
         ),
       getWindow: (id: WindowId) =>
         Effect.map(guarded(request("getWindow", WindowResult, { id })), ({ window }) => window),
-      setWindowFrame: (id: WindowId, frame: Frame) =>
-        guarded(request("setWindowFrame", WriteObservationSchema, { id, frame, mode: "frame" })),
-      setWindowPosition: (id: WindowId, point: Point) =>
+      setWindowFrame: (id: WindowId, frame: Frame, expectedIdentity?: ExpectedWindowIdentity) =>
+        guarded(request("setWindowFrame", WriteObservationSchema, {
+          id,
+          frame,
+          mode: "frame",
+          ...(expectedIdentity ? { expectedIdentity } : {}),
+        })),
+      setWindowPosition: (id: WindowId, point: Point, expectedIdentity?: ExpectedWindowIdentity) =>
         guarded(request("setWindowFrame", WriteObservationSchema, {
           id,
           frame: { ...point, width: 0, height: 0 },
           mode: "position",
+          ...(expectedIdentity ? { expectedIdentity } : {}),
         })),
-      setWindowSize: (id: WindowId, size: Size) =>
+      setWindowSize: (id: WindowId, size: Size, expectedIdentity?: ExpectedWindowIdentity) =>
         guarded(request("setWindowFrame", WriteObservationSchema, {
           id,
           frame: { x: 0, y: 0, ...size },
           mode: "size",
+          ...(expectedIdentity ? { expectedIdentity } : {}),
         })),
       focusWindow: (id: WindowId) =>
         Effect.asVoid(guarded(request("focusWindow", FocusResult, { id }))),

@@ -53,6 +53,65 @@ describe("daemon over the wire (node-host integration)", () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
+  test("hotkey parity commands ride the shared Command wire schema (bean wm-pmys)", async () => {
+    const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    await new Promise<void>((resolve) => server.on("listening", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("no port");
+    const url = `ws://127.0.0.1:${address.port}`;
+
+    attachWebSocketServer(server, {
+      handle: async (command: Command) => ({ echoed: command.type, command }),
+      snapshot: async () => ({ epoch: 0 }) as unknown as StateSnapshot,
+      events: () => Stream.empty,
+    });
+
+    const commands = [
+      { type: "togglePause" },
+      { type: "moveFocusedWindowToWorkspace", workspace: "2" },
+      { type: "moveFocusedWorkspaceToNextDisplay" },
+      { type: "focusDirection", direction: "left" },
+      { type: "moveDirection", direction: "down" },
+    ];
+
+    for (const [index, command] of commands.entries()) {
+      const client = new WebSocket(url);
+      await new Promise<void>((resolve) => client.on("open", resolve));
+      const reply = await new Promise<string>((resolve, reject) => {
+        client.on("message", (raw) => resolve(String(raw)));
+        client.on("error", reject);
+        client.send(
+          JSON.stringify({ v: 1, type: "request", id: `hk-${index}`, command }),
+        );
+      });
+      client.close();
+      const decoded = decodeWireMessage(reply);
+      expect(decoded.type).toBe("response");
+      if (decoded.type !== "response" || !decoded.ok) throw new Error("expected ok response");
+      expect((decoded.data as { echoed: string }).echoed).toBe(command.type);
+    }
+
+    // An invalid direction literal is rejected at the schema boundary.
+    const client = new WebSocket(url);
+    await new Promise<void>((resolve) => client.on("open", resolve));
+    const badReply = await new Promise<string>((resolve, reject) => {
+      client.on("message", (raw) => resolve(String(raw)));
+      client.on("error", reject);
+      client.send(
+        JSON.stringify({
+          v: 1,
+          type: "request",
+          id: "hk-bad",
+          command: { type: "focusDirection", direction: "diagonal" },
+        }),
+      );
+    });
+    client.close();
+    expect(JSON.parse(badReply)).toMatchObject({ ok: false, error: { code: "invalid_request" } });
+
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
   test("config source parses JSONC through the engine boundary", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-engine-host-"));
     const file = path.join(dir, "config.jsonc");

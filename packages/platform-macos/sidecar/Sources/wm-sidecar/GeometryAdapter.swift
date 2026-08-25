@@ -143,11 +143,27 @@ final class GeometryAdapter {
     func write(
         meta: WindowMeta,
         requested: Rect,
-        components: [Component]
+        components: [Component],
+        expectedIdentity: ExpectedIdentityValue? = nil
     ) async throws -> WriteValue {
         guard AXIsProcessTrusted() else { throw AdapterError.notControllable }
         let element = try resolve(meta)
         try validateControllability(element: element, components: components)
+
+        // Atomic identity precondition (contract §4): compared against the
+        // CURRENT live window metadata immediately before any component
+        // mutation; mismatch aborts `stale` without writing. Exact
+        // fingerprint equality — a same-pid/role replacement differing in
+        // subrole (null vs non-null) is rejected.
+        if let expected = expectedIdentity {
+            guard let live = observation(for: meta),
+                  ExpectedIdentityValue.fingerprint(
+                    pid: live.pid,
+                    role: live.role,
+                    subrole: live.subrole
+                  ) == expected.fingerprint
+            else { throw AdapterError.stale }
+        }
 
         try await withEnhancedUserInterfaceDisabled(pid: meta.pid) {
             for component in components {

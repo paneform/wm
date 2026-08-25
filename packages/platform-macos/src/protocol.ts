@@ -1,5 +1,6 @@
 import { Either, Schema } from "effect";
 import {
+  type ExpectedWindowIdentity,
   PlatformEvent,
   TopologyObservation,
   WindowObservation,
@@ -23,6 +24,12 @@ export interface SetWindowFrameRequest {
   readonly id: string;
   readonly frame: { x: number; y: number; width: number; height: number };
   readonly mode: "frame" | "position" | "size";
+  /**
+   * Atomic identity precondition (generic adapter contract §4): the sidecar
+   * MUST re-validate against live window metadata immediately before any
+   * component mutation and respond `stale` without writing on mismatch.
+   */
+  readonly expectedIdentity?: ExpectedWindowIdentity;
 }
 
 export type SidecarRequest =

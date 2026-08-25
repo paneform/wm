@@ -94,3 +94,97 @@ describe("parseArgs / buildCommand", () => {
     expect(parsed.command).toBeNull();
   });
 });
+
+describe("skhd hotkey syntax parity (bean wm-pmys)", () => {
+  test("`wm workspace pause --toggle` maps to togglePause", () => {
+    // Exact skhdrc line: `wm workspace pause --toggle`
+    const parsed = parseArgs(["workspace", "pause", "--toggle"]);
+    expect(parsed.command).toEqual({ type: "togglePause" });
+    expect(buildCommand("workspace", ["pause"], {})).toBeNull(); // requires --toggle
+  });
+
+  test("`wm workspace move-window NAME` moves the FOCUSED window", () => {
+    for (const name of ["1", "9", "A", "W"]) {
+      expect(parseArgs(["workspace", "move-window", name]).command).toEqual({
+        type: "moveFocusedWindowToWorkspace",
+        workspace: name,
+      });
+    }
+  });
+
+  test("`wm workspace move-window ID NAME` keeps the explicit-ID form", () => {
+    expect(parseArgs(["workspace", "move-window", "win:7", "dev"]).command).toEqual({
+      type: "moveWindowToWorkspace",
+      windowId: "win:7",
+      workspace: "dev",
+    });
+    expect(buildCommand("workspace", ["move-window"], {})).toBeNull();
+  });
+
+  test("`wm workspace move next` maps to moveFocusedWorkspaceToNextDisplay", () => {
+    expect(parseArgs(["workspace", "move", "next"]).command).toEqual({
+      type: "moveFocusedWorkspaceToNextDisplay",
+    });
+    expect(buildCommand("workspace", ["move", "prev"], {})).toBeNull();
+    // The explicit display form is unaffected.
+    expect(parseArgs(["workspace", "move-display", "dev", "display:x"]).command).toEqual({
+      type: "moveWorkspaceToDisplay",
+      workspace: "dev",
+      displayId: "display:x",
+    });
+  });
+
+  test("`wm window focus DIR` maps onto focusDirection for all four directions", () => {
+    for (const direction of ["left", "right", "up", "down"] as const) {
+      expect(buildCommand("window", ["focus", direction])).toEqual({
+        type: "focusDirection",
+        direction,
+      });
+      expect(parseArgs(["window", "focus", direction]).command).toEqual({
+        type: "focusDirection",
+        direction,
+      });
+    }
+  });
+
+  test("`wm window move DIR` maps onto moveDirection for all four directions", () => {
+    for (const direction of ["left", "right", "up", "down"] as const) {
+      expect(buildCommand("window", ["move", direction])).toEqual({
+        type: "moveDirection",
+        direction,
+      });
+      expect(parseArgs(["window", "move", direction]).command).toEqual({
+        type: "moveDirection",
+        direction,
+      });
+    }
+  });
+
+  test("malformed directional invocations return null", () => {
+    expect(parseArgs(["window", "focus", "diagonal"]).command).toBeNull();
+    expect(parseArgs(["window", "focus"]).command).toBeNull();
+    expect(parseArgs(["window"]).command).toBeNull();
+    expect(parseArgs(["window", "resize", "left"]).command).toBeNull();
+    expect(buildCommand("window", ["focus", "LEFT"], {})).toBeNull(); // case-sensitive
+  });
+
+  test("excess arguments are rejected for every new form (exact arity)", () => {
+    expect(parseArgs(["window", "focus", "left", "now"]).command).toBeNull();
+    expect(parseArgs(["window", "move", "up", "down"]).command).toBeNull();
+    expect(parseArgs(["workspace", "pause", "--toggle", "extra"]).command).toBeNull();
+    expect(parseArgs(["workspace", "move", "next", "display:x"]).command).toBeNull();
+    // Two positionals ARE the explicit ID form (arity-disambiguated); a third
+    // positional is excess and rejected.
+    expect(parseArgs(["workspace", "move-window", "win:1", "dev", "extra"]).command).toBeNull();
+    // Valid forms still parse with identical tokens.
+    expect(parseArgs(["window", "focus", "left"]).command).toEqual({
+      type: "focusDirection",
+      direction: "left",
+    });
+    expect(parseArgs(["workspace", "move-window", "win:1", "dev"]).command).toEqual({
+      type: "moveWindowToWorkspace",
+      windowId: "win:1",
+      workspace: "dev",
+    });
+  });
+});

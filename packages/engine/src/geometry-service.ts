@@ -72,7 +72,12 @@ const readWindow = (
   Effect.mapError(
     adapter.getWindow(id),
     (error): GeometryFailure => ({
-      code: error.code === "permission" || error.code === "unavailable" ? "unavailable" : "rejected",
+      code:
+        error.code === "permission" || error.code === "unavailable"
+          ? "unavailable"
+          : error.code === "stale"
+            ? "stale"
+            : "rejected",
       outcome: "error",
       detail: error.detail ?? error.code,
     }),
@@ -152,8 +157,10 @@ const writeComponent = (
   part: "position" | "size",
   frame: Frame,
 ): Effect.Effect<Frame, GeometryFailure> => {
-  const failMap = (error: { detail?: string | undefined }): GeometryFailure => ({
-    code: "rejected",
+  const failMap = (error: { code?: string; detail?: string | undefined }): GeometryFailure => ({
+    // Identity-replacement aborts must keep their `stale` semantics
+    // (platform-contract §4) instead of flattening to a generic rejection.
+    code: error.code === "stale" ? "stale" : "rejected",
     outcome: "error",
     detail: error.detail ?? "write refused",
   });

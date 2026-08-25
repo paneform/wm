@@ -1,6 +1,7 @@
 import { Effect, Stream } from "effect";
 import type {
   DisplayId,
+  ExpectedWindowIdentity,
   Frame,
   PlatformError,
   PlatformEvent,
@@ -33,10 +34,34 @@ export interface PlatformAdapter {
    * Write position+size as separate component writes in an adapter-chosen order
    * (macOS uses size→position→size bookends), settle-poll readback, report.
    * Never throws for "window refused the exact frame" — report observed instead.
+   *
+   * IDENTITY GUARD (contract §4): every write primitive — including this one —
+   * MUST re-validate the window identity behind the stable `id` immediately
+   * before and after the underlying native operation and abort with
+   * `PlatformError { code: "stale" }` when a replacement is detected, leaving
+   * the replacement untouched. Callers therefore never need to retry writes
+   * unguarded: a returned `stale` always means "nothing was mutated".
+   *
+   * When `expected` is provided its `fingerprint` is compared EXACTLY against
+   * the live metadata fingerprint `JSON.stringify([pid, role ?? null,
+   * subrole ?? null])` at write time — same-pid replacements differing in
+   * subrole (null or otherwise) are rejected.
    */
-  setWindowFrame(id: WindowId, frame: Frame): Effect.Effect<WriteObservation, PlatformError>;
-  setWindowPosition(id: WindowId, point: Point): Effect.Effect<WriteObservation, PlatformError>;
-  setWindowSize(id: WindowId, size: Size): Effect.Effect<WriteObservation, PlatformError>;
+  setWindowFrame(
+    id: WindowId,
+    frame: Frame,
+    expected?: ExpectedWindowIdentity,
+  ): Effect.Effect<WriteObservation, PlatformError>;
+  setWindowPosition(
+    id: WindowId,
+    point: Point,
+    expected?: ExpectedWindowIdentity,
+  ): Effect.Effect<WriteObservation, PlatformError>;
+  setWindowSize(
+    id: WindowId,
+    size: Size,
+    expected?: ExpectedWindowIdentity,
+  ): Effect.Effect<WriteObservation, PlatformError>;
   focusWindow(id: WindowId): Effect.Effect<void, PlatformError>;
 }
 

@@ -203,7 +203,11 @@ final class SidecarServer {
                 target = Rect(frameValue)
                 components = [.size, .position, .size]
             }
-            let write = try await inventory.write(meta: meta, requested: target, components: components)
+            let write = try await inventory.write(
+                meta: meta,
+                requested: target,
+                components: components,
+                expectedIdentity: request.expectedIdentity)
             send(ResultMessage(reqId: requestId(request), result: .write(write)))
         } catch let error as AdapterError {
             // The platform API itself refused; report honestly with the last

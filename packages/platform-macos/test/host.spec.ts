@@ -213,4 +213,32 @@ describe("MacOsSidecarAdapter geometry wire shape", () => {
     });
     adapter.stop();
   });
+
+  test("expectedIdentity fingerprint rides the wire on guarded writes (round 3 issue 3)", async () => {
+    const { spawn, fake } = makeSpawn();
+    const adapter = Effect.runSync(createMacOsSidecarAdapter({ spawn, sidecarPath: "/x" }));
+    fake.emit(READY);
+
+    // REQUIRED-NULLABLE semantics collapse into one exact fingerprint token:
+    // subrole is always present as null or the real value.
+    const expected = {
+      fingerprint: JSON.stringify([4242, "AXWindow", null]),
+    };
+    await Effect.runPromise(
+      adapter.setWindowFrame("window:cg:9", { x: 5, y: 6, width: 7, height: 8 }, expected),
+    );
+
+    const sent = fake.requests.find((r) => r.op === "setWindowFrame");
+    expect(sent).toMatchObject({
+      id: "window:cg:9",
+      mode: "frame",
+      expectedIdentity: { fingerprint: '[4242,"AXWindow",null]' },
+    });
+
+    // Omitted precondition stays absent on the wire.
+    await Effect.runPromise(adapter.setWindowSize("window:cg:9", { width: 9, height: 10 }));
+    const unguarded = fake.requests.filter((r) => r.op === "setWindowFrame").at(-1);
+    expect("expectedIdentity" in (unguarded ?? {})).toBe(false);
+    adapter.stop();
+  });
 });

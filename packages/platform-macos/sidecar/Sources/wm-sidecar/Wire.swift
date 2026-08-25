@@ -215,6 +215,30 @@ enum EventMessage: Encodable {
 
 // MARK: - Inbound
 
+/// Atomic identity precondition (generic adapter contract §4): compared
+/// against live window metadata immediately before any component mutation;
+/// mismatch aborts the write with `stale` and leaves the window untouched.
+///
+/// Single REQUIRED fingerprint token (`JSON.stringify([pid, role ?? null,
+/// subrole ?? null])`) — deliberately avoids the absent-vs-null JSON
+/// ambiguity for optional metadata fields.
+struct ExpectedIdentityValue: Decodable, Sendable {
+    var fingerprint: String
+
+    /// MUST mirror the engine's canonical format exactly. AX roles/subroles
+    /// are constrained identifiers; quotes are escaped defensively anyway.
+    static func fingerprint(pid: Int, role: String?, subrole: String?) -> String {
+        func enc(_ v: String?) -> String {
+            guard let v else { return "null" }
+            return "\""
+                + v.replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "\"", with: "\\\"")
+                + "\""
+        }
+        return "[\(pid),\(enc(role)),\(enc(subrole))]"
+    }
+}
+
 struct RequestMessage: Decodable, Sendable {
     var op: String
     var reqId: String?
@@ -224,6 +248,7 @@ struct RequestMessage: Decodable, Sendable {
     var mode: String?
     /// "accessibility" | "screenRecording" (openPermissionsSettings)
     var target: String?
+    var expectedIdentity: ExpectedIdentityValue?
 }
 
 // MARK: - Codec helpers

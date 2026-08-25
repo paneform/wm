@@ -60,9 +60,15 @@ final class InventoryService {
     func write(
         meta: WindowMeta,
         requested: Rect,
-        components: [GeometryAdapter.Component]
+        components: [GeometryAdapter.Component],
+        expectedIdentity: ExpectedIdentityValue? = nil
     ) async throws -> WriteValue {
-        try await adapter.write(meta: meta, requested: requested, components: components)
+        try await adapter.write(
+            meta: meta,
+            requested: requested,
+            components: components,
+            expectedIdentity: expectedIdentity
+        )
     }
 
     func focus(meta: WindowMeta) async throws {

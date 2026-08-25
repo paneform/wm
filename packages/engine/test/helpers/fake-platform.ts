@@ -4,6 +4,7 @@ import type {
   Constraints,
   DisplayId,
   DisplayObservation,
+  ExpectedWindowIdentity,
   Frame,
   PlatformEvent,
   Point,
@@ -357,8 +358,16 @@ export interface FakePlatform {
   // World mutation ops (scenario setup).
   addWindow(spec?: FakeWindowSpec): WindowId;
   removeWindow(id: WindowId): void;
-  /** Arm identity replacement: the NEXT write behind this handle aborts `stale`. */
-  swapBackingElement(id: WindowId): void;
+  /**
+   * Arm identity replacement: the NEXT write behind this handle aborts
+   * `stale`. By default the replacement bumps pid; `samePid` keeps it and
+   * `subrole` overrides the subrole — modelling a same-pid/role window whose
+   * subrole differs (fingerprint mismatch without pid change).
+   */
+  swapBackingElement(
+    id: WindowId,
+    opts?: { readonly samePid?: boolean; readonly subrole?: string | null | undefined },
+  ): void;
   connectDisplay(spec: FakeDisplaySpec): void;
   disconnectDisplay(displayId: DisplayId): void;
   updateWorkArea(displayId: DisplayId, workArea: Frame): void;
@@ -369,8 +378,21 @@ export interface FakePlatform {
   focusWindowExternal(id: WindowId | null): void;
   driftWindow(id: WindowId, dx: number, dy: number): void;
   nudgeWindow(id: WindowId, patch: Partial<Frame>): void;
+  /** Physically move without emitting an event — deterministic divergence. */
+  nudgeSilent(id: WindowId, patch: Partial<Frame>): void;
   emitSleep(): void;
   emitWake(): void;
+  /**
+   * Focus-observation deferral (review round 2, issue 6): when enabled,
+   * focus CHANGES update the real focus but observations keep reporting the
+   * previously visible focus and the focus_changed event is withheld until
+   * releaseDeferredFocus() — modelling delayed platform propagation.
+   */
+  setDeferFocus(deferred: boolean): void;
+  releaseDeferredFocus(): void;
+  /** Deliver an AUTHORITATIVE focus_changed event immediately, bypassing
+   * deferral — models a newer platform event whose observation lags. */
+  emitFocusEvent(id: WindowId | null): void;
 
   // Introspection.
   displays(): readonly DisplayObservation[];
@@ -391,7 +413,7 @@ interface SimWindow {
   executablePath?: string | undefined;
   title: string;
   role: string;
-  subrole?: string | undefined;
+  subrole?: string | null | undefined;
   personality: FakePersonality;
   frame: Frame;
   /** Pending animation destination; null when stationary. */
@@ -400,6 +422,7 @@ interface SimWindow {
   hidden: boolean;
   fullscreen: boolean;
   replacementPending: boolean;
+  replacementDescriptor?: { samePid?: boolean; subrole?: string | undefined } | undefined;
   initialFrame: Frame;
 }
 
@@ -427,7 +450,19 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
   let nextWindowNumber = 1;
   let nextPid = 4200 + rng.int(100);
   let focusedId: WindowId | null = null;
+  /** What observations report; lags focusedId while deferral is active. */
+  let visibleFocusedId: WindowId | null = null;
+  let deferFocus = false;
+  let withheldFocusEvent: PlatformEvent | null = null;
   const writeLog: FakeWriteRecord[] = [];
+
+  const emitFocusChanged = (id: WindowId | null): void => {
+    if (deferFocus) {
+      withheldFocusEvent = { kind: "focus_changed", windowId: id };
+      return;
+    }
+    dispatch({ kind: "focus_changed", windowId: id });
+  };
 
   // --- event plumbing (same push pattern as the engine's own event bus) ---
   const listeners = new Set<(event: PlatformEvent) => void>();
@@ -503,12 +538,12 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
     ...(w.executablePath !== undefined ? { executablePath: w.executablePath } : {}),
     title: w.title,
     role: w.role,
-    ...(w.subrole !== undefined ? { subrole: w.subrole } : {}),
+    ...(w.subrole != null ? { subrole: w.subrole } : {}),
     frame: { ...w.frame },
     minimized: w.minimized,
     hidden: w.hidden,
     fullscreen: w.fullscreen,
-    focused: w.id === focusedId,
+    focused: w.id === (deferFocus ? visibleFocusedId : focusedId),
     capabilities: capabilitiesOf(w),
   });
 
@@ -558,13 +593,19 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
    * Identity discipline (contract §4): consume any armed replacement BEFORE
    * applying the write; if the backing element was swapped, abort with
    * `stale` rather than mutating the replacement. The replacement also
-   * changes the pid, so engine-side identity re-reads detect it too.
+   * changes the pid unless `samePid`; a forced subrole models same-pid
+   * replacements that still differ in the identity fingerprint.
    */
   const beginWrite = (w: SimWindow): boolean => {
     if (w.replacementPending) {
       w.replacementPending = false;
-      w.pid = nextPid;
-      nextPid += 1;
+      const d = w.replacementDescriptor ?? {};
+      if (!d.samePid) {
+        w.pid = nextPid;
+        nextPid += 1;
+      }
+      if (d.subrole !== undefined) w.subrole = d.subrole === null ? undefined : d.subrole;
+      w.replacementDescriptor = undefined;
       return false;
     }
     return true;
@@ -686,12 +727,29 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
     });
 
   // macOS-style bookends: size → position → size (contract §setWindowFrame).
+  /** Canonical fingerprint — MUST mirror engine windowIdentityOf exactly. */
+  const fingerprintOf = (
+    pid: number,
+    role: string | null | undefined,
+    subrole: string | null | undefined,
+  ): string => JSON.stringify([pid, role ?? null, subrole ?? null]);
+
+  /** Atomic identity precondition: compared against live state BEFORE any
+   * mutation; mismatch aborts `stale` leaving the window untouched. */
+  const matchesExpected = (w: SimWindow, expected?: ExpectedWindowIdentity): boolean =>
+    expected === undefined ||
+    fingerprintOf(w.pid, w.role, w.subrole) === expected.fingerprint;
+
   const setWindowFrame = (
     id: WindowId,
     frame: Frame,
+    expected?: ExpectedWindowIdentity,
   ): Effect.Effect<WriteObservation, PlatformError> => {
     const w = resolveWindow(id);
     if (w === undefined) return failWith("not_found", `unknown window ${id}`);
+    if (!matchesExpected(w, expected)) {
+      return failWith("stale", "identity precondition mismatch");
+    }
     const requested = (): Frame => ({ ...frame });
     return runWrite(w, "frame", requested(), [
       {
@@ -709,9 +767,13 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
   const setWindowPosition = (
     id: WindowId,
     point: Point,
+    expected?: ExpectedWindowIdentity,
   ): Effect.Effect<WriteObservation, PlatformError> => {
     const w = resolveWindow(id);
     if (w === undefined) return failWith("not_found", `unknown window ${id}`);
+    if (!matchesExpected(w, expected)) {
+      return failWith("stale", "identity precondition mismatch");
+    }
     const requested: Frame = { ...w.frame, x: point.x, y: point.y };
     return runWrite(w, "position", requested, [
       { component: "position", apply: () => applyPositionWrite(w, point) },
@@ -721,9 +783,13 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
   const setWindowSize = (
     id: WindowId,
     size: Size,
+    expected?: ExpectedWindowIdentity,
   ): Effect.Effect<WriteObservation, PlatformError> => {
     const w = resolveWindow(id);
     if (w === undefined) return failWith("not_found", `unknown window ${id}`);
+    if (!matchesExpected(w, expected)) {
+      return failWith("stale", "identity precondition mismatch");
+    }
     const requested: Frame = { ...w.frame, width: size.width, height: size.height };
     return runWrite(w, "size", requested, [
       { component: "size", apply: () => applySizeWrite(w, size) },
@@ -738,7 +804,7 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
         return yield* failWith("stale", "window identity replaced behind the same handle");
       }
       focusedId = w.id;
-      dispatch({ kind: "focus_changed", windowId: w.id });
+      emitFocusChanged(w.id);
     });
 
   const adapter: PlatformAdapter = {
@@ -804,7 +870,10 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
     };
     nextPid += 1;
     windows.set(id, window);
-    if (focusedId === null && !window.minimized) focusedId = id;
+    if (focusedId === null && !window.minimized) {
+      focusedId = id;
+      visibleFocusedId = id;
+    }
     dispatch({ kind: "window_added", window: observationOf(window) });
     return id;
   };
@@ -812,14 +881,24 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
   const removeWindow = (id: WindowId): void => {
     if (!windows.has(id)) return;
     windows.delete(id);
-    if (focusedId === id) focusedId = [...windows.keys()][0] ?? null;
+    if (focusedId === id) {
+      focusedId = [...windows.keys()][0] ?? null;
+      visibleFocusedId = focusedId;
+    }
     dispatch({ kind: "window_removed", windowId: id });
   };
 
   const focusWindowExternal = (id: WindowId | null): void => {
     if (id !== null && !windows.has(id)) return;
     focusedId = id;
-    dispatch({ kind: "focus_changed", windowId: id });
+    emitFocusChanged(id);
+  };
+
+  const releaseDeferredFocus = (): void => {
+    visibleFocusedId = focusedId;
+    withheldFocusEvent = null;
+    // Re-report under the CURRENT real focus so observers converge.
+    dispatch({ kind: "focus_changed", windowId: visibleFocusedId });
   };
 
   const driftWindow = (id: WindowId, dx: number, dy: number): void => {
@@ -837,10 +916,20 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
     dispatch({ kind: "window_changed", window: observationOf(w) });
   };
 
-  const swapBackingElement = (id: WindowId): void => {
+  const swapBackingElement = (
+    id: WindowId,
+    opts?: { readonly samePid?: boolean; readonly subrole?: string | null },
+  ): void => {
     const w = windows.get(id);
     if (w === undefined) return;
     w.replacementPending = true;
+    // `null` models a replacement whose subrole is explicitly ABSENT — the
+    // descriptor drops the key so SimWindow keeps undefined (== null view).
+    const o = opts ?? {};
+    w.replacementDescriptor = {
+      ...(o.samePid !== undefined ? { samePid: o.samePid } : {}),
+      ...(o.subrole !== undefined && o.subrole !== null ? { subrole: o.subrole } : {}),
+    };
   };
 
   const connectDisplay = (spec: FakeDisplaySpec): void => {
@@ -884,8 +973,21 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
     focusWindowExternal,
     driftWindow,
     nudgeWindow,
+    nudgeSilent: (id: WindowId, patch: Partial<Frame>): void => {
+      const w = windows.get(id);
+      if (w === undefined) return;
+      w.frame = mergeDefined(w.frame, patch);
+    },
     emitSleep: (): void => dispatch({ kind: "sleep" }),
     emitWake: (): void => dispatch({ kind: "wake" }),
+    setDeferFocus: (deferred: boolean): void => {
+      deferFocus = deferred;
+      if (!deferred) releaseDeferredFocus();
+    },
+    releaseDeferredFocus,
+    emitFocusEvent: (id: WindowId | null): void => {
+      dispatch({ kind: "focus_changed", windowId: id });
+    },
     displays: (): readonly DisplayObservation[] => sortedDisplays(),
     windowIds: (): readonly WindowId[] => [...windows.keys()],
     focusedWindowId: (): WindowId | null => focusedId,
