@@ -2,12 +2,15 @@ import { Effect } from "effect";
 import type { Clock, PlatformAdapter } from "./platform.ts";
 import type {
   Constraints,
+  ExpectedWindowIdentity,
   Frame,
   GeometryOutcome,
   GeometryRequest,
   WindowId,
   WindowObservation,
+  WriteObservation,
 } from "./schema.ts";
+import { windowIdentityFingerprint } from "./schema.ts";
 import {
   DEFAULT_ATTEMPTS,
   DEFAULT_TOLERANCE,
@@ -40,11 +43,12 @@ export interface GeometryCallContext {
 }
 
 export interface GeometrySuccess {
-  outcome: "exact" | "constrained";
+  outcome: "exact" | "constrained" | "stableClamp";
   frame: Frame;
   strategy: string;
   attemptsUsed: number;
   learning: CandidateScan;
+  learningConfirmed: boolean;
 }
 
 export interface GeometryProgressing {
@@ -53,6 +57,7 @@ export interface GeometryProgressing {
   strategy: string;
   attemptsUsed: number;
   learning: CandidateScan;
+  learningConfirmed: false;
 }
 
 export type GeometryResult = GeometrySuccess | GeometryProgressing;
@@ -130,12 +135,13 @@ const settlePoll = (
   });
 };
 
-type StrategyPlan = Array<"position" | "size">;
+type StrategyWrite = "frame" | "position" | "size";
+type StrategyPlan = StrategyWrite[];
 
 function strategyWrites(strategy: string): StrategyPlan {
   switch (strategy) {
     case "positionSize":
-      return ["position", "size"];
+      return ["frame"];
     case "sizeOnly":
       return ["size"];
     case "sizePositionSize":
@@ -148,14 +154,12 @@ function strategyWrites(strategy: string): StrategyPlan {
   }
 }
 
-const identityOf = (observation: WindowObservation): string =>
-  JSON.stringify([observation.pid, observation.role, observation.subrole ?? ""]);
-
-const writeComponent = (
+const writeFramePart = (
   adapter: PlatformAdapter,
   id: WindowId,
-  part: "position" | "size",
+  part: StrategyWrite,
   frame: Frame,
+  expected: ExpectedWindowIdentity,
 ): Effect.Effect<Frame, GeometryFailure> => {
   const failMap = (error: { code?: string; detail?: string | undefined }): GeometryFailure => ({
     // Identity-replacement aborts must keep their `stale` semantics
@@ -164,14 +168,23 @@ const writeComponent = (
     outcome: "error",
     detail: error.detail ?? "write refused",
   });
-  if (part === "position") {
-    return Effect.mapError(
-      adapter.setWindowPosition(id, { x: frame.x, y: frame.y }),
-      failMap,
-    ).pipe(Effect.map((o) => o.observed));
-  }
-  return Effect.mapError(adapter.setWindowSize(id, { width: frame.width, height: frame.height }), failMap).pipe(
-    Effect.map((o) => o.observed),
+  const result =
+    part === "frame"
+      ? adapter.setWindowFrame(id, frame, expected)
+      : part === "position"
+        ? adapter.setWindowPosition(id, { x: frame.x, y: frame.y }, expected)
+        : adapter.setWindowSize(id, { width: frame.width, height: frame.height }, expected);
+  return Effect.mapError(result, failMap).pipe(
+    Effect.flatMap((observation: WriteObservation) =>
+      observation.errorKind === undefined
+        ? Effect.succeed(observation.observed)
+        : Effect.fail<GeometryFailure>({
+            code: observation.errorKind === "stale" ? "stale" : "rejected",
+            outcome: "error",
+            observed: observation.observed,
+            detail: `write refused (${observation.errorKind})`,
+          }),
+    ),
   );
 };
 
@@ -189,7 +202,10 @@ export function applyGeometryRequest(
   const attempts = request.attempts ?? DEFAULT_ATTEMPTS;
   const target = request.frame;
 
-  const loop = (attemptIndex: number): Effect.Effect<GeometryResult, GeometryFailure> =>
+  const loop = (
+    attemptIndex: number,
+    previousGuardedReadback?: WindowObservation,
+  ): Effect.Effect<GeometryResult, GeometryFailure> =>
     Effect.gen(function* () {
       if (attemptIndex >= attempts) {
         // Budget exhausted without success.
@@ -206,14 +222,15 @@ export function applyGeometryRequest(
         ladderStartIndex(context.correctiveAttemptCount) + attemptIndex,
       );
       const baseline = yield* readWindow(deps.adapter, request.windowId);
-      const identity = identityOf(baseline);
+      const identity = windowIdentityFingerprint(baseline);
+      const expected = { fingerprint: identity };
 
       let observedFrame = baseline.frame;
       for (const part of strategyWrites(strategy)) {
         const identityCheck = yield* Effect.either(readWindow(deps.adapter, request.windowId));
         if (
           identityCheck._tag === "Left" ||
-          identityOf(identityCheck.right) !== identity
+          windowIdentityFingerprint(identityCheck.right) !== identity
         ) {
           return yield* Effect.fail<GeometryFailure>({
             code: "stale",
@@ -222,12 +239,28 @@ export function applyGeometryRequest(
             detail: "window identity changed mid-write",
           });
         }
-        observedFrame = yield* writeComponent(deps.adapter, request.windowId, part, target);
+        observedFrame = yield* writeFramePart(
+          deps.adapter,
+          request.windowId,
+          part,
+          target,
+          expected,
+        );
       }
 
       const readback = yield* settlePoll(deps.adapter, deps.clock, request.windowId, target, tolerance);
 
-      const outcome = classifyWrite({
+      const repeatedStableSizeClamp =
+        previousGuardedReadback !== undefined &&
+        previousGuardedReadback.capabilities.resizable === "supported" &&
+        readback.observation.capabilities.resizable === "supported" &&
+        withinTolerance(previousGuardedReadback.frame, readback.observation.frame, tolerance) &&
+        Math.abs(readback.observation.frame.x - target.x) <= tolerance &&
+        Math.abs(readback.observation.frame.y - target.y) <= tolerance &&
+        (Math.abs(readback.observation.frame.width - target.width) > tolerance ||
+          Math.abs(readback.observation.frame.height - target.height) > tolerance);
+
+      const classified = classifyWrite({
         requested: target,
         observed: readback.observation.frame,
         tolerance,
@@ -235,7 +268,9 @@ export function applyGeometryRequest(
         constraints: context.constraints,
         initialFrame: context.initialFrame,
         previousObserved: baseline.frame,
+        acceptStablePositionClamp: request.acceptance === "parkingStablePositionClamp",
       });
+      const outcome = repeatedStableSizeClamp ? "stableClamp" : classified;
 
       const learning = candidatesFrom({
         outcome,
@@ -244,6 +279,7 @@ export function applyGeometryRequest(
         initial: context.initialFrame,
         workArea: context.workArea,
         tolerance,
+        confirmed: repeatedStableSizeClamp,
       });
 
       if (outcome === "exact" || outcome === "constrained") {
@@ -253,10 +289,21 @@ export function applyGeometryRequest(
           strategy,
           attemptsUsed: attemptIndex + 1,
           learning,
+          learningConfirmed: false,
         } satisfies GeometryResult;
       }
 
       if (attemptIndex + 1 >= attempts) {
+        if (outcome === "stableClamp") {
+          return {
+            outcome,
+            frame: readback.observation.frame,
+            strategy,
+            attemptsUsed: attemptIndex + 1,
+            learning,
+            learningConfirmed: repeatedStableSizeClamp,
+          } satisfies GeometryResult;
+        }
         if (outcome === "progressing") {
           // Report progressing honestly — never clobber a window animating
           // toward its target (engine-guide §Geometry transactions).
@@ -266,6 +313,7 @@ export function applyGeometryRequest(
             strategy,
             attemptsUsed: attemptIndex + 1,
             learning,
+            learningConfirmed: false,
           } satisfies GeometryResult;
         }
         return yield* Effect.fail<GeometryFailure>({
@@ -276,7 +324,7 @@ export function applyGeometryRequest(
         });
       }
 
-      return yield* loop(attemptIndex + 1);
+      return yield* loop(attemptIndex + 1, readback.observation);
     });
 
   return loop(0);

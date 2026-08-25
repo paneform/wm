@@ -714,9 +714,12 @@ const makeGate = (): Gate => {
   return {
     wrapper: (inner) => ({
       ...inner,
-      setWindowPosition: (id, p) => call("position", id, () => inner.setWindowPosition(id, p)),
-      setWindowSize: (id, s) => call("size", id, () => inner.setWindowSize(id, s)),
-      setWindowFrame: (id, f) => call("frame", id, () => inner.setWindowFrame(id, f)),
+      setWindowPosition: (id, p, expected) =>
+        call("position", id, () => inner.setWindowPosition(id, p, expected)),
+      setWindowSize: (id, s, expected) =>
+        call("size", id, () => inner.setWindowSize(id, s, expected)),
+      setWindowFrame: (id, f, expected) =>
+        call("frame", id, () => inner.setWindowFrame(id, f, expected)),
     }),
     arm: (next) => {
       pred = next;
@@ -752,7 +755,7 @@ describe("committed/draft isolation (round 2 issue 1)", () => {
 
     // Suspend the SECOND retile write (w1) so the first (w2) already applied.
     DEADLINE.deadlineMs = 4000; // keep the transaction alive while suspended
-    gate.arm((id, op) => id === w1 && op === "size");
+    gate.arm((id, op) => id === w1 && op === "frame");
     const pending = h.run({ type: "moveDirection", direction: "right" });
     await waitFor(() => h.fake.writes().some((x) => x.windowId === w2 && x.observed.width === 748));
 
@@ -792,7 +795,7 @@ describe("committed/draft isolation (round 2 issue 1)", () => {
 
     // Park of the vacated member (w2) is the first platform effect — gate it.
     DEADLINE.deadlineMs = 4000;
-    gate.arm((id, op) => id === w2 && op === "position");
+    gate.arm((id, op) => id === w2 && op === "frame");
     const pending = h.run({ type: "moveFocusedWindowToWorkspace", workspace: "scratch" });
     await new Promise((r) => setTimeout(r, 25));
 
@@ -992,7 +995,7 @@ describe("interruption-safe rollback (round 2 issue 5)", () => {
     const frameBefore = { w1: await frameOf(h, w1), w2: await frameOf(h, w2) };
 
     // Block the SECOND write forever; the compressed 15 s deadline fires.
-    gate.arm((id, op) => id === w1 && op === "size");
+    gate.arm((id, op) => id === w1 && op === "frame");
     const error = await h.failure({ type: "moveDirection", direction: "right" });
     expect(error.code).toBe("timeout");
 
@@ -1079,7 +1082,7 @@ describe("focusWorkspace of a missing workspace never leaks (round 3 issue 1)", 
     DEADLINE.deadlineMs = 4000;
 
     // Revealing ghost onto primary displaces ws1 → parks w1 → gate it.
-    gate.arm((id, op) => id === w1 && op === "position");
+    gate.arm((id, op) => id === w1 && op === "frame");
     const pending = h.run({ type: "focusWorkspace", name: "ghost" });
     await new Promise((r) => setTimeout(r, 25));
 
@@ -1117,6 +1120,52 @@ describe("focusWorkspace of a missing workspace never leaks (round 3 issue 1)", 
     expect(after.focusedWorkspace).toBe("1");
     expect(await frameOf(h, w1)).toEqual({ ...frame(0, 38, 1512, 944), x: 4321 });
     expect((await h.snapshot()).health).toBe("degraded");
+  });
+});
+
+describe("focusWorkspace physically focuses its destination", () => {
+  test("focuses the last live member when the workspace is already visible", async () => {
+    const h = await bootstrap();
+    const primary = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    await seedWorkspace(h, [primary]);
+    await h.run({
+      type: "moveWorkspaceToDisplay",
+      workspace: "away",
+      displayId: "display:sim-left",
+    });
+    const destination = h.fake.addWindow(makeWindow({ x: -1400, y: 100 }));
+    await h.run({ type: "reconcile" });
+    await h.run({ type: "moveWindowToWorkspace", windowId: destination, workspace: "away" });
+    h.fake.focusWindowExternal(primary);
+    await h.run({ type: "reconcile" });
+
+    await h.run({ type: "focusWorkspace", name: "away" });
+
+    const snap = await h.snapshot();
+    expect(h.fake.focusedWindowId()).toBe(destination);
+    expect(snap.focusedWorkspace).toBe("away");
+    expect(snap.focusedWindow).toBe(destination);
+    expect(workspaceOf(snap, "away")?.lastFocusedMember).toBe(destination);
+  });
+
+  test("focuses a live member immediately after revealing a parked workspace", async () => {
+    const h = await bootstrap([{ id: "display:solo", primary: true }]);
+    const primary = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const destination = h.fake.addWindow(makeWindow({ x: 500, y: 100 }));
+    await seedWorkspace(h, [primary, destination]);
+    await h.run({ type: "moveWindowToWorkspace", windowId: destination, workspace: "away" });
+    await h.run({ type: "focusWorkspace", name: "1" });
+    h.fake.focusWindowExternal(primary);
+    await h.run({ type: "reconcile" });
+    expect(workspaceOf(await h.snapshot(), "away")?.visibleOnDisplay).toBeNull();
+
+    await h.run({ type: "focusWorkspace", name: "away" });
+
+    const snap = await h.snapshot();
+    expect(workspaceOf(snap, "away")?.visibleOnDisplay).toBe("display:solo");
+    expect(h.fake.focusedWindowId()).toBe(destination);
+    expect(snap.focusedWindow).toBe(destination);
+    expect(workspaceOf(snap, "away")?.lastFocusedMember).toBe(destination);
   });
 });
 
@@ -1231,7 +1280,7 @@ describe("compensation identity race (round 3 issue 4)", () => {
     DEADLINE.deadlineMs = 4000;
     // Suspend the FIRST retile write (w2), then insert a replacement behind
     // it WHILE its write is in flight — the native identity guard must abort.
-    gate.arm((id, op) => id === w2 && op === "position");
+    gate.arm((id, op) => id === w2 && op === "frame");
     const pending = Effect.runPromiseExit(
       (h.engine.execute({
         type: "moveDirection",
@@ -1428,7 +1477,7 @@ describe("busy-event coalesced rerun guarantees convergence (final issue 2)", ()
     await h.run({ type: "reconcile" });
 
     DEADLINE.deadlineMs = 4000;
-    gate.arm((id, op) => id === w2 && op === "position");
+    gate.arm((id, op) => id === w2 && op === "frame");
     const pending = h.run({ type: "moveDirection", direction: "right" });
     await waitFor(() => gate.isSuspended());
 
@@ -1483,7 +1532,7 @@ describe("atomic identity guard end-to-end (final issue 3)", () => {
     // ANY other effect, keeping the stray's replacement pending until the
     // compensation phase reads it.
     const writeMark = h.fake.writes().length;
-    gate.arm((id, op) => id === w2 && op === "position");
+    gate.arm((id, op) => id === w2 && op === "frame");
     const pending = h.failure({ type: "moveDirection", direction: "right" });
     await waitFor(() => gate.isSuspended());
     h.fake.swapBackingElement(w2);
@@ -1529,7 +1578,7 @@ describe("pending focus signal observed by waiting command (final issue 4)", () 
     //    (windows were silently nudged so the plan has real work).
     h.fake.nudgeSilent(w1, { x: 30 });
     h.fake.nudgeSilent(w2, { x: -40 });
-    gate.arm((id, op) => id === w1 && op === "position");
+    gate.arm((id, op) => id === w1 && op === "frame");
     const retile = h.run({ type: "retile" });
     await waitFor(() => gate.isSuspended());
 

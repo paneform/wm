@@ -152,3 +152,24 @@ Error codes (closed union): `invalid_request, window_not_found, workspace_not_fo
 window_not_manageable, window_not_controllable, inventory_stale, geometry_rejected,
 geometry_verification_failed, topology_unstable, paused, queue_full, timeout,
 config_invalid, internal_error`.
+### Window dimension-limit probe
+
+The command `{ type: "probeWindowLimits", windowId }` returns
+`windowLimitsProbe` with canonical `identity`, `originalFrame`, `restoredFrame`,
+`restoreStatus: verifiedExact`, per-axis `testedRanges`, exact minimum findings,
+minimum findings discriminated as `exact` or `noClampDownTo`, maximum findings
+discriminated as `exact` or `noClampThrough`, and
+`profileUpdated`. The ordered `phases` report behavioral capability verification,
+adoption/verification of existing durable parking, minimum probing, maximum
+probing, and exact restoration. Targets must be inactive durable parked windows;
+the command does not focus a window or reveal its workspace. Capability findings
+come from guarded parked behavioral writes rather than metadata bounds.
+
+The parked target identifies its host display, corner, retained visibility, and
+aggregate `positionCorrection` (`verified` or `clamped`). Per-sample position
+diagnostics keep requested ideal and observed points plus ideal and actual
+retained visibility separate from size evidence. A stable OS position clamp is
+accepted when the measured size and orthogonal dimension are unchanged, the
+window remains positively parked at the same host corner, and it overlaps no
+other display. `noClampThrough` is only a tested lower bound at the largest
+connected display work-area extent.

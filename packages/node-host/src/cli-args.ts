@@ -18,6 +18,11 @@ type Direction = (typeof DIRECTIONS)[number];
 const directionOf = (value: string): Direction | null =>
   (DIRECTIONS as readonly string[]).includes(value) ? (value as Direction) : null;
 
+const finiteNumber = (value: string): number | null => {
+  const number = Number(value);
+  return value.length > 0 && Number.isFinite(number) ? number : null;
+};
+
 /** Map CLI verb + args onto an engine Command. Returns null for unknown verbs.
  * The CLI owns NO layout/directional policy — it only maps syntax onto
  * Command envelopes; the engine resolves focus/displays/neighbors.
@@ -34,6 +39,8 @@ export function buildCommand(
       return { type: "getState" };
     case "windows":
       return { type: "getWindows" };
+    case "observe-window":
+      return a && !b ? { type: "getWindow", windowId: a } : null;
     case "displays":
       return { type: "getDisplays" };
     case "workspaces":
@@ -48,6 +55,15 @@ export function buildCommand(
       return a && b && c
         ? { type: "resizeWindow", windowId: a, size: { width: Number(b), height: Number(c) } }
         : null;
+    case "debug-frame": {
+      if (a !== "set" || !b || rest.length !== 6) return null;
+      const values = rest.slice(2).map(finiteNumber);
+      if (values.some((value) => value === null)) return null;
+      const [x, y, width, height] = values as [number, number, number, number];
+      return width > 0 && height > 0
+        ? { type: "setWindowFrame", windowId: b, frame: { x, y, width, height } }
+        : null;
+    }
     case "float":
       return a ? { type: "floatWindow", windowId: a } : null;
     case "tile":
@@ -57,6 +73,7 @@ export function buildCommand(
     case "unmanage":
       return a ? { type: "unmanageWindow", windowId: a } : null;
     case "window": {
+      if (a === "probe-limits") return b && !c ? { type: "probeWindowLimits", windowId: b } : null;
       if (!a || !b || c !== "") return null;
       const direction = directionOf(b);
       if (direction === null) return null;
@@ -138,10 +155,13 @@ Client:
   wm <command> [args...]     Execute a command against the daemon over WebSocket
 Commands:
   state | windows | displays | workspaces
+  observe-window ID                         Read one committed window observation
+  debug-frame set ID X Y WIDTH HEIGHT       Explicit verified geometry write
   focus-window ID | move-window ID X Y | resize-window ID W H
   float ID | tile ID | manage ID | unmanage ID
   window focus left|right|up|down     Focus the spatial neighbor (wraps at edges)
   window move left|right|up|down      Swap the focused window with its neighbor
+  window probe-limits WINDOW_ID       Reversibly measure window dimension limits
   workspace focus NAME | workspace pause --toggle
   workspace move-window NAME          Move the FOCUSED window to NAME and follow
   workspace move-window ID NAME       Move an explicit window ID to NAME

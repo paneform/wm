@@ -17,7 +17,7 @@ export const parkInvisibleWorkspaces: Rule = {
   run: (world: World, ctx: RuleContext): Action[] => {
     const actions: Action[] = [];
     for (const workspace of world.workspaces.values()) {
-      if (workspace.visibleOnDisplay !== null) continue;
+      if (workspace.visibleOnDisplay !== null || workspace.name === world.focusedWorkspace) continue;
       if (memberNeedsPark(world, ctx, workspace)) {
         actions.push({ kind: "parkWorkspace", workspace: workspace.name });
       }
@@ -28,7 +28,11 @@ export const parkInvisibleWorkspaces: Rule = {
 
 function scanForPending(world: World, ctx: RuleContext): { pending: boolean } {
   for (const workspace of world.workspaces.values()) {
-    if (workspace.visibleOnDisplay === null && memberNeedsPark(world, ctx, workspace)) {
+    if (
+      workspace.visibleOnDisplay === null &&
+      workspace.name !== world.focusedWorkspace &&
+      memberNeedsPark(world, ctx, workspace)
+    ) {
       return { pending: true };
     }
   }

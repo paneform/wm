@@ -58,9 +58,11 @@ const SizeStruct = Schema.Struct({ width: Schema.Number, height: Schema.Number }
 export const Command = Schema.Union(
   Schema.Struct({ type: Schema.Literal("getState") }),
   Schema.Struct({ type: Schema.Literal("getWindows") }),
+  Schema.Struct({ type: Schema.Literal("getWindow"), windowId: Schema.String }),
   Schema.Struct({ type: Schema.Literal("getDisplays") }),
   Schema.Struct({ type: Schema.Literal("getWorkspaces") }),
   Schema.Struct({ type: Schema.Literal("getTransaction"), id: Schema.String }),
+  Schema.Struct({ type: Schema.Literal("probeWindowLimits"), windowId: Schema.String }),
   Schema.Struct({ type: Schema.Literal("focusWindow"), windowId: Schema.String }),
   Schema.Struct({
     type: Schema.Literal("setWindowFrame"),
@@ -152,6 +154,7 @@ export function isBlockedWhenPaused(command: Command): boolean {
     case "moveFocusedWorkspaceToNextDisplay":
     case "focusDirection":
     case "moveDirection":
+    case "probeWindowLimits":
       return true;
     default:
       return false;
@@ -251,6 +254,10 @@ export interface StateSnapshot extends Schema.Schema.Type<typeof StateSnapshot> 
 export const CommandResult = Schema.Union(
   Schema.Struct({ type: Schema.Literal("state"), snapshot: StateSnapshot }),
   Schema.Struct({ type: Schema.Literal("windows"), windows: Schema.Array(WindowObservation) }),
+  Schema.Struct({
+    type: Schema.Literal("window"),
+    window: Schema.NullOr(WindowObservation),
+  }),
   Schema.Struct({ type: Schema.Literal("displays"), displays: Schema.Array(DisplayObservation) }),
   Schema.Struct({ type: Schema.Literal("workspaces"), workspaces: Schema.Array(WorkspaceSnapshot) }),
   Schema.Struct({
@@ -270,6 +277,66 @@ export const CommandResult = Schema.Union(
     issues: Schema.Array(Schema.String),
   }),
   Schema.Struct({ type: Schema.Literal("ok"), detail: Schema.optional(Schema.String) }),
+  Schema.Struct({
+    type: Schema.Literal("windowLimitsProbe"),
+    windowId: Schema.String,
+    identity: Schema.String,
+    target: Schema.Union(
+      Schema.Struct({
+        mode: Schema.Literal("parked"),
+        hostDisplayId: Schema.String,
+        corner: Schema.Literal("bottomLeft", "bottomRight", "topLeft", "topRight"),
+        retainedVisibility: Schema.Struct({ horizontal: Schema.Number, vertical: Schema.Number }),
+        positionCorrection: Schema.Literal("verified", "clamped"),
+      }),
+    ),
+    phases: Schema.Struct({
+      capability: Schema.Literal("verified"),
+      parking: Schema.Literal("adoptedVerified"),
+      minimumSize: Schema.Literal("verified"),
+      maximumSize: Schema.Literal("verified"),
+      restore: Schema.Literal("verifiedExact"),
+    }),
+    capability: Schema.Struct({
+      source: Schema.Literal("parkedBehavioralProbe"),
+      movable: Schema.Literal("supported"),
+      resizable: Schema.Literal("supported"),
+    }),
+    positionDiagnostics: Schema.Array(Schema.Struct({
+      sample: Schema.Literal("capabilityWidth", "capabilityHeight", "minWidth", "minHeight", "maxWidth", "maxHeight"),
+      correction: Schema.Literal("verified", "clamped"),
+      requestedIdealPoint: Schema.Struct({ x: Schema.Number, y: Schema.Number }),
+      observedPoint: Schema.Struct({ x: Schema.Number, y: Schema.Number }),
+      idealRetainedVisibility: Schema.Struct({ horizontal: Schema.Number, vertical: Schema.Number }),
+      actualRetainedVisibility: Schema.Struct({ horizontal: Schema.Number, vertical: Schema.Number }),
+    })),
+    originalFrame: Frame,
+    restoredFrame: Frame,
+    restoreStatus: Schema.Literal("verifiedExact"),
+    testedRanges: Schema.Struct({
+      width: Schema.Struct({ min: Schema.Number, max: Schema.Number }),
+      height: Schema.Struct({ min: Schema.Number, max: Schema.Number }),
+    }),
+    findings: Schema.Struct({
+      minWidth: Schema.Union(
+        Schema.Struct({ kind: Schema.Literal("exact"), value: Schema.Number }),
+        Schema.Struct({ kind: Schema.Literal("noClampDownTo"), value: Schema.Number }),
+      ),
+      minHeight: Schema.Union(
+        Schema.Struct({ kind: Schema.Literal("exact"), value: Schema.Number }),
+        Schema.Struct({ kind: Schema.Literal("noClampDownTo"), value: Schema.Number }),
+      ),
+      maxWidth: Schema.Union(
+        Schema.Struct({ kind: Schema.Literal("exact"), value: Schema.Number }),
+        Schema.Struct({ kind: Schema.Literal("noClampThrough"), value: Schema.Number }),
+      ),
+      maxHeight: Schema.Union(
+        Schema.Struct({ kind: Schema.Literal("exact"), value: Schema.Number }),
+        Schema.Struct({ kind: Schema.Literal("noClampThrough"), value: Schema.Number }),
+      ),
+    }),
+    profileUpdated: Schema.Boolean,
+  }),
 );
 export type CommandResult = typeof CommandResult.Type;
 
@@ -354,6 +421,7 @@ export interface CommandBusDeps {
   health(): HealthState;
   /** Engine-provided mutation application (desired state + rule pass). */
   applyMutation(command: Command): Effect.Effect<CommandResult, CommandError>;
+  probeWindowLimits(windowId: string): Effect.Effect<CommandResult, CommandError>;
   validateConfigCandidate(): Effect.Effect<CommandResult, CommandError>;
   reloadConfig(mode: "delta" | "full"): Effect.Effect<CommandResult, CommandError>;
   subscriptionTopics(): readonly string[];
@@ -380,6 +448,8 @@ export function createCommandBus(deps: CommandBusDeps): CommandBus {
           };
         case "getWindows":
           return { type: "windows", windows: [...world.windows.values()].map((w) => ({ ...w })) };
+        case "getWindow":
+          return { type: "window", window: world.windows.get(command.windowId) ?? null };
         case "getDisplays":
           return { type: "displays", displays: world.topology.displays.map((d) => ({ ...d })) };
         case "getWorkspaces":
@@ -437,13 +507,17 @@ export function createCommandBus(deps: CommandBusDeps): CommandBus {
       );
     }
 
+    let structuredResult: CommandResult | undefined;
     const unit: WorkUnit = {
       id: `cmd:${deps.clock.now()}:${Math.floor(Math.random() * 1e9).toString(36)}`,
-      coalesceKey: coalesceKeyFor(command),
+      coalesceKey: command.type === "probeWindowLimits" ? undefined : coalesceKeyFor(command),
       steps: [
         {
           name: command.type,
-          run: () => deps.applyMutation(command),
+          run: () => command.type === "probeWindowLimits"
+            ? Effect.tap(deps.probeWindowLimits(command.windowId), (result) =>
+                Effect.sync(() => { structuredResult = result; }))
+            : deps.applyMutation(command),
         },
       ],
     };
@@ -452,7 +526,9 @@ export function createCommandBus(deps: CommandBusDeps): CommandBus {
       Effect.mapError(deps.queue.submit(unit), mapSubmitError),
       (receipt) =>
         receipt.status === "completed"
-          ? Effect.succeed<CommandResult>({ type: "ok", detail: receipt.id })
+          ? structuredResult !== undefined
+            ? Effect.succeed(structuredResult)
+            : Effect.succeed<CommandResult>({ type: "ok", detail: receipt.id })
           : receipt.status === "timeout"
             ? Effect.fail(
                 new CommandError({ code: "timeout", message: "operation timed out" }),
@@ -471,6 +547,7 @@ export function createCommandBus(deps: CommandBusDeps): CommandBus {
       switch (raw.type) {
         case "getState":
         case "getWindows":
+        case "getWindow":
         case "getDisplays":
         case "getWorkspaces":
         case "getTransaction":
@@ -501,6 +578,7 @@ function windowIdOf(command: Command): string | null {
     case "manageWindow":
     case "unmanageWindow":
     case "moveWindowToWorkspace":
+    case "probeWindowLimits":
       return command.windowId;
     default:
       return null;
@@ -519,6 +597,12 @@ export function mapStepCode(code: string | undefined): CommandErrorCode {
       return "geometry_rejected";
     case "geometry_verification_failed":
       return "geometry_verification_failed";
+    case "rejected":
+      return "geometry_rejected";
+    case "not_controllable":
+      return "window_not_controllable";
+    case "stale":
+      return "inventory_stale";
     case "window_not_found":
       return "window_not_found";
     case "workspace_not_found":

@@ -201,3 +201,46 @@ queue: serialized FIFO, idempotent-command coalescing, suspicious-repeat escalat
 15 s timeout, pendingLimit 256, historyLimit 512, batches ≤64 stop-on-first-failure.
 CLI, WebSocket server, and renderer ALL call this same layer. Queries return last
 committed state plus pending metadata — queries never wait on platform I/O.
+## Explicit dimension-limit diagnostic
+
+`probeWindowLimits` requires a managed window parked for an invisible workspace,
+identified by its durable `parkedFrames` intent and a current connected-display
+parking fact. This is the supported least-disruptive target: the diagnostic does
+not reveal its workspace or focus the window. Hidden, minimized, fullscreen, or
+ambiguously attributed parked windows are rejected; there is no visible fallback.
+
+The explicit sequence is behavioral capabilities, adopted/verified parking,
+minimum size, maximum size, then exact restoration. The probe holds the engine's
+exclusive command/reconciliation gate and captures the canonical identity and
+exact physical frame. Every parked trial recomputes `cornerTarget` from the
+requested size and original retained horizontal/vertical sliver. If a requested
+dimension is smaller than that sliver, the deterministic impossible-case policy
+retains that entire dimension at the same corner. After an application size clamp or reanchor, a
+position-only correction recomputes the corner target from the observed size.
+A stable position/work-area clamp is recorded separately and does not invalidate
+size evidence when dimensions remain stable, actual retained visibility stays
+positive at the same corner, and no other display has positive overlap. Onscreen
+movement, a different corner/display, cross-dimension changes, or unsafe overlap
+aborts the diagnostic and is never treated as size evidence.
+Minimum requests use one point. Acceptance at one point is reported as
+`noClampDownTo` and does not publish a minimum constraint; only a stable clamp
+above one point is an exact, publishable minimum. Maximum requests stop at the largest connected
+display work-area width or height; exact acceptance there is `noClampThrough`, not an
+unbounded maximum. Any observation below that endpoint, including a one-point
+clamp, is an exact maximum.
+
+Every write is bracketed by identity-validated reads and deterministic adapter
+settling. The untouched dimensions and position come from the captured frame,
+and the complete original frame is restored and verified after every sample.
+Any failed exact restore makes the command fail and suppresses all findings and
+profile updates. An operation-wide uninterruptible finalizer repeats the guarded
+exact restore after interruption or an unexpected defect once mutation may have
+started. Durable parked intent is not mutated. After every sample and
+the final exact restore succeed, exact bounds atomically replace the topology-
+partitioned profile constraints used by subsequent layout planning.
+
+Guarded writes bind both the canonical window ID (the sidecar's CG/AX mapping)
+and the expected pid/role/subrole fingerprint. This is the strongest local
+contract available without broad adapter redesign. A same-fingerprint AX-only
+incarnation that reuses the canonical ID and cannot be distinguished by the
+sidecar remains a platform-level residual risk.

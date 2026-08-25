@@ -186,8 +186,8 @@ final class SidecarServer {
         guard let meta = inventory.metadata(for: id) else {
             return sendError(request, code: "not_found", detail: "unknown window \(id)")
         }
+        var target = Rect(frameValue)
         do {
-            let target: Rect
             let components: [GeometryAdapter.Component]
             switch mode {
             case "position":
@@ -200,7 +200,6 @@ final class SidecarServer {
                 }
                 components = [.size]
             default:
-                target = Rect(frameValue)
                 components = [.size, .position, .size]
             }
             let write = try await inventory.write(
@@ -212,15 +211,19 @@ final class SidecarServer {
         } catch let error as AdapterError {
             // The platform API itself refused; report honestly with the last
             // observed frame so the engine can classify.
-            let requested = Rect(frameValue)
-            let observed = inventory.currentObservedFrame(for: meta) ?? requested
+            let observed = inventory.currentObservedFrame(for: meta) ?? target
             send(ResultMessage(reqId: requestId(request), result: .write(WriteValue(
-                requested: requested.frameValue,
+                requested: target.frameValue,
                 observed: observed.frameValue,
                 stable: false,
                 errorKind: error.wireCode))))
         } catch {
-            sendError(request, code: "rejected", detail: "\(error)")
+            let observed = inventory.currentObservedFrame(for: meta) ?? target
+            send(ResultMessage(reqId: requestId(request), result: .write(WriteValue(
+                requested: target.frameValue,
+                observed: observed.frameValue,
+                stable: false,
+                errorKind: AdapterError.rejected.wireCode))))
         }
     }
 

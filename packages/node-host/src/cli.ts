@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-import { Effect, Exit } from "effect";
+import { Effect } from "effect";
 import { createEngine } from "@wm/engine";
 import type { MacOsSidecarAdapter } from "@wm/platform-macos";
 import { attachWebSocketServer } from "./ws-server.ts";
 import { clockNode } from "./clock-node.ts";
+import { executeEngineCommand } from "./command-handler.ts";
 import { createFileConfigSource, resolveConfigPath } from "./config-file.ts";
 import { parseArgs, USAGE } from "./cli-args.ts";
 import {
@@ -144,11 +145,7 @@ async function main(): Promise<number> {
   const { WebSocketServer } = await import("ws");
   const server = new WebSocketServer({ host: "127.0.0.1", port });
   attachWebSocketServer(server, {
-    handle: async (command) => {
-      const exit = await Effect.runPromiseExit(engine.execute(command));
-      if (Exit.isSuccess(exit)) return { ok: true, data: exit.value };
-      throw exit.cause;
-    },
+    handle: (command) => executeEngineCommand(engine, command),
     snapshot: () => Effect.runPromise(engine.state()),
     events: () => engine.events(),
   });

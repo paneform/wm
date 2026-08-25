@@ -201,6 +201,32 @@ describe("learning guards on the write pipeline (±2pt flush, initial frame)", (
     ]);
   });
 
+  test("confirmed repeated evidence bypasses only the initial-frame guard", () => {
+    const scan = learnScan({
+      outcome: "stableClamp",
+      requested: f(1134, 32, 378, 950),
+      observed: f(1134, 32, 480, 950),
+      initial: f(1134, 32, 480, 950),
+      workArea: f(0, 32, 1512, 950),
+      confirmed: true,
+    });
+    expect(scan.candidates).toEqual([{ axis: "width", direction: "min", value: 480 }]);
+    expect(scan.skipped).toEqual([]);
+
+    const flush = learnScan({
+      outcome: "stableClamp",
+      requested: f(0, 32, 378, 950),
+      observed: f(0, 32, 480, 950),
+      initial: f(0, 32, 480, 950),
+      workArea: f(0, 32, 1512, 950),
+      confirmed: true,
+    });
+    expect(flush.candidates).toEqual([]);
+    expect(flush.skipped).toEqual([
+      { axis: "width", direction: "min", value: 480, reason: "work_area_flush" },
+    ]);
+  });
+
   test("progressing outcomes are never learnable", () => {
     const scan = learnScan({
       outcome: "progressing",

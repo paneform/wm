@@ -1,5 +1,5 @@
 import { Effect, Stream } from "effect";
-import type { Command, DomainEvent } from "@wm/engine";
+import { CommandError, type Command, type DomainEvent } from "@wm/engine";
 import { decodeWireMessage, encodeWireMessage, wireSnapshot } from "@wm/engine";
 import type { StateSnapshot, WireMessage } from "@wm/engine";
 import type { WebSocketServer } from "ws";
@@ -80,12 +80,15 @@ export function attachWebSocketServer(
         const data = await options.handle(message.command);
         reply(message.id, { v: 1, type: "response", id: message.id, ok: true, data });
       } catch (e) {
+        const error = e instanceof CommandError
+          ? { code: e.code, message: e.message }
+          : { code: "internal_error", message: String(e) };
         reply(message.id, {
           v: 1,
           type: "response",
           id: message.id,
           ok: false,
-          error: { code: "internal_error", message: String(e) },
+          error,
         });
       }
     }

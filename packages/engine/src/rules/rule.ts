@@ -1,7 +1,7 @@
 import type { Config, EffectiveWorkspaceSettings } from "../config.ts";
 import type { Action } from "../actions.ts";
 import type { Constraints, DisplayId, Frame, WindowId, WindowObservation } from "../schema.ts";
-import { classify, type Profile, type ProfileKey, type World, type WorkspaceState } from "../world.ts";
+import { classify, type BspNode, type Profile, type ProfileKey, type World, type WorkspaceState } from "../world.ts";
 import { DEFAULT_TOLERANCE, REPLAN_BONUS } from "../constants.ts";
 import { contentRect, constraintsResolver, planLayout, tiledMembers } from "../layout/bsp.ts";
 import {
@@ -18,6 +18,9 @@ import { effectiveSettings } from "../config.ts";
 export interface TombstoneRecord {
   workspace: string;
   floating: boolean;
+  /** Exact pre-removal BSP topology, used when its surviving members still match. */
+  tree: BspNode;
+  parkedFrame: Frame | null;
   /** Split partner to re-insert beside, when known. */
   anchor: WindowId | null;
   at: number;

@@ -255,10 +255,12 @@ describe("viability margins", () => {
     expect(isMinViable(700, 800)).toBe(true);
     expect(isMinViable(798, 800)).toBe(true);
     expect(isMinViable(799, 800)).toBe(false);
+    expect(isMinViable(800, 800)).toBe(true);
 
     expect(isMaxViable(902, 900)).toBe(true);
     expect(isMaxViable(901, 900)).toBe(false);
     expect(isMaxViable(899, 900)).toBe(false);
+    expect(isMaxViable(900, 900)).toBe(true);
   });
 
   test("viableConstraints keeps only bounds still separated from the live observation by the margin", () => {
@@ -273,6 +275,10 @@ describe("viability margins", () => {
       maxHeight: 1000,
     });
     expect(viableConstraints(learned, f(0, 0, 900, 800))).toEqual({});
+    expect(viableConstraints(learned, f(0, 0, 800, 600))).toEqual({
+      minWidth: 800,
+      minHeight: 600,
+    });
     expect(viableConstraints(undefined, f(0, 0, 900, 800))).toEqual({});
   });
 

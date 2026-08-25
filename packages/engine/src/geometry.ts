@@ -112,6 +112,8 @@ export interface ClassifyInput {
   initialFrame?: Frame | undefined;
   /** Previous readback; enables the `progressing` verdict. */
   previousObserved?: Frame | undefined;
+  /** Parking-only acceptance for a stable OS clamp that preserves exact size. */
+  acceptStablePositionClamp?: boolean | undefined;
 }
 
 function constrainedMatch(
@@ -161,6 +163,16 @@ export function classifyWrite(input: ClassifyInput): GeometryOutcome {
     constrainedMatch(requested, observed, tolerance, input.constraints)
   ) {
     return "constrained";
+  }
+
+  if (
+    input.acceptStablePositionClamp === true &&
+    stable &&
+    Math.abs(observed.width - requested.width) <= tolerance &&
+    Math.abs(observed.height - requested.height) <= tolerance &&
+    !positionWithinTolerance(requested, observed, tolerance)
+  ) {
+    return "stableClamp";
   }
 
   if (

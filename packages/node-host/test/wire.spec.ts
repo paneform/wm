@@ -1,16 +1,54 @@
 import { describe, expect, test } from "vitest";
 import { Effect, Stream } from "effect";
-import type { Command, StateSnapshot } from "@wm/engine";
+import { CommandError, type Command, type StateSnapshot } from "@wm/engine";
 import { decodeWireMessage } from "@wm/engine";
 import { createFileConfigSource } from "../src/config-file.ts";
 import { attachWebSocketServer } from "../src/ws-server.ts";
 import { clockNode } from "../src/clock-node.ts";
+import { executeEngineCommand } from "../src/command-handler.ts";
 import WebSocket, { WebSocketServer } from "ws";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
 describe("daemon over the wire (node-host integration)", () => {
+  test("engine command result is wrapped exactly once by the wire response", async () => {
+    const result = { type: "ok" as const, detail: "resumed" };
+    const engine = { execute: () => Effect.succeed(result) };
+
+    await expect(executeEngineCommand(engine, { type: "resume" })).resolves.toEqual(result);
+  });
+
+  test("engine command failures retain their typed wire error", async () => {
+    const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    await new Promise<void>((resolve) => server.on("listening", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("no port");
+    const engine = {
+      execute: () => Effect.fail(new CommandError({ code: "paused", message: "engine is paused" })),
+    };
+    attachWebSocketServer(server, {
+      handle: (command) => executeEngineCommand(engine, command),
+      snapshot: async () => ({ epoch: 0 }) as unknown as StateSnapshot,
+      events: () => Stream.empty,
+    });
+    const client = new WebSocket(`ws://127.0.0.1:${address.port}`);
+    await new Promise<void>((resolve) => client.on("open", resolve));
+
+    const reply = await new Promise<string>((resolve, reject) => {
+      client.on("message", (raw) => resolve(String(raw)));
+      client.on("error", reject);
+      client.send(JSON.stringify({ v: 1, type: "request", id: "fail", command: { type: "resume" } }));
+    });
+
+    expect(JSON.parse(reply)).toMatchObject({
+      ok: false,
+      error: { code: "paused", message: "engine is paused" },
+    });
+    client.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
   test("request → response envelope round-trip through a stub handle", async () => {
     const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
     await new Promise<void>((resolve) => server.on("listening", resolve));
@@ -110,6 +148,40 @@ describe("daemon over the wire (node-host integration)", () => {
     expect(JSON.parse(badReply)).toMatchObject({ ok: false, error: { code: "invalid_request" } });
 
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  test("limit probe command and structured result round-trip over the wire", () => {
+    const request = decodeWireMessage(JSON.stringify({
+      v: 1,
+      type: "request",
+      id: "probe-1",
+      command: { type: "probeWindowLimits", windowId: "window:1" },
+    }));
+    expect(request).toMatchObject({ command: { type: "probeWindowLimits", windowId: "window:1" } });
+
+    const result = {
+      type: "windowLimitsProbe",
+      windowId: "window:1",
+      identity: "[1,\"AXWindow\",null]",
+      originalFrame: { x: 10, y: 20, width: 800, height: 600 },
+      restoredFrame: { x: 10, y: 20, width: 800, height: 600 },
+      testedRanges: { width: { min: 1, max: 1512 }, height: { min: 1, max: 944 } },
+      findings: {
+        minWidth: { kind: "exact", value: 320 },
+        minHeight: { kind: "exact", value: 200 },
+        maxWidth: { kind: "noClampThrough", value: 1512 },
+        maxHeight: { kind: "exact", value: 800 },
+      },
+      profileUpdated: true,
+    };
+    const response = decodeWireMessage(JSON.stringify({
+      v: 1,
+      type: "response",
+      id: "probe-1",
+      ok: true,
+      data: result,
+    }));
+    expect(response).toMatchObject({ ok: true, data: result });
   });
 
   test("config source parses JSONC through the engine boundary", async () => {

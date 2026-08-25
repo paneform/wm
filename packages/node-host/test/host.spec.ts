@@ -75,6 +75,21 @@ describe("parseArgs / buildCommand", () => {
       windowId: "w1",
       point: { x: 10, y: 20 },
     });
+    expect(buildCommand("observe-window", ["window:cg:1"])).toEqual({
+      type: "getWindow",
+      windowId: "window:cg:1",
+    });
+    expect(buildCommand("window", ["probe-limits", "window:cg:1"])).toEqual({
+      type: "probeWindowLimits",
+      windowId: "window:cg:1",
+    });
+    expect(buildCommand("debug-frame", ["set", "w1", "10", "20", "800", "600"])).toEqual({
+      type: "setWindowFrame",
+      windowId: "w1",
+      frame: { x: 10, y: 20, width: 800, height: 600 },
+    });
+    expect(buildCommand("debug-frame", ["set", "w1", "10", "20", "0", "600"])).toBeNull();
+    expect(buildCommand("debug-frame", ["set", "w1", "x", "20", "800", "600"])).toBeNull();
     expect(buildCommand("workspace", ["focus", "dev"])).toEqual({
       type: "focusWorkspace",
       name: "dev",

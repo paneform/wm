@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 import Foundation
 
-enum AdapterError: Error {
+enum AdapterError: Error, Equatable {
     case notFound
     case notControllable
     case stale
@@ -16,6 +16,15 @@ enum AdapterError: Error {
         case .stale: "stale"
         case .ambiguous: "ambiguous"
         case .rejected: "rejected"
+        }
+    }
+
+    static func writeFailure(_ result: AXError) -> AdapterError? {
+        switch result {
+        case .success: nil
+        case .invalidUIElement, .invalidUIElementObserver: .stale
+        case .apiDisabled, .attributeUnsupported, .notImplemented, .cannotComplete: .notControllable
+        default: .rejected
         }
     }
 }
@@ -146,48 +155,57 @@ final class GeometryAdapter {
         components: [Component],
         expectedIdentity: ExpectedIdentityValue? = nil
     ) async throws -> WriteValue {
-        guard AXIsProcessTrusted() else { throw AdapterError.notControllable }
-        let element = try resolve(meta)
-        try validateControllability(element: element, components: components)
+        do {
+            guard AXIsProcessTrusted() else { throw AdapterError.notControllable }
+            let element = try resolve(meta)
+            try validateControllability(element: element, components: components)
 
         // Atomic identity precondition (contract §4): compared against the
         // CURRENT live window metadata immediately before any component
         // mutation; mismatch aborts `stale` without writing. Exact
         // fingerprint equality — a same-pid/role replacement differing in
         // subrole (null vs non-null) is rejected.
-        if let expected = expectedIdentity {
-            guard let live = observation(for: meta),
-                  ExpectedIdentityValue.fingerprint(
-                    pid: live.pid,
-                    role: live.role,
-                    subrole: live.subrole
-                  ) == expected.fingerprint
-            else { throw AdapterError.stale }
-        }
-
-        try await withEnhancedUserInterfaceDisabled(pid: meta.pid) {
-            for component in components {
-                // Identity BEFORE the write: never mutate a replacement window.
-                guard sameLogicalWindow(element, meta) else { throw AdapterError.stale }
-                try writeComponent(component, requested, element: element)
-                try await Task.sleep(for: .milliseconds(interWriteDelayMs))
-                // Identity AFTER the write: abort rather than continue on a swap.
-                guard sameLogicalWindow(element, meta) else { throw AdapterError.stale }
+            if let expected = expectedIdentity {
+                guard let live = observation(for: meta),
+                      ExpectedIdentityValue.fingerprint(
+                        pid: live.pid,
+                        role: live.role,
+                        subrole: live.subrole
+                      ) == expected.fingerprint
+                else { throw AdapterError.stale }
             }
-        }
 
-        let settlement = try await settle(element: element, requested: requested)
-        return WriteValue(
-            requested: requested.frameValue,
-            observed: settlement.frame.frameValue,
-            stable: settlement.stable,
-            errorKind: nil)
+            try await withEnhancedUserInterfaceDisabled(pid: meta.pid) {
+                for component in components {
+                    // Identity BEFORE the write: never mutate a replacement window.
+                    guard sameLogicalWindow(element, meta) else { throw AdapterError.stale }
+                    try writeComponent(component, requested, element: element)
+                    try await Task.sleep(for: .milliseconds(interWriteDelayMs))
+                    // Identity AFTER the write: abort rather than continue on a swap.
+                    guard sameLogicalWindow(element, meta) else { throw AdapterError.stale }
+                }
+            }
+
+            let settlement = try await settle(element: element, requested: requested)
+            return WriteValue(
+                requested: requested.frameValue,
+                observed: settlement.frame.frameValue,
+                stable: settlement.stable,
+                errorKind: nil)
+        } catch let error as AdapterError {
+            throw error
+        } catch {
+            throw AdapterError.rejected
+        }
     }
 
     /// Builds the effective request rect for position/size-only operations by
     /// merging onto the current observed frame.
     func mergedTarget(meta: WindowMeta, replace: (inout Rect) -> Void) throws -> Rect {
-        var target = try frame(of: try resolve(meta))
+        // Inventory and AX are sampled independently. A transient failed live
+        // read must not reject a component write before its atomic identity
+        // precondition gets a chance to classify a replacement as stale.
+        var target = (try? frame(of: resolve(meta))) ?? meta.frame
         replace(&target)
         return target
     }
@@ -196,17 +214,17 @@ final class GeometryAdapter {
         switch component {
         case .position:
             var point = CGPoint(x: target.x, y: target.y)
-            guard let value = AXValueCreate(.cgPoint, &point),
-                  AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, value) == .success else {
-                throw AdapterError.rejected
-            }
+            guard let value = AXValueCreate(.cgPoint, &point) else { throw AdapterError.rejected }
+            try checkWrite(AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, value))
         case .size:
             var size = CGSize(width: target.width, height: target.height)
-            guard let value = AXValueCreate(.cgSize, &size),
-                  AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, value) == .success else {
-                throw AdapterError.rejected
-            }
+            guard let value = AXValueCreate(.cgSize, &size) else { throw AdapterError.rejected }
+            try checkWrite(AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, value))
         }
+    }
+
+    private func checkWrite(_ result: AXError) throws {
+        if let error = AdapterError.writeFailure(result) { throw error }
     }
 
     private func validateControllability(element: AXUIElement, components: [Component]) throws {

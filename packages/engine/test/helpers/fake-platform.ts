@@ -270,6 +270,7 @@ export interface FakeWindowSpec {
   width?: number | undefined;
   height?: number | undefined;
   personality?: FakePersonality | undefined;
+  constraints?: Constraints | undefined;
   minimized?: boolean | undefined;
   hidden?: boolean | undefined;
   fullscreen?: boolean | undefined;
@@ -415,6 +416,7 @@ interface SimWindow {
   role: string;
   subrole?: string | null | undefined;
   personality: FakePersonality;
+  constraints?: Constraints | undefined;
   frame: Frame;
   /** Pending animation destination; null when stationary. */
   target: Frame | null;
@@ -507,6 +509,13 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
 
   const capabilitiesOf = (w: SimWindow): WindowObservation["capabilities"] => {
     switch (w.personality.kind) {
+      case "minMaxClamp":
+        return {
+          movable: "supported",
+          resizable: "supported",
+          movableEvidence: "platform_report",
+          resizableEvidence: "platform_report",
+        };
       case "fixedSize":
         return {
           movable: "supported",
@@ -545,6 +554,7 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
     fullscreen: w.fullscreen,
     focused: w.id === (deferFocus ? visibleFocusedId : focusedId),
     capabilities: capabilitiesOf(w),
+    ...(w.constraints !== undefined ? { constraints: w.constraints } : {}),
   });
 
   const resolveWindow = (id: WindowId): SimWindow | undefined => windows.get(id);
@@ -860,6 +870,7 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
       role: spec.role ?? "AXWindow",
       ...(spec.subrole !== undefined ? { subrole: spec.subrole } : {}),
       personality: spec.personality ?? { kind: "normal" },
+      ...(spec.constraints !== undefined ? { constraints: spec.constraints } : {}),
       frame,
       target: null,
       minimized: spec.minimized ?? false,

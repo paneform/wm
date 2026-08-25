@@ -164,6 +164,71 @@ describe("BSP two-pane solve", () => {
     const result = partitionLengths(100, 8, 0.5, { min: 90 }, { min: 90 });
     expect(result.feasible).toBe(false);
   });
+
+  test("a single leaf is infeasible when its minimum exceeds the work area", () => {
+    expect(
+      planLayout(
+        {
+          tree: leaf("wide"),
+          content: frame(0, 0, 1512, 950),
+          resolve: constraintsResolver(constraintMap({ wide: { minWidth: 1600 } })),
+        },
+        ["greedy"],
+      ),
+    ).toEqual({ feasible: false });
+  });
+
+  test("contained overlap honors three infeasible nominal minima", () => {
+    const plan = planLayout({
+      tree: split(
+        "vertical",
+        0.5,
+        leaf("spotify"),
+        split("vertical", 0.5, leaf("docker"), leaf("chatgpt")),
+      ),
+      content: frame(0, 32, 1512, 950),
+      gap: 0,
+      resolve: constraintsResolver(
+        constraintMap({
+          spotify: { minWidth: 800 },
+          docker: { minWidth: 940 },
+          chatgpt: { minWidth: 480 },
+        }),
+      ),
+    });
+
+    expect(plan.feasible).toBe(true);
+    if (!plan.feasible) return;
+    expect(plan.policy).toBe("overlap");
+    expect([...plan.frames]).toEqual([
+      ["spotify", frame(0, 32, 800, 950)],
+      ["docker", frame(572, 32, 940, 950)],
+      ["chatgpt", frame(1032, 32, 480, 950)],
+    ]);
+  });
+
+  test("overlap rejects contradictory and individually oversized bounds", () => {
+    const input = {
+      tree: leaf("wide"),
+      content: frame(0, 32, 1512, 950),
+      resolve: constraintsResolver(constraintMap({ wide: { minWidth: 1600 } })),
+    };
+    expect(planLayout(input, ["overlap"])).toEqual({ feasible: false });
+    const fallback = planLayout(input);
+    expect(fallback.feasible && fallback.policy).toBe("overflow");
+    if (fallback.feasible) expect(fallback.frames.get("wide")?.width).toBe(1600);
+    expect(
+      planLayout(
+        {
+          ...input,
+          resolve: constraintsResolver(
+            constraintMap({ wide: { minWidth: 900, maxWidth: 800 } }),
+          ),
+        },
+        ["overlap"],
+      ),
+    ).toEqual({ feasible: false });
+  });
 });
 
 describe("subtree aggregate bounds", () => {

@@ -127,6 +127,20 @@ export const ExpectedWindowIdentity = Schema.Struct({
 export interface ExpectedWindowIdentity
   extends Schema.Schema.Type<typeof ExpectedWindowIdentity> {}
 
+/** Canonical cross-adapter identity token used by guarded window writes. */
+export const windowIdentityFingerprint = (
+  observation: {
+    pid: number;
+    role?: string | null | undefined;
+    subrole?: string | null | undefined;
+  },
+): string =>
+  JSON.stringify([
+    observation.pid,
+    observation.role ?? null,
+    observation.subrole ?? null,
+  ]);
+
 export const WriteObservation = Schema.Struct({
   requested: Frame,
   observed: Frame,
@@ -185,5 +199,6 @@ export const GeometryRequest = Schema.Struct({
   frame: Frame,
   tolerance: Schema.optional(Schema.Number),
   attempts: Schema.optional(Attempts),
+  acceptance: Schema.optional(Schema.Literal("parkingStablePositionClamp")),
 });
 export interface GeometryRequest extends Schema.Schema.Type<typeof GeometryRequest> {}

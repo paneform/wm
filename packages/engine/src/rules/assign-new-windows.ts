@@ -2,6 +2,7 @@ import { insertLeaf, firstLeaf, planLayout, contentRect, tiledMembers, constrain
 import type { Action } from "../actions.ts";
 import type { Frame } from "../schema.ts";
 import type { World } from "../world.ts";
+import { insertionTargetFrame } from "../insertion-frame.ts";
 import {
   constraintsForWindow,
   displayById,
@@ -28,6 +29,12 @@ export const assignNewWindows: Rule = {
   applies: (world: World, ctx: RuleContext): boolean => {
     for (const observation of world.windows.values()) {
       if (!isIgnoredSurface(world, ctx, observation) && findMembership(world, observation.id) === null) {
+        const tombstone = ctx.tombstones.get(observation.id);
+        if (
+          tombstone !== undefined &&
+          ctx.now - tombstone.at <= 5 * 60 * 1000 &&
+          world.workspaces.has(tombstone.workspace)
+        ) continue;
         return true;
       }
     }
@@ -38,6 +45,12 @@ export const assignNewWindows: Rule = {
     for (const observation of world.windows.values()) {
       if (isIgnoredSurface(world, ctx, observation)) continue;
       if (findMembership(world, observation.id) !== null) continue;
+      const tombstone = ctx.tombstones.get(observation.id);
+      if (
+        tombstone !== undefined &&
+        ctx.now - tombstone.at <= 5 * 60 * 1000 &&
+        world.workspaces.has(tombstone.workspace)
+      ) continue;
       // Only normal windows are auto-placed; transients follow parents (rule 6).
       if (windowClass(observation) === "transient") continue;
 
@@ -114,11 +127,13 @@ function preflightFrame(
     (workspace.lastFocusedMember !== null && members.includes(workspace.lastFocusedMember)
       ? workspace.lastFocusedMember
       : members[0]) ?? null;
-  if (beside === null || isEmptyTree(workspace.tree)) return null;
-  const besideFrame = world.windows.get(beside)?.frame;
-  if (besideFrame === undefined) return null;
-
-  const hypothetical = insertLeaf(workspace.tree, beside, newId, besideFrame);
+  const observedBesideFrame = beside === null ? undefined : world.windows.get(beside)?.frame;
+  const besideFrame = insertionTargetFrame(world, workspace, observedBesideFrame, settings.margins);
+  const hypothetical = isEmptyTree(workspace.tree)
+    ? ({ kind: "leaf", windowId: newId } as const)
+    : beside !== null && besideFrame !== undefined
+      ? insertLeaf(workspace.tree, beside, newId, besideFrame)
+      : null;
   if (hypothetical === null) return null;
 
   const resolver = constraintsResolver((id) => {

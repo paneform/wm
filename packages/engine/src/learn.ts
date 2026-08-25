@@ -38,6 +38,8 @@ export interface LearningInput {
   initial: Frame;
   workArea: Frame;
   tolerance: number;
+  /** Repeated guarded writes confirmed a clamp equal to the initial frame. */
+  confirmed?: boolean | undefined;
 }
 
 const flushGuard = (
@@ -87,7 +89,11 @@ export function candidatesFrom(input: LearningInput): CandidateScan {
     }
     // Initial-frame guard: "window didn't move" is not a size limit. Only the
     // stable clamp path needs this; a constrained match hit a KNOWN bound.
-    if (input.outcome === "stableClamp" && Math.abs(value - input.initial[axis]) <= input.tolerance) {
+    if (
+      input.outcome === "stableClamp" &&
+      input.confirmed !== true &&
+      Math.abs(value - input.initial[axis]) <= input.tolerance
+    ) {
       scan.skipped.push({ axis, direction, value, reason: "initial_frame" });
       continue;
     }
@@ -293,6 +299,27 @@ export function recordCandidates(
   };
 }
 
+/** Explicit diagnostics are already verified evidence and replace the four
+ * measured bounds atomically instead of passing through promotion buckets. */
+export function setVerifiedConstraints(
+  store: LearningStore,
+  key: ProfileKey,
+  constraints: Constraints,
+): LearningStore {
+  const keyStr = profileKeyString(key);
+  const existing = store.profiles.get(keyStr);
+  const profiles = new Map(store.profiles);
+  profiles.set(keyStr, {
+    key,
+    constraints: { ...constraints },
+    sampleCount: (existing?.sampleCount ?? 0) + Object.keys(constraints).length,
+    confidence: "strong",
+    correctiveAttemptCount: existing?.correctiveAttemptCount ?? 0,
+    cooperative: existing?.cooperative ?? false,
+  });
+  return { ...store, profiles };
+}
+
 /**
  * An exact observation contradicting a learned bound replaces it — bounds can
  * be wrong after OS updates — and resets pending samples for that bound.
@@ -387,10 +414,12 @@ export function markCooperation(
 // ---------------------------------------------------------------------------
 
 export const isMinViable = (observed: number, bound: number): boolean =>
-  observed + VIABILITY_MARGIN_PT < bound;
+  observed + VIABILITY_MARGIN_PT < bound ||
+  Math.abs(observed - bound) < VIABILITY_MARGIN_PT;
 
 export const isMaxViable = (observed: number, bound: number): boolean =>
-  observed - VIABILITY_MARGIN_PT > bound;
+  observed - VIABILITY_MARGIN_PT > bound ||
+  Math.abs(observed - bound) < VIABILITY_MARGIN_PT;
 
 /** Filter bounds to those still viable against a live observation. */
 export function viableConstraints(

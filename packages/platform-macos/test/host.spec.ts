@@ -194,6 +194,32 @@ describe("MacOsSidecarAdapter permission ops", () => {
 });
 
 describe("MacOsSidecarAdapter geometry wire shape", () => {
+  test("classified write failures retain requested and observed frames", async () => {
+    const { spawn, fake } = makeSpawn();
+    const adapter = Effect.runSync(createMacOsSidecarAdapter({ spawn, sidecarPath: "/x" }));
+    fake.emit(READY);
+    fake.overrides.set("setWindowFrame", (reqId) => ({
+      reqId,
+      result: {
+        requested: { x: 20, y: 52, width: 800, height: 600 },
+        observed: { x: 10, y: 40, width: 700, height: 500 },
+        stable: false,
+        errorKind: "not_controllable",
+      },
+    }));
+
+    const result = await Effect.runPromise(
+      adapter.setWindowPosition("window:cg:37", { x: 20, y: 52 }),
+    );
+    expect(result).toEqual({
+      requested: { x: 20, y: 52, width: 800, height: 600 },
+      observed: { x: 10, y: 40, width: 700, height: 500 },
+      stable: false,
+      errorKind: "not_controllable",
+    });
+    adapter.stop();
+  });
+
   test("position and size writes send complete FrameValue payloads", async () => {
     const { spawn, fake } = makeSpawn();
     const adapter = Effect.runSync(createMacOsSidecarAdapter({ spawn, sidecarPath: "/x" }));
@@ -227,13 +253,19 @@ describe("MacOsSidecarAdapter geometry wire shape", () => {
     await Effect.runPromise(
       adapter.setWindowFrame("window:cg:9", { x: 5, y: 6, width: 7, height: 8 }, expected),
     );
+    await Effect.runPromise(
+      adapter.setWindowPosition("window:cg:9", { x: 9, y: 10 }, expected),
+    );
+    await Effect.runPromise(
+      adapter.setWindowSize("window:cg:9", { width: 11, height: 12 }, expected),
+    );
 
-    const sent = fake.requests.find((r) => r.op === "setWindowFrame");
-    expect(sent).toMatchObject({
-      id: "window:cg:9",
-      mode: "frame",
-      expectedIdentity: { fingerprint: '[4242,"AXWindow",null]' },
-    });
+    const guardedWrites = fake.requests.filter((r) => r.op === "setWindowFrame");
+    expect(guardedWrites.map(({ mode, expectedIdentity }) => ({ mode, expectedIdentity }))).toEqual([
+      { mode: "frame", expectedIdentity: { fingerprint: '[4242,"AXWindow",null]' } },
+      { mode: "position", expectedIdentity: { fingerprint: '[4242,"AXWindow",null]' } },
+      { mode: "size", expectedIdentity: { fingerprint: '[4242,"AXWindow",null]' } },
+    ]);
 
     // Omitted precondition stays absent on the wire.
     await Effect.runPromise(adapter.setWindowSize("window:cg:9", { width: 9, height: 10 }));

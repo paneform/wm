@@ -8,6 +8,7 @@ import {
   Point,
   Size,
   WindowObservation,
+  windowIdentityFingerprint,
 } from "../src/schema.ts";
 import {
   decodeWireMessage,
@@ -63,6 +64,23 @@ describe("primitive frame schemas", () => {
 });
 
 describe("WindowObservation boundaries", () => {
+  test("identity fingerprint canonicalizes missing metadata as JSON null", () => {
+    expect(windowIdentityFingerprint({ pid: 4242 })).toBe('[4242,null,null]');
+    expect(windowIdentityFingerprint({ pid: 4242, role: "AXWindow" })).toBe(
+      '[4242,"AXWindow",null]',
+    );
+    expect(
+      windowIdentityFingerprint({ pid: 4242, role: null, subrole: null }),
+    ).toBe('[4242,null,null]');
+    expect(
+      windowIdentityFingerprint({
+        pid: 4242,
+        role: "AXWindow",
+        subrole: "AXStandardWindow",
+      }),
+    ).toBe('[4242,"AXWindow","AXStandardWindow"]');
+  });
+
   test("a fully valid observation decodes", () => {
     const obs = windowObservation();
     expect(decoderOf(WindowObservation)(obs)).toEqual(obs);

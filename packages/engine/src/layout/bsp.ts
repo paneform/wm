@@ -303,6 +303,13 @@ function assignFrames(
   frames: Map<WindowId, Frame>,
 ): boolean {
   if (node.kind === "leaf") {
+    const constraints = resolve(node.windowId);
+    if (
+      !withinBounds(rect.width, constraints?.width ?? {}) ||
+      !withinBounds(rect.height, constraints?.height ?? {})
+    ) {
+      return false;
+    }
     if (frames.has(node.windowId)) return true; // duplicate ids resolve first-wins
     frames.set(node.windowId, rect);
     return rect.width > 0 && rect.height > 0;
@@ -350,6 +357,48 @@ function stackPlan(input: LayoutInput): Map<WindowId, Frame> | null {
   return frames;
 }
 
+export function overlapPlan(input: LayoutInput): Map<WindowId, Frame> | null {
+  const nominal = new Map<WindowId, Frame>();
+  const gap = input.gap ?? BSP_DEFAULT_GAP;
+  if (!assignFrames(input.tree, input.content, gap, () => ({}), nominal)) return null;
+
+  const frames = new Map<WindowId, Frame>();
+  for (const [id, frame] of nominal) {
+    const constraints = input.resolve(id);
+    const widthBounds = constraints?.width ?? {};
+    const heightBounds = constraints?.height ?? {};
+    if (
+      (widthBounds.min !== undefined &&
+        widthBounds.max !== undefined &&
+        widthBounds.min > widthBounds.max) ||
+      (heightBounds.min !== undefined &&
+        heightBounds.max !== undefined &&
+        heightBounds.min > heightBounds.max)
+    ) {
+      return null;
+    }
+
+    const width = clampToBounds(frame.width, widthBounds);
+    const height = clampToBounds(frame.height, heightBounds);
+    if (width <= 0 || height <= 0 || width > input.content.width || height > input.content.height) {
+      return null;
+    }
+    frames.set(id, {
+      x: Math.min(
+        Math.max(frame.x, input.content.x),
+        input.content.x + input.content.width - width,
+      ),
+      y: Math.min(
+        Math.max(frame.y, input.content.y),
+        input.content.y + input.content.height - height,
+      ),
+      width,
+      height,
+    });
+  }
+  return frames;
+}
+
 function overflowFrames(
   node: BspNode,
   content: Frame,
@@ -370,8 +419,21 @@ function overflowFrames(
   const walk = (n: BspNode, rect: Frame): boolean => {
     if (n.kind === "leaf") {
       if (frames.has(n.windowId)) return true;
-      frames.set(n.windowId, rect);
-      return rect.width > 0 && rect.height > 0;
+      const constraints = resolve(n.windowId);
+      const widthBounds = constraints?.width ?? {};
+      const heightBounds = constraints?.height ?? {};
+      const width = clampToBounds(rect.width, widthBounds);
+      const height = clampToBounds(rect.height, heightBounds);
+      if (
+        width <= 0 ||
+        height <= 0 ||
+        !withinBounds(width, widthBounds) ||
+        !withinBounds(height, heightBounds)
+      ) {
+        return false;
+      }
+      frames.set(n.windowId, { ...rect, width, height });
+      return true;
     }
     const expanded = grow(rect, n);
     const { first, second } = partitionLengths(
@@ -397,10 +459,7 @@ function tryPolicy(policy: LayoutPolicy, input: LayoutInput): Map<WindowId, Fram
       return assignFrames(input.tree, input.content, gap, input.resolve, frames) ? frames : null;
     }
     case "overlap": {
-      // Relax minimums so panes compress instead of escaping the content rect.
-      const frames = new Map<WindowId, Frame>();
-      const relaxed: ConstraintResolver = () => ({});
-      return assignFrames(input.tree, input.content, gap, relaxed, frames) ? frames : null;
+      return overlapPlan(input);
     }
     case "stack": {
       return stackPlan(input);

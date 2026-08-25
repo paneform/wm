@@ -15,12 +15,23 @@ export const revealFocusedWorkspace: Rule = {
     const workspace = world.workspaces.get(world.focusedWorkspace);
     if (workspace === undefined) return [];
 
+    // A visible workspace is already revealed. Display affinity selects where
+    // to restore a parked workspace; it must not relocate one on every pass.
+    if (
+      workspace.visibleOnDisplay !== null &&
+      world.topology.displays.some((display) => display.id === workspace.visibleOnDisplay)
+    ) {
+      return [];
+    }
+
+    const connected = (id: string | null): string | null =>
+      id !== null && world.topology.displays.some((display) => display.id === id) ? id : null;
     const desired =
-      workspace.pinnedDisplayOverride ??
-      workspace.preferredDisplay ??
+      connected(workspace.pinnedDisplayOverride) ??
+      connected(workspace.preferredDisplay) ??
       primaryDisplay(world)?.id ??
       null;
-    if (desired === null || desired === workspace.visibleOnDisplay) return [];
+    if (desired === null) return [];
 
     return [{ kind: "revealWorkspace", workspace: workspace.name, displayId: desired }];
   },
