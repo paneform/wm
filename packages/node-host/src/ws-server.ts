@@ -47,8 +47,9 @@ export function attachWebSocketServer(
       send: (text) => socket.readyState === socket.OPEN && socket.send(text),
     };
     let subscribed = false;
+    let handling = Promise.resolve();
     socket.on("message", (raw) => {
-      void handleRaw(String(raw));
+      handling = handling.then(() => handleRaw(String(raw)));
     });
 
     const reply = (id: string, message: WireMessage): void => session.send(encodeWireMessage(message));
@@ -68,7 +69,6 @@ export function attachWebSocketServer(
         return;
       }
       if (message.type !== "request") return;
-      if (subscribed) return;
       try {
         if (message.command.type === "subscribe") {
           subscribed = true;

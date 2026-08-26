@@ -70,7 +70,12 @@ const bootstrap = async (
         : displays.map((spec) => makeDisplay(spec)),
   });
   const refs: { engine: { setRecovery(a: boolean): void } | null } = { engine: null };
-  const adapter = wrap ? wrap(fake.adapter, refs) : fake.adapter;
+  const adapter = (() => {
+    if (wrap === undefined) return fake.adapter;
+    const { executeBatch: _batch, ...legacyAdapter } = wrap(fake.adapter, refs);
+    void _batch;
+    return legacyAdapter;
+  })();
   const engine = await Effect.runPromise(
     createEngine({ adapter, configSource: CONFIG_SOURCE, clock: CLOCK }),
   );
@@ -1139,6 +1144,7 @@ describe("focusWorkspace physically focuses its destination", () => {
     h.fake.focusWindowExternal(primary);
     await h.run({ type: "reconcile" });
 
+    const batchesBefore = h.fake.batchCalls();
     await h.run({ type: "focusWorkspace", name: "away" });
 
     const snap = await h.snapshot();
@@ -1146,6 +1152,7 @@ describe("focusWorkspace physically focuses its destination", () => {
     expect(snap.focusedWorkspace).toBe("away");
     expect(snap.focusedWindow).toBe(destination);
     expect(workspaceOf(snap, "away")?.lastFocusedMember).toBe(destination);
+    expect(h.fake.batchCalls() - batchesBefore).toBe(1);
   });
 
   test("focuses a live member immediately after revealing a parked workspace", async () => {
@@ -1166,6 +1173,35 @@ describe("focusWorkspace physically focuses its destination", () => {
     expect(h.fake.focusedWindowId()).toBe(destination);
     expect(snap.focusedWindow).toBe(destination);
     expect(workspaceOf(snap, "away")?.lastFocusedMember).toBe(destination);
+  });
+});
+
+describe("multi-display focus isolation", () => {
+  test("T -> M -> T -> 1 -> T preserves pins and never writes the unaffected display", async () => {
+    const h = await bootstrap();
+    const t = h.fake.addWindow(makeWindow({ displayId: "display:sim-left", x: -1400, y: 100 }));
+    const m = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const one = h.fake.addWindow(makeWindow({ x: 500, y: 100 }));
+    await seedWorkspace(h, [t, m, one]);
+    await h.run({ type: "moveWindowToWorkspace", windowId: t, workspace: "T" });
+    await h.run({ type: "moveWindowToWorkspace", windowId: m, workspace: "M" });
+    await h.run({ type: "moveWorkspaceToDisplay", workspace: "T", displayId: "display:sim-left" });
+    await h.run({ type: "focusWorkspace", name: "M" });
+
+    const before = await h.snapshot();
+    const pins = new Map(before.workspaces.map((workspace) => [workspace.name, workspace.pinnedDisplayOverride]));
+    const writesBefore = h.fake.writes().length;
+
+    for (const name of ["T", "M", "T", "1", "T"]) {
+      await h.run({ type: "focusWorkspace", name });
+    }
+
+    const after = await h.snapshot();
+    for (const name of ["T", "M", "1"]) {
+      expect(workspaceOf(after, name)?.pinnedDisplayOverride).toBe(pins.get(name));
+    }
+    expect(h.fake.writes().slice(writesBefore).map((write) => write.windowId)).not.toContain(t);
+    expect(after.windows.find((window) => window.id === one)?.workspace).toBe("1");
   });
 });
 

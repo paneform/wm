@@ -37,6 +37,7 @@ export type WorkspaceName = string;
 
 export const DisplayObservation = Schema.Struct({
   id: Schema.String,
+  nativeId: Schema.optional(Schema.String),
   frame: Frame,
   workArea: Frame,
   scale: Schema.Number,

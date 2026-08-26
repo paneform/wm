@@ -1,5 +1,5 @@
 import { contentRect } from "./layout/bsp.ts";
-import type { Frame } from "./schema.ts";
+import type { DisplayObservation, Frame } from "./schema.ts";
 import type { World, WorkspaceState } from "./world.ts";
 
 type Margins = {
@@ -20,24 +20,39 @@ export function insertionTargetFrame(
   targetFrame: Frame | undefined,
   margins: Margins,
 ): Frame | undefined {
+  const display = insertionDisplay(world, workspace, targetFrame);
   const targetIsVisible =
     workspace.visibleOnDisplay !== null &&
     targetFrame !== undefined &&
     world.topology.displays.some((display) => overlaps(targetFrame, display.workArea));
   if (targetIsVisible) return targetFrame;
 
+  return display === undefined ? targetFrame : contentRect(display, margins);
+}
+
+/** Display whose logical content rect governs insertion into this workspace. */
+export function insertionDisplay(
+  world: World,
+  workspace: WorkspaceState,
+  targetFrame: Frame | undefined,
+): DisplayObservation | undefined {
+  if (workspace.visibleOnDisplay !== null && targetFrame !== undefined) {
+    const physical = world.topology.displays.find((display) =>
+      overlaps(targetFrame, display.workArea),
+    );
+    if (physical !== undefined) return physical;
+  }
   const displayIds = [
     workspace.visibleOnDisplay,
     workspace.pinnedDisplayOverride,
     workspace.preferredDisplay,
   ];
-  const display =
+  return (
     displayIds
       .filter((id): id is string => id !== null)
       .map((id) => world.topology.displays.find((candidate) => candidate.id === id))
       .find((candidate) => candidate !== undefined) ??
     world.topology.displays.find((candidate) => candidate.primary) ??
-    world.topology.displays[0];
-
-  return display === undefined ? targetFrame : contentRect(display, margins);
+    world.topology.displays[0]
+  );
 }

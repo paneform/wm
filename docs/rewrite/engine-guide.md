@@ -185,13 +185,31 @@ focused workspace, health, pending transaction metadata, paused flag.
 
 ## Config
 
-JSONC config, Schema-validated, unknown fields are errors. Global defaults inherited
-field-by-field by workspace settings: name, preferred display, mode (bsp|floating),
-margins, gap, resize increment, initial assignment matchers. Hotload = delta reload
-(validated fully before atomic swap; invalid hotload keeps prior config + health event).
-Explicit reload = full rebuild preserving runtime overlay. Engine defines the schema +
+JSONC config, Schema-validated, unknown fields are errors. Layout values resolve in the
+deliberate order global defaults → matched display → workspace, with every margin edge
+inherited independently and `gap` inherited as a scalar. Display entries have the shape
+`{ display: "display:<uuid>", margins?: {...}, gap?: number }`; selectors are unique and
+match only the stable UUID-derived topology ID, never display order or mutable names.
+Omitting display context preserves global → workspace behavior. Hotload = delta reload:
+display entries merge by ID and partial margins merge by edge, after complete validation
+and before an atomic swap. Invalid hotload keeps prior config + health event. Explicit
+reload = full replacement preserving runtime overlay. Engine defines the schema +
 `ConfigSource` interface (`load(): Effect<Config>`, `changes(): Stream<void>`); the node
 host implements file loading/watching.
+
+Global keybinds use chord strings as object keys (JSON cannot use arrays as keys):
+
+```jsonc
+"keybinds": {
+  "lshift rshift s": "window move workspace S",
+  "rshift s": "workspace focus S"
+}
+```
+
+Modifiers are unordered and side-aware: `shift` accepts either side, while `lshift` and
+`rshift` match those physical keys independently. The persistent macOS sidecar applies
+bindings on config load/hotload and sends actions on matching keydown events; Input
+Monitoring permission is required. Key events remain visible to other applications.
 
 ## Command execution layer (single source of truth)
 

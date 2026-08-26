@@ -39,7 +39,7 @@ export interface RuleContext {
   tombstones: ReadonlyMap<WindowId, TombstoneRecord>;
   overrides: ManagedOverrides;
   contextFingerprint: string;
-  settings(workspaceName: string): EffectiveWorkspaceSettings;
+  settings(workspaceName: string, displayId?: DisplayId): EffectiveWorkspaceSettings;
   globalSettings(): EffectiveWorkspaceSettings;
 }
 
@@ -170,7 +170,7 @@ export function plannedTiledFrames(
   if (workspace.visibleOnDisplay === null) return null;
   const display = displayById(world, workspace.visibleOnDisplay);
   if (display === undefined) return null;
-  const settings = ctx.settings(workspace.name);
+  const settings = ctx.settings(workspace.name, display.id);
   const content = contentRect(display, settings.margins);
   const resolver = constraintsResolver((id) => {
     const obs = world.windows.get(id);

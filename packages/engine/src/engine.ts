@@ -1,4 +1,4 @@
-import { Effect, Fiber, Schema, Stream } from "effect";
+import { Effect, Either, Fiber, Schema, Stream } from "effect";
 import type { ConfigSource, PlatformAdapter, Clock } from "./platform.ts";
 import {
   TopologyObservation,
@@ -13,6 +13,7 @@ import type {
   Frame,
   GeometryRequest,
   WindowId,
+  WriteObservation,
   WorkspaceName,
 } from "./schema.ts";
 import type { DomainTopic } from "./events.ts";
@@ -31,7 +32,8 @@ import {
   PARKING_ACCEPTANCE_PT,
   PROMOTION_SAMPLES,
 } from "./constants.ts";
-import { center, containsPoint, withinTolerance } from "./geometry.ts";
+import { center, classifyWrite, containsPoint, withinTolerance } from "./geometry.ts";
+import type { PlatformBatchOperation, PlatformBatchOperationResult } from "./platform.ts";
 import { applyGeometryRequest, type GeometryFailure } from "./geometry-service.ts";
 import {
   candidatesFrom,
@@ -66,7 +68,7 @@ import {
   tiledMembers,
 } from "./layout/bsp.ts";
 import { directionalNeighbor, type DirectionalCandidate } from "./direction.ts";
-import { insertionTargetFrame } from "./insertion-frame.ts";
+import { insertionDisplay, insertionTargetFrame } from "./insertion-frame.ts";
 import type { Action } from "./actions.ts";
 import { dedupeActions } from "./actions.ts";
 import {
@@ -240,7 +242,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       tombstones,
       overrides: { managed: overrides.managed, unmanaged: overrides.unmanaged },
       contextFingerprint: contextFingerprint(world.topology),
-      settings: (name) => effectiveSettings(config, name),
+      settings: (name, displayId) => effectiveSettings(config, name, displayId),
       globalSettings: () => globalSettings(config),
     });
 
@@ -418,11 +420,12 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             ? workspace.lastFocusedMember
             : members[0];
       const observedBesideFrame = beside === undefined ? undefined : world.windows.get(beside)?.frame;
+      const insertionHost = insertionDisplay(world, workspace, observedBesideFrame);
       const besideFrame = insertionTargetFrame(
         world,
         workspace,
         observedBesideFrame,
-        effectiveSettings(config, workspaceName).margins,
+        effectiveSettings(config, workspaceName, insertionHost?.id).margins,
       );
 
       const tree =
@@ -647,7 +650,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         if (workspace === undefined || workspace.mode !== "bsp") return;
         const display = displayOf(workspace.visibleOnDisplay);
         if (display === undefined) return;
-        const settings = effectiveSettings(config, workspaceName);
+        const settings = effectiveSettings(config, workspaceName, display.id);
         const resolver = constraintsResolver((id) => {
           const obs = world.windows.get(id);
           return obs === undefined ? {} : constraintsFor(obs);
@@ -721,6 +724,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               }),
             );
           case "insertWindow":
+            // A startup inventory and its matching window_added event can plan
+            // concurrently. Preserve the first committed membership.
+            if (workspaceContaining(action.windowId) !== undefined) return;
             {
               const tombstone = tombstones.get(action.windowId);
               const observation = world.windows.get(action.windowId);
@@ -1145,11 +1151,12 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             : members[0];
       const observedBesideFrame =
         beside === undefined ? undefined : framesWorld.windows.get(beside)?.frame;
+      const insertionHost = insertionDisplay(withWs, ws, observedBesideFrame);
       const besideFrame = insertionTargetFrame(
-        framesWorld,
+        withWs,
         ws,
         observedBesideFrame,
-        effectiveSettings(config, wsName).margins,
+        effectiveSettings(config, wsName, insertionHost?.id).margins,
       );
       const tree =
         beside === undefined || besideFrame === undefined || isEmptyTree(ws.tree)
@@ -1184,7 +1191,18 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           ),
         };
       }
+      const destinationExisted = next.workspaces.has(workspaceName);
       next = ensureWorkspaceIn(next, workspaceName);
+      if (!destinationExisted) {
+        const created = next.workspaces.get(workspaceName)!;
+        next = {
+          ...next,
+          workspaces: new Map(next.workspaces).set(workspaceName, {
+            ...created,
+            visibleOnDisplay: null,
+          }),
+        };
+      }
       const target = next.workspaces.get(workspaceName)!;
       if (wasFloating) {
         return {
@@ -1238,7 +1256,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     interface PlanAccessors {
       observationOf(id: WindowId): WindowObservation | undefined;
       constraintsFor(obs: WindowObservation): Constraints;
-      settingsFor(name: string): EffectiveWorkspaceSettings;
+      settingsFor(name: string, displayId?: DisplayId): EffectiveWorkspaceSettings;
       ignoredSurface(obs: WindowObservation): boolean;
     }
 
@@ -1267,7 +1285,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           }
           return null; // not visible anywhere — nothing to tile
         }
-        const settings = acc.settingsFor(wsName);
+        const settings = acc.settingsFor(wsName, display.id);
         const resolver = constraintsResolver((id) => {
           const obs = acc.observationOf(id);
           return obs === undefined ? undefined : acc.constraintsFor(obs);
@@ -1411,6 +1429,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         base: World;
       }) => (world0: World) => World,
       validateDraft?: (draft: World) => CommandError | null,
+      focusAfter?: (draft: World) => WindowId | null,
     ): Effect.Effect<void, CommandError> =>
       runExclusive(
         Effect.gen(function* () {
@@ -1488,7 +1507,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               const built = buildCompoundPlan(ctx.draft, ctx.intents, {
                 observationOf: (id) => ctx.draft.windows.get(id),
                 constraintsFor: (obs) => constraintsFor(obs),
-                settingsFor: (name) => effectiveSettings(config, name),
+                settingsFor: (name, displayId) => effectiveSettings(config, name, displayId),
                 ignoredSurface: (obs) =>
                   classify(obs) !== "normal" &&
                   classify(obs) !== "transient" &&
@@ -1505,16 +1524,113 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               }
               let applied = 0;
               let finalDraft = built.draft;
-              for (const wr of built.writes) {
-                const result = yield* Effect.either(
-                  writeFrame(
-                    wr.windowId,
-                    wr.frame,
-                    wr.tolerance,
-                    wr.parkingDisplayId,
-                    finalDraft.topology.displays,
-                  ),
+              const captured = new Map(ctx.preFrames.map((frame) => [frame.id, frame]));
+              const writeOperations: PlatformBatchOperation[] = built.writes.map((wr, index) => ({
+                operationId: `write:${index}:${wr.windowId}`,
+                kind: "setFrame",
+                windowId: wr.windowId,
+                frame: wr.frame,
+                expectedIdentity: captured.get(wr.windowId)!.expected,
+              }));
+              const focusId = focusAfter?.(built.draft) ?? null;
+              const focusCapture = focusId === null ? undefined : captured.get(focusId);
+              const operations: PlatformBatchOperation[] = [
+                ...writeOperations,
+                ...(focusId !== null && focusCapture !== undefined
+                  ? [{
+                      operationId: `focus:${focusId}`,
+                      kind: "focus" as const,
+                      windowId: focusId,
+                      expectedIdentity: focusCapture.expected,
+                      dependsOn: writeOperations
+                        .filter((operation) => operation.windowId === focusId)
+                        .map((operation) => operation.operationId),
+                    }]
+                  : []),
+              ];
+              const sequentialBatch = () =>
+                Effect.gen(function* () {
+                  const results: PlatformBatchOperationResult[] = [];
+                  for (const operation of operations) {
+                    const outcome = yield* Effect.either(
+                      operation.kind === "setFrame"
+                        ? adapter.setWindowFrame(operation.windowId, operation.frame, operation.expectedIdentity)
+                        : Effect.as(adapter.focusWindow(operation.windowId), undefined),
+                    );
+                    if (outcome._tag === "Left") {
+                      results.push({ operationId: operation.operationId, error: outcome.left });
+                    } else if (operation.kind === "focus") {
+                      results.push({ operationId: operation.operationId });
+                    } else {
+                      const write = outcome.right as WriteObservation;
+                      results.push({
+                        operationId: operation.operationId,
+                        requested: write.requested,
+                        observed: write.observed,
+                        stable: write.stable,
+                      });
+                    }
+                  }
+                  return {
+                    operations: results,
+                    completed: results.filter((result) => result.error === undefined).length,
+                    failed: results.filter((result) => result.error !== undefined).length,
+                  };
+                });
+              const batch = yield* Effect.mapError(
+                operations.length === 0
+                  ? Effect.succeed({ operations: [], completed: 0, failed: 0 })
+                  : (adapter.executeBatch?.({ operations }) ?? sequentialBatch()),
+                (error) => new CommandError({ code: mapStepCode(error.code), message: error.detail ?? "native batch failed" }),
+              );
+              for (let index = 0; index < built.writes.length; index += 1) {
+                const wr = built.writes[index]!;
+                const batchResult = batch.operations[index]!;
+                if (batchResult.error !== undefined) {
+                  return yield* Effect.fail(new CommandError({
+                    code: mapStepCode(batchResult.error.code),
+                    message: `window ${wr.windowId}: ${batchResult.error.detail ?? "native batch operation failed"}`,
+                  }));
+                }
+                const observation = finalDraft.windows.get(wr.windowId)!;
+                const observed = batchResult.observed ?? observation.frame;
+                const tolerance = wr.tolerance ?? DEFAULT_TOLERANCE;
+                const classifiedOutcome = classifyWrite({
+                  requested: wr.frame,
+                  observed,
+                  tolerance,
+                  stable: batchResult.stable ?? false,
+                  constraints: constraintsFor(observation),
+                  initialFrame: firstSeen.get(wr.windowId) ?? observation.frame,
+                  previousObserved: observation.frame,
+                  acceptStablePositionClamp: wr.parkingDisplayId !== undefined,
+                });
+                const nativeConfirmedSizeClamp =
+                  (batchResult.stableReads ?? 0) >= 3 &&
+                  observation.capabilities.resizable === "supported" &&
+                  Math.abs(observed.x - wr.frame.x) <= tolerance &&
+                  Math.abs(observed.y - wr.frame.y) <= tolerance &&
+                  (Math.abs(observed.width - wr.frame.width) > tolerance ||
+                    Math.abs(observed.height - wr.frame.height) > tolerance);
+                const outcome = nativeConfirmedSizeClamp ? "stableClamp" : classifiedOutcome;
+                const confirmedStableClamp =
+                  outcome === "stableClamp" && nativeConfirmedSizeClamp;
+                const parkingSafe = wr.parkingDisplayId === undefined || (
+                  !finalDraft.topology.displays.some((display) =>
+                    containsPoint(display.frame, center(observed))) &&
+                  cornerFeasible(observed, wr.parkingDisplayId, finalDraft.topology.displays)
                 );
+                const acceptedInitial = parkingSafe && (
+                  outcome === "exact" || outcome === "constrained" ||
+                  (outcome === "stableClamp" &&
+                    (wr.parkingDisplayId !== undefined || confirmedStableClamp))
+                );
+                const result = acceptedInitial
+                  ? { _tag: "Right" as const, right: { frame: observed, outcome } }
+                  : yield* Effect.either(writeFrame(
+                      wr.windowId, wr.frame, wr.tolerance, wr.parkingDisplayId,
+                      finalDraft.topology.displays,
+                    ));
                 if (result._tag === "Left") {
                   return yield* Effect.fail(
                     new CommandError({
@@ -1523,8 +1639,17 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                     }),
                   );
                 }
-                const observation = finalDraft.windows.get(wr.windowId);
                 if (observation !== undefined) {
+                  if (acceptedInitial) {
+                    learnFrom(
+                      observation,
+                      wr.frame,
+                      outcome,
+                      observed,
+                      confirmedStableClamp ? batchResult.stableReads : 1,
+                      confirmedStableClamp,
+                    );
+                  }
                   finalDraft = {
                     ...finalDraft,
                     windows: new Map(finalDraft.windows).set(wr.windowId, {
@@ -1547,6 +1672,28 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                       }),
                     };
                   }
+                }
+                applied += 1;
+              }
+              const focusResult = batch.operations[built.writes.length];
+              if (focusResult?.error !== undefined) {
+                return yield* Effect.fail(new CommandError({
+                  code: mapStepCode(focusResult.error.code),
+                  message: focusResult.error.detail ?? `focus ${focusId} failed`,
+                }));
+              }
+              if (focusId !== null && focusResult !== undefined) {
+                focusGeneration += 1;
+                finalDraft = { ...finalDraft, focusIntent: { id: focusId, generation: focusGeneration } };
+                const focusedWorkspace = finalDraft.focusedWorkspace === null
+                  ? undefined : finalDraft.workspaces.get(finalDraft.focusedWorkspace);
+                if (focusedWorkspace !== undefined) {
+                  finalDraft = {
+                    ...finalDraft,
+                    workspaces: new Map(finalDraft.workspaces).set(focusedWorkspace.name, {
+                      ...focusedWorkspace, lastFocusedMember: focusId,
+                    }),
+                  };
                 }
                 applied += 1;
               }
@@ -1785,7 +1932,16 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             issues: [...parsed.error.issues],
           };
         }
-        config = mode === "delta" ? applyConfigDelta(config, raw) : applyConfigFull(config, raw);
+        const candidate = mode === "delta" ? applyConfigDelta(config, raw) : applyConfigFull(config, raw);
+        if (configSource.prepare !== undefined) {
+          const prepared = yield* Effect.either(configSource.prepare(candidate, mode));
+          if (prepared._tag === "Left") {
+            setHealth("degraded", "config_invalid");
+            bus.publish("config", { status: "invalid", issues: prepared.left.issues.slice(0, 4) });
+            return { type: "configChecked", valid: false, issues: [...prepared.left.issues] };
+          }
+        }
+        config = candidate;
         setHealth("healthy");
         bus.publish("config", { status: "applied", mode });
         yield* gatedReconcile();
@@ -2637,42 +2793,16 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                       code: "topology_unstable",
                       message: "focus workspace destination changed during capture",
                     }),
-            );
-            yield* runExclusive(
-              Effect.gen(function* () {
-                const workspace = world.workspaces.get(command.name);
-                if (workspace === undefined) return;
+              (draft) => {
+                const workspace = draft.workspaces.get(command.name);
+                if (workspace === undefined) return null;
                 const members = [...tiledMembers(workspace.tree), ...workspace.floating].filter(
-                  (id) => id !== EMPTY_TREE_LEAF && world.windows.has(id),
+                  (id) => id !== EMPTY_TREE_LEAF && draft.windows.has(id),
                 );
-                const target =
-                  workspace.lastFocusedMember !== null &&
-                  members.includes(workspace.lastFocusedMember)
-                    ? workspace.lastFocusedMember
-                    : members[0];
-                if (target === undefined) return;
-
-                const applied = yield* Effect.either(
-                  applyAction({ kind: "focusWindow", windowId: target }),
-                );
-                if (applied._tag === "Left") {
-                  return yield* Effect.fail(
-                    new CommandError({
-                      code: mapStepCode(applied.left.code),
-                      message: applied.left.message,
-                    }),
-                  );
-                }
-                focusGeneration += 1;
-                world = {
-                  ...world,
-                  focusIntent: { id: target, generation: focusGeneration },
-                  workspaces: new Map(world.workspaces).set(command.name, {
-                    ...workspace,
-                    lastFocusedMember: target,
-                  }),
-                };
-              }),
+                return workspace.lastFocusedMember !== null && members.includes(workspace.lastFocusedMember)
+                  ? workspace.lastFocusedMember
+                  : (members[0] ?? null);
+              },
             );
             break;
           }
@@ -2847,8 +2977,16 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           if (loaded._tag === "Right") {
             const parsed = parseConfigSafe(loaded.right);
             if (parsed.ok) {
-              config = parsed.config;
-              syncConfiguredWorkspaces();
+              const prepared = configSource.prepare === undefined
+                ? Either.right(undefined)
+                : yield* Effect.either(configSource.prepare(parsed.config, "full"));
+              if (prepared._tag === "Right") {
+                config = parsed.config;
+                syncConfiguredWorkspaces();
+              } else {
+                setHealth("degraded", "config_invalid");
+                bus.publish("config", { status: "invalid", issues: prepared.left.issues.slice(0, 4) });
+              }
             }
             else setHealth("degraded", "config_invalid");
           } else {
@@ -2870,7 +3008,19 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   });
                   return;
                 }
-                config = applyConfigDelta(config, candidate.right);
+                const next = applyConfigDelta(config, candidate.right);
+                if (configSource.prepare !== undefined) {
+                  const prepared = yield* Effect.either(configSource.prepare(next, "delta"));
+                  if (prepared._tag === "Left") {
+                    setHealth("degraded", "config_invalid");
+                    bus.publish("config", {
+                      status: "invalid",
+                      issues: prepared.left.issues.slice(0, 4),
+                    });
+                    return;
+                  }
+                }
+                config = next;
                 setHealth("healthy");
                 bus.publish("config", { status: "hotloaded" });
                 yield* gatedReconcile();
@@ -2906,11 +3056,11 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         }),
       execute: (command: Command) =>
         Effect.flatMap(
-          Effect.try({
-            try: () => decodeCommandSync(command),
-            catch: () => new CommandError({ code: "invalid_request", message: "malformed command" }),
-          }),
-          (validated) => commandBus.execute(validated),
+            Effect.try({
+              try: () => decodeCommandSync(command),
+              catch: () => new CommandError({ code: "invalid_request", message: "malformed command" }),
+            }),
+            (validated) => commandBus.execute(validated),
         ),
       state: () => Effect.succeed(projectSnapshot(world, health.state, pendingMeta())),
       events: () => bus.events(),

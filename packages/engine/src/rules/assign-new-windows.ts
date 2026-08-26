@@ -120,7 +120,7 @@ function preflightFrame(
   if (workspace === undefined) return null;
   const display = displayById(world, displayId);
   if (display === undefined) return null;
-  const settings = ctx.settings(workspaceName);
+  const settings = ctx.settings(workspaceName, display.id);
 
   const members = tiledMembers(workspace.tree);
   const beside =

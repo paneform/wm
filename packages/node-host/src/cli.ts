@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-import { Effect } from "effect";
-import { createEngine } from "@wm/engine";
+import { Effect, Stream } from "effect";
+import { ConfigInvalidError, createEngine, type Command } from "@wm/engine";
 import type { MacOsSidecarAdapter } from "@wm/platform-macos";
 import { attachWebSocketServer } from "./ws-server.ts";
 import { clockNode } from "./clock-node.ts";
 import { executeEngineCommand } from "./command-handler.ts";
 import { createFileConfigSource, resolveConfigPath } from "./config-file.ts";
-import { parseArgs, USAGE } from "./cli-args.ts";
+import { buildKeybindCommand, parseArgs, USAGE } from "./cli-args.ts";
 import {
   errorReport,
   exitCodeFor,
@@ -123,17 +123,53 @@ async function main(): Promise<number> {
   }
 
   // Daemon mode: engine + macOS adapter + config watcher + WebSocket server.
+  const nativeStdio = process.env["WM_NATIVE_STDIO"] === "1";
+  const { WebSocketServer } = await import("ws");
+  const server = await new Promise<InstanceType<typeof WebSocketServer>>((resolve, reject) => {
+    const candidate = new WebSocketServer({
+      host: "127.0.0.1",
+      port,
+      maxPayload: 64 * 1024,
+      verifyClient: (info: { origin?: string }) => info.origin === undefined,
+    });
+    candidate.once("listening", () => resolve(candidate));
+    candidate.once("error", reject);
+  });
   const platform = await import("@wm/platform-macos");
   const requestedSidecar = parsed.flags["sidecar"];
   const adapter = await Effect.runPromise(
     platform.createMacOsSidecarAdapter(
-      typeof requestedSidecar === "string" && requestedSidecar.length > 0
+      nativeStdio
+        ? { sidecarPath: "native-host", spawn: platform.inheritedStdioSpawn() }
+        : typeof requestedSidecar === "string" && requestedSidecar.length > 0
         ? { sidecarPath: requestedSidecar }
         : {},
     ),
   );
-  if ((await gateDaemonPermissions(adapter)) !== 0) return 1;
-  const configSource = createFileConfigSource(resolveConfigPath());
+  if ((await gateDaemonPermissions(adapter)) !== 0) {
+    server.close();
+    return 1;
+  }
+  let keybindCommands = new Map<string, Command>();
+  let nativeConfigReady = false;
+  const configSource = createFileConfigSource(resolveConfigPath(), (config) => {
+    const keybinds = config.keybinds ?? {};
+    return Effect.gen(function* () {
+      const commands = yield* Effect.try({
+        try: () => new Map(Object.values(keybinds).map((action) => {
+          const command = buildKeybindCommand(action);
+          if (command === null) throw new Error(`invalid keybind action: ${action}`);
+          return [action, command] as const;
+        })),
+        catch: (error) => new ConfigInvalidError([String(error)]),
+      });
+      yield* adapter.configureKeybinds(keybinds).pipe(
+        Effect.mapError((error) => new ConfigInvalidError([String(error)])),
+      );
+      keybindCommands = commands;
+      nativeConfigReady = true;
+    });
+  });
   const engine = await Effect.runPromise(createEngine({
     adapter,
     configSource,
@@ -141,16 +177,57 @@ async function main(): Promise<number> {
     initiallyPaused: parsed.flags["observe-only"] === true,
   }));
   await Effect.runPromise(engine.start());
+  if (!nativeConfigReady) {
+    await Effect.runPromise(engine.stop());
+    adapter.stop();
+    server.close();
+    throw new Error("native keybind configuration failed during startup");
+  }
+  Effect.runFork(
+    Stream.runForEach(adapter.keybindActions, (action) => {
+      const command = keybindCommands.get(action);
+      if (command === undefined) {
+        return Effect.sync(() => console.error(`[keybind] ignored unconfigured action: ${action}`));
+      }
+      return Effect.tryPromise({
+        try: () => executeEngineCommand(engine, command),
+        catch: (error) => error,
+      }).pipe(
+        Effect.catchAll((error) =>
+          Effect.sync(() => console.error(`[keybind] command failed: ${String(error)}`))),
+        Effect.asVoid,
+      );
+    }),
+  );
 
-  const { WebSocketServer } = await import("ws");
-  const server = new WebSocketServer({ host: "127.0.0.1", port });
   attachWebSocketServer(server, {
     handle: (command) => executeEngineCommand(engine, command),
     snapshot: () => Effect.runPromise(engine.state()),
     events: () => engine.events(),
   });
-  console.log(JSON.stringify({ ready: true, port }));
-  return await new Promise(() => {});
+  if (process.env["WM_SKETCHYBAR_BRIDGE"] === "1") {
+    await import("./sketchybar-daemon.ts");
+  }
+  (nativeStdio ? console.error : console.log)(JSON.stringify({ ready: true, port }));
+  return await new Promise<number>((resolve) => {
+    let stopping = false;
+    const stop = (exitCode = 0, stopAdapter = true): void => {
+      if (stopping) return;
+      stopping = true;
+      for (const client of server.clients) client.terminate();
+      server.close();
+      void Promise.race([
+        Effect.runPromise(engine.stop()),
+        new Promise<void>((done) => setTimeout(done, 2_000)),
+      ]).finally(() => {
+          if (stopAdapter) adapter.stop();
+          resolve(exitCode);
+      });
+    };
+    process.once("SIGINT", () => stop());
+    process.once("SIGTERM", () => stop());
+    void adapter.whenExited.then(() => stop(1, false));
+  });
 }
 
 main()

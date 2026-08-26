@@ -71,8 +71,8 @@ final class InventoryService {
         )
     }
 
-    func focus(meta: WindowMeta) async throws {
-        try adapter.focus(meta: meta)
+    func focus(meta: WindowMeta, expectedIdentity: ExpectedIdentityValue? = nil) async throws {
+        try adapter.focus(meta: meta, expectedIdentity: expectedIdentity)
     }
 
     // MARK: Loops

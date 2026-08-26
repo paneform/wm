@@ -28,10 +28,21 @@ describe("config parse validation", () => {
     expect(parseConfig({})).toEqual({});
   });
 
+  test("keybinds are a non-empty chord-to-action string map", () => {
+    const keybinds = {
+      "lshift rshift s": "workspace move-window S",
+      "rshift s": "workspace focus S",
+    };
+    expect(parseConfig({ keybinds }).keybinds).toEqual(keybinds);
+    expect(parseConfigSafe({ keybinds: { "": "workspace focus S" } }).ok).toBe(false);
+    expect(parseConfigSafe({ keybinds: { "shift s": "" } }).ok).toBe(false);
+  });
+
   test("unknown fields are errors at every level", () => {
     const candidates: unknown[] = [
       { nope: true },
       { defaults: { gap: 8, nope: 1 } },
+      { displays: [{ display: "display:one", margins: { top: 4 }, nope: 1 }] },
       { workspaces: [{ name: "main", nope: 1 }] },
       { defaults: { margins: { top: 4, sideways: 1 } } },
       { workspaces: [{ name: "main", assign: [{ bundleId: "x", titleExtra: "y" }] }] },
@@ -51,6 +62,24 @@ describe("config parse validation", () => {
   test("workspace names must be non-empty strings", () => {
     expect(() => parseConfig({ workspaces: [{ name: "" }] })).toThrow(ConfigInvalidError);
     expect(parseConfigSafe({ workspaces: [{ name: 7 }] }).ok).toBe(false);
+  });
+
+  test("display selectors are non-empty, unique stable ids", () => {
+    expect(parseConfigSafe({ displays: [{ display: "" }] }).ok).toBe(false);
+    expect(parseConfigSafe({ displays: [{ display: "DELL C3422WE" }] }).ok).toBe(false);
+    expect(
+      parseConfigSafe({
+        displays: [
+          { display: "display:uuid", gap: 0 },
+          { display: "display:uuid", margins: { top: 32 } },
+        ],
+      }).ok,
+    ).toBe(false);
+    expect(
+      parseConfig({ displays: [{ display: "display:uuid", margins: { top: 32 }, gap: 0 }] }),
+    ).toEqual({
+      displays: [{ display: "display:uuid", margins: { top: 32 }, gap: 0 }],
+    });
   });
 
   test("mode literals are restricted to bsp|floating", () => {
@@ -138,6 +167,29 @@ describe("effective settings inheritance", () => {
       right: 0,
       bottom: 0,
       left: 3,
+    });
+  });
+
+  test("display settings sit between global and workspace overrides field by field", () => {
+    const config: Config = {
+      defaults: { margins: { top: 4, right: 5, bottom: 6, left: 7 }, gap: 8 },
+      displays: [
+        { display: "display:dell", margins: { top: 32, left: 0 }, gap: 0 },
+      ],
+      workspaces: [{ name: "code", margins: { top: 12, right: 9 }, gap: 3 }],
+    };
+
+    expect(effectiveSettings(config, "code", "display:dell")).toMatchObject({
+      margins: { top: 12, right: 9, bottom: 6, left: 0 },
+      gap: 3,
+    });
+    expect(effectiveSettings(config, "other", "display:dell")).toMatchObject({
+      margins: { top: 32, right: 5, bottom: 6, left: 0 },
+      gap: 0,
+    });
+    expect(effectiveSettings(config, "code")).toMatchObject({
+      margins: { top: 12, right: 9, bottom: 6, left: 7 },
+      gap: 3,
     });
   });
 
@@ -230,6 +282,35 @@ describe("delta reload atomicity", () => {
     });
   });
 
+  test("delta merges displays by id and partial margins by edge", () => {
+    const prior: Config = {
+      displays: [
+        {
+          display: "display:dell",
+          margins: { top: 10, right: 2, bottom: 3, left: 4 },
+          gap: 8,
+        },
+      ],
+    };
+    expect(
+      applyConfigDelta(prior, {
+        displays: [
+          { display: "display:dell", margins: { top: 32, left: 0 }, gap: 0 },
+          { display: "display:builtin", margins: { top: 0 } },
+        ],
+      }),
+    ).toEqual({
+      displays: [
+        {
+          display: "display:dell",
+          margins: { top: 32, right: 2, bottom: 3, left: 0 },
+          gap: 0,
+        },
+        { display: "display:builtin", margins: { top: 0 } },
+      ],
+    });
+  });
+
   test("delta with absent sections reproduces the current config", () => {
     const prior = baseConfig();
     expect(applyConfigDelta(prior, {})).toEqual(prior);
@@ -254,6 +335,16 @@ describe("full reload semantics", () => {
     const next = applyConfigFull(prior, candidate);
     expect(next).toEqual(parseConfig(candidate));
     expect(next.workspaces?.map((ws) => ws.name)).toEqual(["solo"]);
+  });
+
+  test("full reload replaces display overrides rather than merging them", () => {
+    const prior: Config = {
+      displays: [{ display: "display:dell", margins: { top: 32 }, gap: 0 }],
+    };
+    const candidate = {
+      displays: [{ display: "display:builtin", margins: { top: 0 }, gap: 0 }],
+    };
+    expect(applyConfigFull(prior, candidate)).toEqual(candidate);
   });
 
   test("workspaces absent from a full reload drop their config properties", () => {

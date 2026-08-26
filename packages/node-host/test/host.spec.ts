@@ -4,7 +4,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createFileConfigSource, resolveConfigPath, stripJsonc } from "../src/config-file.ts";
-import { buildCommand, parseArgs, USAGE } from "../src/cli-args.ts";
+import { buildCommand, buildKeybindCommand, parseArgs, USAGE } from "../src/cli-args.ts";
+import { legacySketchybarSnapshot } from "../src/sketchybar.ts";
+import type { StateSnapshot } from "@wm/engine";
 
 describe("stripJsonc", () => {
   test("removes comments and trailing commas", () => {
@@ -20,6 +22,35 @@ describe("stripJsonc", () => {
 
   test("keeps comment-like content inside strings", () => {
     expect(JSON.parse(stripJsonc(`{ "url": "http://x//y" }`))).toEqual({ url: "http://x//y" });
+  });
+});
+
+describe("SketchyBar compatibility", () => {
+  test("groups workspaces by stable display intent and preserves native display ids", () => {
+    const snapshot = {
+      health: "healthy",
+      focusedWorkspace: "T",
+      topology: [
+        { id: "display:built-in", nativeId: "1", primary: true },
+        { id: "display:dell", nativeId: "4", primary: false },
+      ],
+      windows: [{ id: "w1", executablePath: "/Applications/Ghostty.app/Contents/MacOS/ghostty" }],
+      workspaces: [
+        { name: "1", members: [], floating: [], preferredDisplay: "display:built-in", visibleOnDisplay: null, pinnedDisplayOverride: null },
+        { name: "T", members: ["w1"], floating: [], preferredDisplay: "display:dell", visibleOnDisplay: "display:dell", pinnedDisplayOverride: null },
+      ],
+    } as unknown as StateSnapshot;
+
+    expect(legacySketchybarSnapshot(snapshot)).toMatchObject({
+      focused_workspace_name: "T",
+      displays: [
+        { identifiers: { cg_direct_display_id: "1" }, workspaces: [{ name: "1" }] },
+        {
+          identifiers: { cg_direct_display_id: "4" },
+          workspaces: [{ name: "T", windows: [{ app_name: "ghostty" }] }],
+        },
+      ],
+    });
   });
 });
 
@@ -57,6 +88,18 @@ describe("createFileConfigSource", () => {
 });
 
 describe("parseArgs / buildCommand", () => {
+  test("human-friendly keybind actions map directly to engine commands", () => {
+    expect(buildKeybindCommand("window move workspace S")).toEqual({
+      type: "moveFocusedWindowToWorkspace",
+      workspace: "S",
+    });
+    expect(buildKeybindCommand("workspace focus S")).toEqual({
+      type: "focusWorkspace",
+      name: "S",
+    });
+    expect(buildKeybindCommand("workspace pause --toggle")).toEqual({ type: "togglePause" });
+    expect(buildKeybindCommand("not a command")).toBeNull();
+  });
   test("--help short-circuits to usage", () => {
     const parsed = parseArgs(["--help"]);
     expect(parsed.help).toBe(true);
@@ -147,6 +190,17 @@ describe("skhd hotkey syntax parity (bean wm-pmys)", () => {
       workspace: "dev",
       displayId: "display:x",
     });
+  });
+
+  test("workspace focus cannot fall through to workspace movement", () => {
+    for (const name of ["T", "M", "1", "next", "move"]) {
+      expect(parseArgs(["workspace", "focus", name]).command).toEqual({
+        type: "focusWorkspace",
+        name,
+      });
+    }
+    expect(parseArgs(["workspace", "focus", "T", "next"]).command).toBeNull();
+    expect(parseArgs(["workspace", "move", "T"]).command).toBeNull();
   });
 
   test("`wm window focus DIR` maps onto focusDirection for all four directions", () => {

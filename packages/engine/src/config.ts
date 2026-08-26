@@ -7,11 +7,13 @@ import { BSP_DEFAULT_GAP, RESIZE_INCREMENT_DEFAULT } from "./constants.ts";
 // Schema-validates it. Unknown fields are errors. Workspaces inherit global
 // defaults field-by-field.
 
+const MarginSchema = Schema.Number.pipe(Schema.nonNegative());
+
 export const MarginsSchema = Schema.Struct({
-  top: Schema.optional(Schema.Number),
-  right: Schema.optional(Schema.Number),
-  bottom: Schema.optional(Schema.Number),
-  left: Schema.optional(Schema.Number),
+  top: Schema.optional(MarginSchema),
+  right: Schema.optional(MarginSchema),
+  bottom: Schema.optional(MarginSchema),
+  left: Schema.optional(MarginSchema),
 });
 export interface Margins extends Schema.Schema.Type<typeof MarginsSchema> {}
 
@@ -37,6 +39,13 @@ export const GlobalDefaultsSchema = Schema.Struct({
 });
 export interface GlobalDefaults extends Schema.Schema.Type<typeof GlobalDefaultsSchema> {}
 
+export const DisplayConfigSchema = Schema.Struct({
+  display: Schema.String.pipe(Schema.minLength(1)),
+  margins: Schema.optional(MarginsSchema),
+  gap: Schema.optional(GapSchema),
+});
+export interface DisplayConfig extends Schema.Schema.Type<typeof DisplayConfigSchema> {}
+
 export const WorkspaceConfigSchema = Schema.Struct({
   name: Schema.String.pipe(Schema.minLength(1)),
   preferredDisplay: Schema.optional(Schema.String),
@@ -48,9 +57,17 @@ export const WorkspaceConfigSchema = Schema.Struct({
 });
 export interface WorkspaceConfig extends Schema.Schema.Type<typeof WorkspaceConfigSchema> {}
 
+export const KeybindsSchema = Schema.Record({
+  key: Schema.String.pipe(Schema.minLength(1)),
+  value: Schema.String.pipe(Schema.minLength(1)),
+});
+export interface Keybinds extends Schema.Schema.Type<typeof KeybindsSchema> {}
+
 export const ConfigSchema = Schema.Struct({
   defaults: Schema.optional(GlobalDefaultsSchema),
+  displays: Schema.optional(Schema.Array(DisplayConfigSchema)),
   workspaces: Schema.optional(Schema.Array(WorkspaceConfigSchema)),
+  keybinds: Schema.optional(KeybindsSchema),
 });
 export interface Config extends Schema.Schema.Type<typeof ConfigSchema> {}
 
@@ -66,7 +83,15 @@ export class ConfigInvalidError extends Error {
 /** Validate a raw candidate object. Unknown fields are errors. */
 export function parseConfig(raw: unknown): Config {
   try {
-    return Schema.decodeUnknownSync(ConfigSchema, { onExcessProperty: "error" })(raw);
+    const config = Schema.decodeUnknownSync(ConfigSchema, { onExcessProperty: "error" })(raw);
+    const selectors = config.displays?.map((entry) => entry.display) ?? [];
+    if (selectors.some((selector) => !selector.startsWith("display:"))) {
+      throw new ConfigInvalidError(["display selectors must be stable display IDs"]);
+    }
+    if (new Set(selectors).size !== selectors.length) {
+      throw new ConfigInvalidError(["display selectors must be unique"]);
+    }
+    return config;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new ConfigInvalidError([message]);
@@ -125,10 +150,25 @@ function mergeMargins(
   };
 }
 
-/** Field-by-field: workspace values override global defaults per field. */
+function mergeOptionalMargins(
+  base: Margins | undefined,
+  override: Margins | undefined,
+): Margins | undefined {
+  if (override === undefined) return base;
+  if (base === undefined) return override;
+  return {
+    top: override.top ?? base.top,
+    right: override.right ?? base.right,
+    bottom: override.bottom ?? base.bottom,
+    left: override.left ?? base.left,
+  };
+}
+
+/** Field-by-field precedence: global defaults, matched display, workspace. */
 export function effectiveSettings(
   config: Config,
   workspaceName: string,
+  displayId?: string,
 ): EffectiveWorkspaceSettings {
   const defaults = config.defaults;
   let effective: EffectiveWorkspaceSettings = {
@@ -139,6 +179,18 @@ export function effectiveSettings(
       defaults?.resizeIncrement ?? GLOBAL_DEFAULT_SETTINGS.resizeIncrement,
     margins: mergeMargins(GLOBAL_DEFAULT_SETTINGS.margins, defaults?.margins),
   };
+
+  const display =
+    displayId === undefined
+      ? undefined
+      : config.displays?.find((entry) => entry.display === displayId);
+  if (display !== undefined) {
+    effective = {
+      ...effective,
+      gap: display.gap ?? effective.gap,
+      margins: mergeMargins(effective.margins, display.margins),
+    };
+  }
 
   const configured = config.workspaces?.find((ws) => ws.name === workspaceName);
   if (configured !== undefined) {
@@ -181,11 +233,30 @@ export function applyConfigDelta(current: Config, rawCandidate: unknown): Config
         ? candidate.defaults
         : {
             mode: candidate.defaults.mode ?? current.defaults.mode,
-            margins: candidate.defaults.margins ?? current.defaults.margins,
+            margins: mergeOptionalMargins(
+              current.defaults.margins,
+              candidate.defaults.margins,
+            ),
             gap: candidate.defaults.gap ?? current.defaults.gap,
             resizeIncrement:
               candidate.defaults.resizeIncrement ?? current.defaults.resizeIncrement,
           };
+
+  const displaysById = new Map<string, DisplayConfig>();
+  for (const display of current.displays ?? []) displaysById.set(display.display, display);
+  for (const display of candidate.displays ?? []) {
+    const existing = displaysById.get(display.display);
+    displaysById.set(
+      display.display,
+      existing === undefined
+        ? display
+        : {
+            display: display.display,
+            margins: mergeOptionalMargins(existing.margins, display.margins),
+            gap: display.gap ?? existing.gap,
+          },
+    );
+  }
 
   const byName = new Map<string, WorkspaceConfig>();
   for (const ws of current.workspaces ?? []) byName.set(ws.name, ws);
@@ -199,7 +270,7 @@ export function applyConfigDelta(current: Config, rawCandidate: unknown): Config
       name: ws.name,
       preferredDisplay: ws.preferredDisplay ?? existing.preferredDisplay,
       mode: ws.mode ?? existing.mode,
-      margins: ws.margins ?? existing.margins,
+      margins: mergeOptionalMargins(existing.margins, ws.margins),
       gap: ws.gap ?? existing.gap,
       resizeIncrement: ws.resizeIncrement ?? existing.resizeIncrement,
       assign: ws.assign ?? existing.assign,
@@ -207,12 +278,15 @@ export function applyConfigDelta(current: Config, rawCandidate: unknown): Config
   }
 
   const workspaces = byName.size > 0 ? [...byName.values()] : undefined;
-  if (mergedDefaults !== undefined) {
-    return workspaces === undefined
-      ? { defaults: mergedDefaults }
-      : { defaults: mergedDefaults, workspaces };
-  }
-  return workspaces === undefined ? {} : { workspaces };
+  const displays = displaysById.size > 0 ? [...displaysById.values()] : undefined;
+  return {
+    ...(mergedDefaults === undefined ? {} : { defaults: mergedDefaults }),
+    ...(displays === undefined ? {} : { displays }),
+    ...(workspaces === undefined ? {} : { workspaces }),
+    ...(candidate.keybinds === undefined
+      ? current.keybinds === undefined ? {} : { keybinds: current.keybinds }
+      : { keybinds: candidate.keybinds }),
+  };
 }
 
 /**

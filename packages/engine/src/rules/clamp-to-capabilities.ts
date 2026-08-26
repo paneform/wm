@@ -28,7 +28,7 @@ export const clampToCapabilities: Rule = {
       const display =
         displayById(world, workspace.visibleOnDisplay);
       if (display === undefined) continue;
-      const settings = ctx.settings(workspace.name);
+      const settings = ctx.settings(workspace.name, display.id);
 
       const resolver = constraintsResolver((id) => {
         const obs = world.windows.get(id);

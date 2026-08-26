@@ -14,7 +14,11 @@ import type {
   WindowObservation,
   WriteObservation,
 } from "../../src/schema.ts";
-import type { Clock, PlatformAdapter } from "../../src/platform.ts";
+import type {
+  Clock,
+  PlatformAdapter,
+  PlatformBatchOperationResult,
+} from "../../src/platform.ts";
 
 // Headless fake PlatformAdapter — docs/rewrite/testing-guide.md §Fake platform,
 // honoring the contract in docs/rewrite/platform-contract.md and matching the
@@ -401,6 +405,9 @@ export interface FakePlatform {
   focusedWindowId(): WindowId | null;
   frameOf(id: WindowId): Frame | null;
   writes(): readonly FakeWriteRecord[];
+  batchCalls(): number;
+  batchTrace(): readonly { operationId: string; phase: "start" | "settle" | "finish"; active: number }[];
+  batchHistory(): readonly { writeEnd: number; operationIds: readonly string[] }[];
 }
 
 interface SimDisplay {
@@ -457,6 +464,10 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
   let deferFocus = false;
   let withheldFocusEvent: PlatformEvent | null = null;
   const writeLog: FakeWriteRecord[] = [];
+  let batchCallCount = 0;
+  const batchEvents: { operationId: string; phase: "start" | "settle" | "finish"; active: number }[] = [];
+  let activeBatchOperations = 0;
+  const batchHistory: { writeEnd: number; operationIds: readonly string[] }[] = [];
 
   const emitFocusChanged = (id: WindowId | null): void => {
     if (deferFocus) {
@@ -813,8 +824,9 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
       if (!beginWrite(w)) {
         return yield* failWith("stale", "window identity replaced behind the same handle");
       }
+      const changed = focusedId !== w.id;
       focusedId = w.id;
-      emitFocusChanged(w.id);
+      if (changed) emitFocusChanged(w.id);
     });
 
   const adapter: PlatformAdapter = {
@@ -835,6 +847,97 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
     setWindowPosition,
     setWindowSize,
     focusWindow,
+    executeBatch: (request) =>
+      Effect.gen(function* () {
+        batchCallCount += 1;
+        const pending = new Map(request.operations.map((operation, index) => [operation.operationId, { operation, index }]));
+        const results = new Map<string, PlatformBatchOperationResult>();
+        let waveCount = 0;
+        while (pending.size > 0) {
+          waveCount += 1;
+          if (waveCount > request.operations.length + 1) {
+            throw new Error("fake batch scheduler failed to make progress");
+          }
+          const usedWindows = new Set<WindowId>();
+          const ready = [...pending.values()].filter(({ operation }) => {
+            if ((operation.dependsOn ?? []).some((id) => !results.has(id))) return false;
+            if (usedWindows.has(operation.windowId)) return false;
+            usedWindows.add(operation.windowId);
+            return true;
+          });
+          if (ready.length === 0) {
+            for (const { operation } of pending.values()) {
+              results.set(operation.operationId, {
+                operationId: operation.operationId,
+                error: platformError("rejected", "cyclic or unknown batch dependency"),
+              });
+            }
+            break;
+          }
+          activeBatchOperations = ready.length;
+          for (const { operation } of ready) {
+            batchEvents.push({
+              operationId: operation.operationId,
+              phase: "start",
+              active: activeBatchOperations,
+            });
+          }
+          const wave: PlatformBatchOperationResult[] = [];
+          for (const { operation } of ready) {
+            const failedDependency = (operation.dependsOn ?? []).find(
+              (id) => results.get(id)?.error !== undefined,
+            );
+            if (failedDependency !== undefined) {
+              wave.push({
+                operationId: operation.operationId,
+                error: platformError("rejected", `dependency ${failedDependency} failed`),
+              });
+              continue;
+            }
+            batchEvents.push({ operationId: operation.operationId, phase: "settle", active: activeBatchOperations });
+            const effect = operation.kind === "setFrame"
+              ? setWindowFrame(operation.windowId, operation.frame, operation.expectedIdentity)
+              : Effect.gen(function* () {
+                  const window = resolveWindow(operation.windowId);
+                  if (window === undefined) return yield* failWith("not_found", `unknown window ${operation.windowId}`);
+                  if (!matchesExpected(window, operation.expectedIdentity)) {
+                    return yield* failWith("stale", "window identity changed before focus");
+                  }
+                  return yield* focusWindow(operation.windowId);
+                });
+            const outcome = yield* Effect.either(effect);
+            activeBatchOperations -= 1;
+            batchEvents.push({ operationId: operation.operationId, phase: "finish", active: activeBatchOperations });
+            if (outcome._tag === "Left") wave.push({ operationId: operation.operationId, error: outcome.left });
+            else if (operation.kind === "focus") wave.push({ operationId: operation.operationId });
+            else {
+              const write = outcome.right as unknown as WriteObservation;
+              wave.push({
+                operationId: operation.operationId,
+                requested: write.requested,
+                observed: write.observed,
+                stable: write.stable,
+                stableReads: write.stable ? STABLE_READS_TO_STOP : 0,
+              });
+            }
+          }
+          for (let index = 0; index < ready.length; index += 1) {
+            const id = ready[index]!.operation.operationId;
+            results.set(id, wave[index]!);
+            pending.delete(id);
+          }
+        }
+        const operations = request.operations.map((operation) => results.get(operation.operationId)!);
+        batchHistory.push({
+          writeEnd: writeLog.length,
+          operationIds: request.operations.map((operation) => operation.operationId),
+        });
+        return {
+          operations,
+          completed: operations.filter((result) => result.error === undefined).length,
+          failed: operations.filter((result) => result.error !== undefined).length,
+        };
+      }),
   };
 
   // --- controller ops ---
@@ -1007,5 +1110,8 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
       return w === undefined ? null : { ...w.frame };
     },
     writes: (): readonly FakeWriteRecord[] => [...writeLog],
+    batchCalls: () => batchCallCount,
+    batchTrace: () => [...batchEvents],
+    batchHistory: () => [...batchHistory],
   };
 }

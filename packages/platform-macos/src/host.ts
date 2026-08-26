@@ -9,6 +9,8 @@ import type {
   Size,
   WindowId,
   WriteObservation,
+  PlatformBatchRequest,
+  PlatformBatchResult,
 } from "@wm/engine";
 import {
   PlatformError as PlatformErrorClass,
@@ -20,10 +22,13 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import {
   decodePlatformEvent,
+  BatchResult,
   ErrorEnvelope,
   FocusResult,
   mapErrorCode,
   OpenedResult,
+  KeybindActionEvent,
+  KeybindsConfiguredResult,
   PermissionsResult,
   ReadyMessage,
   ResultEnvelope,
@@ -40,6 +45,7 @@ export {
   PermissionsResult,
   type SettingsTarget,
 } from "./protocol.ts";
+export { inheritedStdioSpawn } from "./sidecar-process.ts";
 
 // ---------------------------------------------------------------------------
 // Pushable async-iterator queue: bridge between raw protocol callbacks and
@@ -95,12 +101,15 @@ export interface MacOsSidecarOptions {
 export interface MacOsSidecarAdapter extends PlatformAdapter {
   /** Structured record of every invalid inbound message. Never silent. */
   readonly protocolErrors: Stream.Stream<string>;
+  readonly keybindActions: Stream.Stream<string>;
   /** Resolves once the handshake has been received from the sidecar. */
   readonly whenReady: Promise<{
     version: string;
     accessibility: boolean;
     screenRecording: boolean;
   }>;
+  /** Resolves when the sidecar exits, allowing supervisors to restart the host. */
+  readonly whenExited: Promise<number | null>;
   /** Path the sidecar was spawned from (surfaced by CLI diagnostics). */
   readonly sidecarPath: string;
   /** Read-only TCC snapshot; never triggers prompts. */
@@ -111,6 +120,9 @@ export interface MacOsSidecarAdapter extends PlatformAdapter {
    * Idempotent for already-granted permissions.
    */
   readonly requestPermissions: () => Effect.Effect<PermissionStatus, PlatformError>;
+  readonly configureKeybinds: (
+    keybinds: Readonly<Record<string, string>>,
+  ) => Effect.Effect<void, PlatformError>;
   /** Deep link into a System Settings privacy pane via the sidecar. */
   readonly openPermissionsSettings: (
     target: SettingsTarget,
@@ -174,6 +186,7 @@ export const createMacOsSidecarAdapter = (
 
     const events = makePushable<PlatformEvent>();
     const issues = makePushable<string>();
+    const keybindActions = makePushable<string>();
     const pending = new Map<string, PendingEntry>();
 
     let reqCounter = 0;
@@ -186,6 +199,10 @@ export const createMacOsSidecarAdapter = (
     // Methods may be invoked before the handshake arrives; they queue until
     // ready, or fail fast if the handshake never comes.
     const readySettled = whenReady.catch(() => undefined);
+    let resolveExited!: (code: number | null) => void;
+    const whenExited = new Promise<number | null>((resolve) => {
+      resolveExited = resolve;
+    });
 
     const issue = (reason: string) => {
       issues.push(reason);
@@ -309,6 +326,12 @@ export const createMacOsSidecarAdapter = (
         return;
       }
 
+      const keybind = Schema.decodeUnknownEither(KeybindActionEvent)(raw);
+      if (Either.isRight(keybind)) {
+        keybindActions.push(keybind.right.action);
+        return;
+      }
+
       // Correlated / uncorrelated errors. Checked BEFORE results: an error
       // envelope carries no "result" key, but Schema.Unknown would otherwise
       // accept its absence and misroute the message into onResult.
@@ -346,13 +369,15 @@ export const createMacOsSidecarAdapter = (
     const terminateStreams = () => {
       events.end();
       issues.end();
+      keybindActions.end();
     };
 
-    child.onExit(() => {
+    child.onExit((code) => {
       alive = false;
       failPendingAll("sidecar exited");
       terminateStreams();
       readline.close();
+      resolveExited(code);
     });
 
     // -- adapter ---------------------------------------------------------------
@@ -367,6 +392,7 @@ export const createMacOsSidecarAdapter = (
     const adapter: MacOsSidecarAdapter = {
       events: Stream.fromAsyncIterable(events.values(), (error) => error as never),
       protocolErrors: Stream.fromAsyncIterable(issues.values(), (error) => error as never),
+      keybindActions: Stream.fromAsyncIterable(keybindActions.values(), (error) => error as never),
       getTopology: () =>
         Effect.map(
           guarded(request("getTopology", TopologyResult)),
@@ -402,6 +428,8 @@ export const createMacOsSidecarAdapter = (
         })),
       focusWindow: (id: WindowId) =>
         Effect.asVoid(guarded(request("focusWindow", FocusResult, { id }))),
+      executeBatch: (batch: PlatformBatchRequest): Effect.Effect<PlatformBatchResult, PlatformError> =>
+        guarded(request("executeBatch", BatchResult, { operations: batch.operations })),
       permissionsStatus: () =>
         Effect.map(
           guarded(request("permissionsStatus", PermissionsResult)),
@@ -412,10 +440,13 @@ export const createMacOsSidecarAdapter = (
           guarded(request("requestPermissions", PermissionsResult)),
           ({ permissions }) => permissions,
         ),
+      configureKeybinds: (keybinds) =>
+        Effect.asVoid(guarded(request("configureKeybinds", KeybindsConfiguredResult, { keybinds }))),
       openPermissionsSettings: (target: SettingsTarget) =>
         Effect.asVoid(guarded(request("openPermissionsSettings", OpenedResult, { target }))),
       sidecarPath: path,
       whenReady,
+      whenExited,
       stop: () => {
         if (!alive) return;
         alive = false;

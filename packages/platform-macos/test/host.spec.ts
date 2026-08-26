@@ -3,6 +3,7 @@ import { Effect, Exit, Stream } from "effect";
 import { PassThrough } from "node:stream";
 import { createMacOsSidecarAdapter } from "../src/host.ts";
 import type { SidecarProcess, SpawnSidecar } from "../src/sidecar-process.ts";
+import { inheritedStdioSpawn } from "../src/sidecar-process.ts";
 
 /**
  * Headless fake of the wm-sidecar wire behavior: echoes protocol results for
@@ -56,9 +57,29 @@ const makeSpawn = (): { spawn: SpawnSidecar; fake: FakeSidecar } => {
         case "openPermissionsSettings":
           emit({ reqId, result: { opened: true } });
           break;
+        case "configureKeybinds":
+          emit({ reqId, result: { configured: Object.keys(message.keybinds as object).length } });
+          break;
         case "setWindowFrame": {
           const frame = message.frame as { x: number; y: number; width: number; height: number };
           emit({ reqId, result: { requested: frame, observed: frame, stable: true } });
+          break;
+        }
+        case "executeBatch": {
+          const operations = message.operations as Array<Record<string, unknown>>;
+          emit({
+            reqId,
+            result: {
+              operations: operations.map((operation) => ({
+                operationId: operation.operationId,
+                ...(operation.kind === "setFrame"
+                  ? { requested: operation.frame, observed: operation.frame, stable: true }
+                  : {}),
+              })),
+              completed: operations.length,
+              failed: 0,
+            },
+          });
           break;
         }
       }
@@ -89,6 +110,65 @@ const READY = {
 };
 
 describe("MacOsSidecarAdapter permission ops", () => {
+  test("native-parent transport uses inherited protocol streams without spawning", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const adapter = Effect.runSync(createMacOsSidecarAdapter({
+      spawn: inheritedStdioSpawn(input, output),
+      sidecarPath: "native-host",
+    }));
+    input.write(`${JSON.stringify(READY)}\n`);
+    expect((await adapter.whenReady).version).toBe("wm-sidecar test");
+
+    const request = new Promise<{ reqId: string }>((resolve) => {
+      output.on("data", (chunk) => {
+        for (const line of String(chunk).trim().split("\n")) {
+          const value = JSON.parse(line) as { op: string; reqId: string };
+          if (value.op === "permissionsStatus") resolve(value);
+        }
+      });
+    });
+    const status = Effect.runPromise(adapter.permissionsStatus());
+    const { reqId } = await request;
+    input.write(`${JSON.stringify({
+      reqId,
+      result: { permissions: { accessibility: true, screenRecording: true } },
+    })}\n`);
+    await expect(status).resolves.toEqual({ accessibility: true, screenRecording: true });
+    adapter.stop();
+  });
+  test("configures native keybinds and exposes matching actions", async () => {
+    const { spawn, fake } = makeSpawn();
+    const adapter = Effect.runSync(createMacOsSidecarAdapter({ spawn, sidecarPath: "/x" }));
+    fake.emit(READY);
+    await Effect.runPromise(adapter.configureKeybinds({ "rshift s": "workspace focus S" }));
+    expect(fake.requests.find((request) => request.op === "configureKeybinds")).toMatchObject({
+      keybinds: { "rshift s": "workspace focus S" },
+    });
+    const actions: string[] = [];
+    Effect.runFork(Stream.runForEach(Stream.take(adapter.keybindActions, 1), (action) =>
+      Effect.sync(() => actions.push(action)),
+    ));
+    fake.emit({ ev: "keybind", action: "workspace focus S" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(actions).toEqual(["workspace focus S"]);
+    adapter.stop();
+  });
+  test("compound mutations use one sidecar request with ordered results", async () => {
+    const { spawn, fake } = makeSpawn();
+    const adapter = Effect.runSync(createMacOsSidecarAdapter({ spawn, sidecarPath: "/x" }));
+    fake.emit(READY);
+    const frame = { x: 1, y: 2, width: 300, height: 200 };
+    const result = await Effect.runPromise(adapter.executeBatch!({ operations: [
+      { operationId: "reveal", kind: "setFrame", windowId: "w1", frame, expectedIdentity: { fingerprint: "id1" } },
+      { operationId: "focus", kind: "focus", windowId: "w1", expectedIdentity: { fingerprint: "id1" }, dependsOn: ["reveal"] },
+    ] }));
+
+    expect(fake.requests.filter((request) => request.op === "executeBatch")).toHaveLength(1);
+    expect(fake.requests.filter((request) => request.op === "setWindowFrame" || request.op === "focusWindow")).toHaveLength(0);
+    expect(result.operations.map((operation) => operation.operationId)).toEqual(["reveal", "focus"]);
+    adapter.stop();
+  });
   test("handshake resolves whenReady and triggers subscribe", async () => {
     const { spawn, fake } = makeSpawn();
     const adapter = Effect.runSync(createMacOsSidecarAdapter({ spawn, sidecarPath: "/fake/wm-sidecar" }));
@@ -100,6 +180,7 @@ describe("MacOsSidecarAdapter permission ops", () => {
       screenRecording: false,
     });
     expect(adapter.sidecarPath).toBe("/fake/wm-sidecar");
+    expect(adapter.whenExited).toBeInstanceOf(Promise);
     await new Promise((r) => setTimeout(r, 10));
     expect(fake.requests.map((r) => r.op)).toContain("subscribe");
     adapter.stop();
@@ -188,6 +269,7 @@ describe("MacOsSidecarAdapter permission ops", () => {
     const { spawn } = makeSpawn();
     const adapter = Effect.runSync(createMacOsSidecarAdapter({ spawn, sidecarPath: "/x" }));
     adapter.stop();
+    await expect(adapter.whenExited).resolves.toBe(0);
     const exit = await Effect.runPromiseExit(adapter.permissionsStatus());
     expect(Exit.isFailure(exit)).toBe(true);
   });

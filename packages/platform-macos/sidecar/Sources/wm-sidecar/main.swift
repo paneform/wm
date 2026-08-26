@@ -10,6 +10,22 @@ import Foundation
 // without an event loop AppKit screen notifications never deliver (bean
 // wm-dm8l), and polling is authoritative even for sleep/clamshell states.
 
-let server = SidecarServer()
-server.start()
+let arguments = Array(CommandLine.arguments.dropFirst())
+var retainedChild: Process?
+var retainedServer: SidecarServer?
+if let configuration = NativeHostConfiguration.parse(arguments) {
+  do {
+    (retainedChild, retainedServer) = try runNativeHost(configuration)
+  } catch {
+    FileHandle.standardError.write(Data("native host failed: \(error)\n".utf8))
+    exit(1)
+  }
+} else if !arguments.isEmpty {
+  FileHandle.standardError.write(
+    Data("usage: wm-sidecar host --node PATH --entry PATH --config PATH --port PORT\n".utf8))
+  exit(2)
+} else {
+  retainedServer = SidecarServer()
+  retainedServer?.start()
+}
 RunLoop.main.run()

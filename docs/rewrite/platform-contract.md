@@ -23,6 +23,7 @@ interface PlatformAdapter {
   setWindowPosition(id: WindowId, point: Point): Effect<WriteObservation, PlatformError>
   setWindowSize(id: WindowId, size: Size): Effect<WriteObservation, PlatformError>
   focusWindow(id: WindowId): Effect<void, PlatformError>
+  executeBatch(request: PlatformBatchRequest): Effect<PlatformBatchResult, PlatformError>
 
   // Readback of a single window (cheap, used for settle polling).
   getWindow(id: WindowId): Effect<WindowObservation | null, PlatformError>
@@ -57,7 +58,10 @@ Rules for ALL implementations:
   refuses the write (e.g. AX error), `not_controllable` when the element exists but is
   not writable, `stale` when identity changed mid-operation.
 - The adapter performs NO policy: no clamping, no retry ladders, no learning, no parking
-  search. It executes one primitive at a time.
+  search. A batch may schedule independent primitives concurrently and serializes
+  operations targeting the same window, but does not provide all-or-nothing atomicity.
+  Every operation retains its ID, requested/observed/stable/error result in request order;
+  the engine compensates partial failure from captured preframes.
 - All adapter outputs are Schema-validated before entering the engine.
 
 ## macOS sidecar wire protocol
@@ -74,11 +78,17 @@ Engine → sidecar:
 { "op": "getWindow", "id": "window:cg:123" }
 { "op": "setWindowFrame", "id": "...", "frame": {...}, "mode": "frame" | "position" | "size" }
 { "op": "focusWindow", "id": "..." }
+{ "op": "executeBatch", "operations": [{ "operationId": "reveal:1", "kind": "setFrame", "windowId": "...", "frame": {...}, "expectedIdentity": {...} }, { "operationId": "focus:1", "kind": "focus", "windowId": "...", "expectedIdentity": {...}, "dependsOn": ["reveal:1"] }] }
 { "op": "ping" }
 { "op": "permissionsStatus" }
 { "op": "requestPermissions" }   // TCC prompts MUST be invoked by the sidecar executable
 { "op": "openPermissionsSettings", "target": "accessibility" | "screenRecording" }
 ```
+
+`executeBatch` has one aggregate response. Intermediate streaming is intentionally
+out of scope: it would add protocol and rollback ordering complexity without reducing
+the command's completion latency, because the engine cannot commit until all results
+have settled.
 
 Sidecar → engine:
 ```jsonc

@@ -118,6 +118,21 @@ export function buildCommand(
   }
 }
 
+export function buildKeybindCommand(action: string): Command | null {
+  const words = action.trim().split(/\s+/);
+  if (words[0] === "window" && words[1] === "move" && words[2] === "workspace" && words[3] && !words[4]) {
+    return { type: "moveFocusedWindowToWorkspace", workspace: words[3] };
+  }
+  const verb = words.shift();
+  const flags: Record<string, boolean> = {};
+  const positional = words.filter((word) => {
+    if (!word.startsWith("--")) return true;
+    flags[word.slice(2)] = true;
+    return false;
+  });
+  return verb === undefined || verb.length === 0 ? null : buildCommand(verb, positional, flags);
+}
+
 export function parseArgs(argv: string[]): ParsedArgs {
   const flags: Record<string, string | boolean> = {};
   const positional: string[] = [];

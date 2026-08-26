@@ -81,8 +81,14 @@ const parkedProbeHarness = async (
     }),
     changes: () => Stream.empty,
   };
+  const wrapped = wrapAdapter?.(fake.adapter, fake);
+  const adapter = wrapped === undefined ? fake.adapter : (() => {
+    const { executeBatch: _batch, ...legacy } = wrapped;
+    void _batch;
+    return legacy;
+  })();
   const engine = await Effect.runPromise(createEngine({
-    adapter: wrapAdapter?.(fake.adapter, fake) ?? fake.adapter,
+    adapter,
     configSource,
     clock: CLOCK,
   }));
@@ -92,6 +98,57 @@ const parkedProbeHarness = async (
 };
 
 describe("engine pipeline (fake platform)", () => {
+  test("deduplicates concurrent startup inventory and window-added insertion", async () => {
+    const fake = createFakePlatform({ clock: CLOCK, displays: [makeDisplay()] });
+    const windowId = fake.addWindow(makeWindow({ id: "window:startup-race" }));
+    const [window] = await Effect.runPromise(fake.adapter.getWindows());
+    const engine = await Effect.runPromise(createEngine({
+      adapter: {
+        ...fake.adapter,
+        events: Stream.concat(
+          Stream.make({ kind: "window_added" as const, window: window! }),
+          Stream.never,
+        ),
+      },
+      configSource: CONFIG_SOURCE,
+      clock: CLOCK,
+    }));
+
+    await Effect.runPromise(engine.start());
+
+    const workspace = (await Effect.runPromise(engine.state())).workspaces.find((candidate) =>
+      candidate.members.includes(windowId)
+    );
+    const countLeaves = (tree: NonNullable<typeof workspace>["tree"]): number =>
+      tree.kind === "leaf"
+        ? Number(tree.windowId === windowId)
+        : countLeaves(tree.first) + countLeaves(tree.second);
+    expect(workspace).toBeDefined();
+    expect(countLeaves(workspace!.tree)).toBe(1);
+    await Effect.runPromise(engine.stop());
+  });
+
+  test("prepares effective native config for startup and full reload", async () => {
+    const fake = createFakePlatform({ clock: CLOCK, displays: [makeDisplay()] });
+    let raw: unknown = { keybinds: { "shift s": "workspace focus S" } };
+    const prepared: Array<{ keybinds: Readonly<Record<string, string>>; mode: string }> = [];
+    const configSource: ConfigSource = {
+      load: () => Effect.succeed(raw),
+      changes: () => Stream.empty,
+      prepare: (config, mode) => Effect.sync(() => {
+        prepared.push({ keybinds: config.keybinds ?? {}, mode });
+      }),
+    };
+    const engine = await Effect.runPromise(createEngine({ adapter: fake.adapter, configSource, clock: CLOCK }));
+    await Effect.runPromise(engine.start());
+    raw = {};
+    await Effect.runPromise(engine.execute({ type: "reloadConfig", mode: "full" }));
+
+    expect(prepared).toEqual([
+      { keybinds: { "shift s": "workspace focus S" }, mode: "full" },
+      { keybinds: {}, mode: "full" },
+    ]);
+  });
   test("parked limit probe preserves bottom-left intent, slivers, and focus", async () => {
     const display = makeDisplay();
     const fake = createFakePlatform({ clock: CLOCK, displays: [display] });
@@ -736,6 +793,37 @@ describe("engine pipeline (fake platform)", () => {
     const snapshot = await h.snapshot();
     expect(snapshot.focusedWorkspace).toBe("constrained-away");
     expect(snapshot.windows.find((window) => window.id === constrained)).toMatchObject({ parked: true });
+  });
+
+  test("confirmed stable clamp from the native batch does not replay geometry", async () => {
+    const h = await bootstrap();
+    const constrained = h.fake.addWindow(makeWindow({
+      bundleId: "com.example.confirmed-batch-clamp",
+      x: 100,
+      y: 100,
+      width: 1000,
+      personality: { kind: "minMaxClamp", constraints: { minWidth: 900 } },
+    }));
+    const peer = h.fake.addWindow(makeWindow({ x: 500, y: 100, width: 800 }));
+    await h.run({ type: "reconcile" });
+    await h.run({ type: "moveWindowToWorkspace", windowId: constrained, workspace: "clamp" });
+    await h.run({ type: "moveWindowToWorkspace", windowId: peer, workspace: "clamp" });
+    await h.run({ type: "focusWorkspace", name: "clamp" });
+    await h.run({ type: "reconcile" });
+    h.fake.nudgeSilent(constrained, { width: 1000 });
+    h.fake.nudgeSilent(peer, { x: 1000 });
+    const writesBefore = h.fake.writes().length;
+    const batchesBefore = h.fake.batchCalls();
+
+    await h.run({ type: "retile", workspace: "clamp" });
+
+    const batch = h.fake.batchHistory().at(-1)!;
+    const writes = h.fake.writes().slice(writesBefore).filter((write) => write.windowId === constrained);
+    const followUpWrites = h.fake.writes().slice(batch.writeEnd).filter((write) => write.windowId === constrained);
+    expect(h.fake.batchCalls() - batchesBefore).toBe(1);
+    expect(batch.operationIds.some((operationId) => operationId.endsWith(`:${constrained}`))).toBe(true);
+    expect(followUpWrites).toHaveLength(0);
+    expect(writes.at(-1)?.observed.width).toBe(900);
   });
 
   test("startup assignment ignores portrait parked frames when deriving BSP axes", async () => {

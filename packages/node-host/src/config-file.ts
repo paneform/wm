@@ -1,5 +1,5 @@
 import { Effect, Stream } from "effect";
-import type { ConfigSource } from "@wm/engine";
+import type { Config, ConfigInvalidError, ConfigSource } from "@wm/engine";
 import * as fs from "node:fs";
 
 const DEBOUNCE_MS = 150;
@@ -48,12 +48,16 @@ export function resolveConfigPath(env: NodeJS.ProcessEnv = process.env): string 
 /**
  * File-backed ConfigSource: JSONC on disk; changes() debounced from fs.watch.
  */
-export function createFileConfigSource(path: string): ConfigSource {
+export function createFileConfigSource(
+  path: string,
+  prepare?: (config: Config, mode: "delta" | "full") => Effect.Effect<void, ConfigInvalidError>,
+): ConfigSource {
   return {
     // Parse failures surface as defects: the engine treats an unloadable
     // config source as fatal rather than a recoverable error.
     load: (): Effect.Effect<unknown> =>
       Effect.sync(() => JSON.parse(stripJsonc(fs.readFileSync(path, "utf8") as string))),
+    ...(prepare === undefined ? {} : { prepare }),
     changes: () =>
       Stream.asyncPush<void>((emit) =>
         Effect.acquireRelease(

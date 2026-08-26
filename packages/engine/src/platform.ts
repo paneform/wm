@@ -1,4 +1,5 @@
 import { Effect, Stream } from "effect";
+import type { Config, ConfigInvalidError } from "./config.ts";
 import type {
   DisplayId,
   ExpectedWindowIdentity,
@@ -63,6 +64,57 @@ export interface PlatformAdapter {
     expected?: ExpectedWindowIdentity,
   ): Effect.Effect<WriteObservation, PlatformError>;
   focusWindow(id: WindowId): Effect.Effect<void, PlatformError>;
+
+  /**
+   * One host/native round trip for related mutations. This is not an atomic
+   * transaction: every operation reports its own outcome and callers own
+   * compensation. Dependencies order related operations; unrelated windows
+   * may execute concurrently.
+   */
+  readonly executeBatch?: (
+    request: PlatformBatchRequest,
+  ) => Effect.Effect<PlatformBatchResult, PlatformError>;
+}
+
+export type PlatformBatchOperation =
+  | {
+      readonly operationId: string;
+      readonly kind: "setFrame";
+      readonly windowId: WindowId;
+      readonly frame: Frame;
+      readonly expectedIdentity: ExpectedWindowIdentity;
+      readonly dependsOn?: readonly string[];
+    }
+  | {
+      readonly operationId: string;
+      readonly kind: "focus";
+      readonly windowId: WindowId;
+      readonly expectedIdentity: ExpectedWindowIdentity;
+      readonly dependsOn?: readonly string[];
+    };
+
+export interface PlatformBatchRequest {
+  readonly operations: readonly PlatformBatchOperation[];
+}
+
+export interface PlatformBatchOperationResult {
+  readonly operationId: string;
+  readonly requested?: Frame | undefined;
+  readonly observed?: Frame | undefined;
+  readonly stable?: boolean | undefined;
+  /** Consecutive stable native settle reads supporting this observation. */
+  readonly stableReads?: number | undefined;
+  readonly error?: {
+    readonly code: PlatformError["code"];
+    readonly detail?: string | undefined;
+  } | undefined;
+}
+
+export interface PlatformBatchResult {
+  /** Results are in deterministic request order. */
+  readonly operations: readonly PlatformBatchOperationResult[];
+  readonly completed: number;
+  readonly failed: number;
 }
 
 /** Injected clock — tests use virtual time; production uses real time. */
@@ -80,4 +132,5 @@ export interface Random {
 export interface ConfigSource {
   load(): Effect.Effect<unknown>; // raw JSONC text → parsed candidate
   changes(): Stream.Stream<void>;
+  prepare?(config: Config, mode: "delta" | "full"): Effect.Effect<void, ConfigInvalidError>;
 }

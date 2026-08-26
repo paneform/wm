@@ -1,4 +1,5 @@
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
+import { Readable } from "node:stream";
 
 /**
  * Minimal structural surface of a spawned sidecar process. Compatible with
@@ -33,6 +34,34 @@ export const defaultSpawn: SpawnSidecar = (path) => {
     },
     onExit(listener) {
       child.once("exit", (code) => listener(code));
+    },
+  };
+};
+
+/** Native-parent mode: stdout carries requests to Swift and stdin carries
+ * responses/events back from Swift. Human logs must use stderr. */
+export const inheritedStdioSpawn = (
+  input: NodeJS.ReadableStream = process.stdin,
+  output: NodeJS.WritableStream = process.stdout,
+): SpawnSidecar => () => {
+  const listeners: Array<(code: number | null) => void> = [];
+  let ended = false;
+  const finish = () => {
+    if (ended) return;
+    ended = true;
+    for (const listener of listeners) listener(null);
+  };
+  input.once("end", finish);
+  input.once("close", finish);
+  return {
+    pid: process.ppid,
+    stdin: output,
+    stdout: input,
+    stderr: Readable.from([]),
+    kill() {},
+    onExit(listener) {
+      listeners.push(listener);
+      if (ended) listener(null);
     },
   };
 };

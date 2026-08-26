@@ -191,6 +191,7 @@ final class GeometryAdapter {
                 requested: requested.frameValue,
                 observed: settlement.frame.frameValue,
                 stable: settlement.stable,
+                stableReads: settlement.stableReads,
                 errorKind: nil)
         } catch let error as AdapterError {
             throw error
@@ -267,6 +268,7 @@ final class GeometryAdapter {
     struct Settlement {
         var frame: Rect
         var stable: Bool
+        var stableReads: Int
     }
 
     /// Up to 36 samples, 17 ms apart. Early exit on 3 consecutive target
@@ -288,7 +290,7 @@ final class GeometryAdapter {
             stableSamples = previous?.approximatelyEquals(observed, tolerance: 0.5) == true ? stableSamples + 1 : 0
             let distance = normalizedDistance(observed, to: requested)
             if targetSamples >= 3 || (stableSamples >= 3 && distance >= previousDistance - 0.0001) {
-                return Settlement(frame: observed, stable: true)
+                return Settlement(frame: observed, stable: true, stableReads: max(targetSamples, stableSamples))
             }
             previous = observed
             previousDistance = distance
@@ -298,7 +300,7 @@ final class GeometryAdapter {
         guard let final = Self.readFrame(element, errors: &errors) else {
             throw AdapterError.stale
         }
-        return Settlement(frame: final, stable: false)
+        return Settlement(frame: final, stable: false, stableReads: 0)
     }
 
     private func normalizedDistance(_ observed: Rect, to target: Rect) -> Double {
@@ -312,9 +314,14 @@ final class GeometryAdapter {
 
     /// activate(activateAllWindows) → AXFrontmost → AXRaise → AXMain →
     /// AXFocused, verified via frontmost pid, with one delayed retry.
-    func focus(meta: WindowMeta) throws {
+    func focus(meta: WindowMeta, expectedIdentity: ExpectedIdentityValue? = nil) throws {
         guard AXIsProcessTrusted() else { throw AdapterError.notControllable }
         let element = try resolve(meta)
+        if let expected = expectedIdentity {
+            guard let live = observation(for: meta),
+                  ExpectedIdentityValue.fingerprint(pid: live.pid, role: live.role, subrole: live.subrole)
+                    == expected.fingerprint else { throw AdapterError.stale }
+        }
         for attempt in 0..<2 {
             try raiseToFront(element, meta: meta)
             if frontmostPid() == meta.pid { return }

@@ -38,10 +38,12 @@ export type SidecarRequest =
   | { readonly op: "getWindows"; readonly reqId: string }
   | { readonly op: "getWindow"; readonly reqId: string; readonly id: string }
   | SetWindowFrameRequest
+  | { readonly op: "executeBatch"; readonly reqId: string; readonly operations: readonly unknown[] }
   | { readonly op: "focusWindow"; readonly reqId: string; readonly id: string }
   | { readonly op: "ping"; readonly reqId: string }
   | { readonly op: "permissionsStatus"; readonly reqId: string }
   | { readonly op: "requestPermissions"; readonly reqId: string }
+  | { readonly op: "configureKeybinds"; readonly reqId: string; readonly keybinds: Readonly<Record<string, string>> }
   | {
       readonly op: "openPermissionsSettings";
       readonly reqId: string;
@@ -74,11 +76,30 @@ export type ResultSchemaFor = {
   getWindows: typeof WindowsResult;
   getWindow: typeof WindowResult;
   setWindowFrame: typeof WriteObservation;
+  executeBatch: typeof BatchResult;
   focusWindow: typeof FocusResult;
   permissionsStatus: typeof PermissionsResult;
   requestPermissions: typeof PermissionsResult;
   openPermissionsSettings: typeof OpenedResult;
+  configureKeybinds: typeof KeybindsConfiguredResult;
 };
+
+const BatchOperationResult = Schema.Struct({
+  operationId: Schema.String,
+  requested: Schema.optional(Schema.Struct({ x: Schema.Number, y: Schema.Number, width: Schema.Number, height: Schema.Number })),
+  observed: Schema.optional(Schema.Struct({ x: Schema.Number, y: Schema.Number, width: Schema.Number, height: Schema.Number })),
+  stable: Schema.optional(Schema.Boolean),
+  stableReads: Schema.optional(Schema.Number),
+  error: Schema.optional(Schema.Struct({
+    code: Schema.Literal("not_found", "not_controllable", "stale", "ambiguous", "rejected", "permission", "unavailable"),
+    detail: Schema.optional(Schema.String),
+  })),
+});
+export const BatchResult = Schema.Struct({
+  operations: Schema.Array(BatchOperationResult),
+  completed: Schema.Number,
+  failed: Schema.Number,
+});
 
 export const PingResult = Schema.Struct({
   pong: Schema.Literal(true),
@@ -110,6 +131,7 @@ export interface PermissionStatus extends Schema.Schema.Type<typeof PermissionSt
 
 export const PermissionsResult = Schema.Struct({ permissions: PermissionStatus });
 export const OpenedResult = Schema.Struct({ opened: Schema.Literal(true) });
+export const KeybindsConfiguredResult = Schema.Struct({ configured: Schema.Number });
 
 export const ErrorBody = Schema.Struct({
   code: Schema.String,
@@ -135,6 +157,11 @@ export const ErrorEnvelope = Schema.Struct({
 // ---------------------------------------------------------------------------
 
 const EventEnvelope = Schema.Struct({ ev: Schema.String });
+
+export const KeybindActionEvent = Schema.Struct({
+  ev: Schema.Literal("keybind"),
+  action: Schema.String,
+});
 
 /**
  * Validates a raw event line against the PlatformEvent union and maps it to
