@@ -1,12 +1,13 @@
 import { describe, expect, test } from "vitest";
-import { Effect, Stream } from "effect";
+import { Effect, Fiber, Stream } from "effect";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createFileConfigSource, resolveConfigPath, stripJsonc } from "../src/config-file.ts";
 import { buildCommand, buildKeybindCommand, parseArgs, USAGE } from "../src/cli-args.ts";
 import { legacySketchybarSnapshot } from "../src/sketchybar.ts";
-import type { StateSnapshot } from "@wm/engine";
+import { emptyObservationDocument, type ObservationDocument, type StateSnapshot } from "@wm/engine";
+import { createFileObservationStore, resolveObservationPath } from "../src/observation-file.ts";
 
 describe("stripJsonc", () => {
   test("removes comments and trailing commas", () => {
@@ -85,6 +86,125 @@ describe("createFileConfigSource", () => {
 
     fs.rmSync(dir, { recursive: true, force: true });
   }, 5000);
+});
+
+describe("file observation store", () => {
+  const documentWithMaximum = (maxWidth: number): ObservationDocument => ({
+    schemaVersion: 1,
+    profiles: [{
+      key: {
+        application: "com.apple.systempreferences",
+        role: "AXWindow",
+        contextFingerprint: "display-a",
+      },
+      constraints: { maxWidth },
+      sampleCount: 3,
+      confidence: "learned",
+      correctiveAttemptCount: 0,
+      cooperative: false,
+    }],
+    pending: [],
+  });
+
+  test("resolves WM_OBSERVATIONS, XDG state, and home paths", () => {
+    expect(resolveObservationPath({ WM_OBSERVATIONS: "/tmp/custom.json" })).toBe("/tmp/custom.json");
+    expect(resolveObservationPath({ XDG_STATE_HOME: "/state" })).toBe("/state/wm/observations.json");
+    expect(resolveObservationPath({ HOME: "/home/test" })).toBe("/home/test/.local/state/wm/observations.json");
+  });
+
+  test("atomically round-trips observations and rejects stale revisions", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wm-observations-"));
+    const file = path.join(directory, "observations.json");
+    const store = createFileObservationStore(file);
+    const initial = await Effect.runPromise(store.load());
+    expect(initial.document).toEqual(emptyObservationDocument());
+
+    const saved = await Effect.runPromise(store.save(initial.revision, documentWithMaximum(723)));
+    expect((await Effect.runPromise(store.load())).document.profiles[0]?.constraints.maxWidth).toBe(723);
+
+    const conflict = await Effect.runPromise(
+      Effect.either(store.save(initial.revision, documentWithMaximum(800))),
+    );
+    expect(conflict._tag).toBe("Left");
+    if (conflict._tag === "Left") expect(conflict.left.code).toBe("conflict");
+    expect(saved.revision).not.toBe(initial.revision);
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  test("emits externally replaced documents", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wm-observations-watch-"));
+    const file = path.join(directory, "observations.json");
+    const store = createFileObservationStore(file);
+    const initial = await Effect.runPromise(store.load());
+    const fiber = Effect.runFork(Stream.runCollect(Stream.take(store.changes(initial.revision), 1)));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    fs.writeFileSync(file, `${JSON.stringify(documentWithMaximum(723))}\n`, { mode: 0o600 });
+
+    const changes = await Effect.runPromise(Fiber.join(fiber));
+    expect(Array.from(changes)[0]?.document.profiles[0]?.constraints.maxWidth).toBe(723);
+    fs.rmSync(directory, { recursive: true, force: true });
+  }, 5000);
+
+  test("closes the load-to-watch gap with an immediate catch-up read", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wm-observations-catchup-"));
+    const file = path.join(directory, "observations.json");
+    const store = createFileObservationStore(file);
+    const initial = await Effect.runPromise(store.load());
+    fs.writeFileSync(file, `${JSON.stringify(documentWithMaximum(723))}\n`, { mode: 0o600 });
+
+    const changes = await Effect.runPromise(Stream.runCollect(Stream.take(store.changes(initial.revision), 1)));
+
+    expect(Array.from(changes)[0]?.document.profiles[0]?.constraints.maxWidth).toBe(723);
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  test("ignores an invalid live replacement and keeps watching from the last good revision", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wm-observations-invalid-live-"));
+    const file = path.join(directory, "observations.json");
+    const store = createFileObservationStore(file);
+    const initial = await Effect.runPromise(store.load());
+    const valid = await Effect.runPromise(store.save(initial.revision, documentWithMaximum(723)));
+    let changes = 0;
+    const fiber = Effect.runFork(Stream.runForEach(store.changes(valid.revision), () =>
+      Effect.sync(() => changes += 1)));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    fs.writeFileSync(file, "invalid\n", { mode: 0o600 });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(changes).toBe(0);
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  test("rejects a save while another writer holds the store lock", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wm-observations-lock-"));
+    const file = path.join(directory, "observations.json");
+    const store = createFileObservationStore(file);
+    const initial = await Effect.runPromise(store.load());
+    fs.writeFileSync(`${file}.lock`, "other writer\n", { mode: 0o600 });
+
+    const result = await Effect.runPromise(
+      Effect.either(store.save(initial.revision, documentWithMaximum(723))),
+    );
+
+    expect(result._tag).toBe("Left");
+    if (result._tag === "Left") expect(result.left.code).toBe("busy");
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  test("quarantines an invalid startup document instead of failing", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wm-observations-corrupt-"));
+    const file = path.join(directory, "observations.json");
+    fs.writeFileSync(file, "not json\n");
+
+    const loaded = await Effect.runPromise(createFileObservationStore(file).load());
+
+    expect(loaded.document).toEqual(emptyObservationDocument());
+    expect(fs.readdirSync(directory).some((entry) => entry.startsWith("observations.json.corrupt-")))
+      .toBe(true);
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
 });
 
 describe("parseArgs / buildCommand", () => {

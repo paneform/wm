@@ -6,6 +6,7 @@ import { attachWebSocketServer } from "./ws-server.ts";
 import { clockNode } from "./clock-node.ts";
 import { executeEngineCommand } from "./command-handler.ts";
 import { createFileConfigSource, resolveConfigPath } from "./config-file.ts";
+import { createFileObservationStore, resolveObservationPath } from "./observation-file.ts";
 import { buildKeybindCommand, parseArgs, USAGE } from "./cli-args.ts";
 import {
   errorReport,
@@ -173,6 +174,7 @@ async function main(): Promise<number> {
   const engine = await Effect.runPromise(createEngine({
     adapter,
     configSource,
+    observationStore: createFileObservationStore(resolveObservationPath()),
     clock: clockNode,
     initiallyPaused: parsed.flags["observe-only"] === true,
   }));

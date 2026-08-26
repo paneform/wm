@@ -28,7 +28,7 @@ export const PROBE_DELTA = 1;
 export const PROBE_MATCH_THRESHOLD = 0.25;
 export const RESTORE_MATCH_THRESHOLD = 0.25;
 
-/** Observation edge within this distance of a work-area edge is not learnable. */
+/** Work-area edge distance used to reject display-clamped size evidence. */
 export const WORK_AREA_FLUSH_GUARD_PT = 2;
 
 export const PROMOTION_SAMPLES = 3;

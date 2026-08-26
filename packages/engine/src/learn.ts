@@ -46,16 +46,19 @@ const flushGuard = (
   observed: Frame,
   workArea: Frame,
   axis: ConstraintAxis,
+  direction: BoundDirection,
 ): boolean => {
   if (axis === "width") {
     return (
-      Math.abs(observed.x - workArea.x) <= WORK_AREA_FLUSH_GUARD_PT ||
+      (direction === "min" &&
+        Math.abs(observed.x - workArea.x) <= WORK_AREA_FLUSH_GUARD_PT) ||
       Math.abs(observed.x + observed.width - (workArea.x + workArea.width)) <=
         WORK_AREA_FLUSH_GUARD_PT
     );
   }
   return (
-    Math.abs(observed.y - workArea.y) <= WORK_AREA_FLUSH_GUARD_PT ||
+    (direction === "min" &&
+      Math.abs(observed.y - workArea.y) <= WORK_AREA_FLUSH_GUARD_PT) ||
     Math.abs(observed.y + observed.height - (workArea.y + workArea.height)) <=
       WORK_AREA_FLUSH_GUARD_PT
   );
@@ -83,7 +86,7 @@ export function candidatesFrom(input: LearningInput): CandidateScan {
     const direction: BoundDirection = delta > 0 ? "min" : "max";
     const value = input.observed[axis];
 
-    if (flushGuard(input.observed, input.workArea, axis)) {
+    if (flushGuard(input.observed, input.workArea, axis, direction)) {
       scan.skipped.push({ axis, direction, value, reason: "work_area_flush" });
       continue;
     }

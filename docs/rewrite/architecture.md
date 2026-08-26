@@ -50,6 +50,7 @@ packages/
       observe.ts     Observation normalization/joining pipeline
       probe.ts       Probe runner (capability + constraint probing)
       learn.ts       Constraint/cooperation profile learning (evidence-gated)
+      observation-store.ts Browser-safe durable observation port + versioned document
       geometry.ts    Frame math, classification of write outcomes, retry ladders
       parking.ts     Offscreen parking search (clamp discovery, corner planning)
       layout/bsp.ts  BSP tree ops + constraint-aware tiling math
@@ -64,6 +65,7 @@ packages/
 
   node-host/         @wm/node-host — Node implementations of engine ports
     src/config-file.ts   fs config loader/watcher implementing ConfigSource
+    src/observation-file.ts atomic fs implementation of ObservationStore
     src/ws-server.ts     ws-based WebSocketPort implementation
     src/sidecar.ts       spawns + speaks stdio JSON-lines to the Swift sidecar
     src/cli.ts           `wm` bin: thin arg parsing → CommandBus → print JSON
@@ -91,11 +93,16 @@ PlatformAdapter (sidecar host)  ──generic events──►  Engine
                                                     │ transaction executor: apply → readback
                                                     │ verify → classify → learn → commit
                                                     ▼
-                                        committed State + domain events
+                                         committed State + domain events
                                               │                 │
                                     CommandBus ◄─ CLI / WS      └─► Renderer (simulated
                                     (same execution layer)          platform, no macOS)
 ```
+
+The engine also receives an optional `ObservationStore`. Production injects the
+Node file implementation. A browser may inject IndexedDB or omit the store for
+session-only learning. The engine owns validation and learning semantics; hosts
+own storage I/O.
 
 ## Key contracts
 

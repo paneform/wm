@@ -12,6 +12,7 @@ export * from "./actions.ts";
 export * as rules from "./rules/index.ts";
 export * from "./probe.ts";
 export * from "./learn.ts";
+export * from "./observation-store.ts";
 export * from "./parking.ts";
 
 // Services

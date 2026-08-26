@@ -105,6 +105,28 @@ replacement window behind the same handle aborts before mutating the replacement
 - Viability check before layout use: min bound usable iff liveObserved + 1 < bound;
   max iff liveObserved − 1 > bound.
 
+### Durable observations
+
+`@wm/engine` defines a browser-safe `ObservationStore` port. Its versioned document
+contains promoted profiles and pending evidence, so a restart does not reset the
+three-sample promotion window. The host implementation provides `load`, `changes`,
+and compare-and-swap `save` operations using opaque revisions.
+
+The engine hydrates observations before it exposes its API or performs its first
+layout. Successful writes persist verified learning at their transaction boundary.
+External snapshots install under the engine mutation gate and trigger reconciliation.
+When a configured store rejects a passive update, the last durable catalog remains
+authoritative and engine health degrades. Verified probes fail rather than report an
+unpersisted profile update.
+
+The Node host stores observations at
+`${WM_OBSERVATIONS:-${XDG_STATE_HOME:-~/.local/state}/wm/observations.json}` using
+bounded reads, content-hash conflict detection, file watching, and fsync plus atomic
+rename. Concurrent writers must use the adjacent store lock; revision conflicts reload
+the winner and reapply independent local changes before retrying. Invalid startup
+documents are quarantined. Browser hosts can implement the
+same port with IndexedDB; tests use in-memory stores.
+
 ## Geometry transactions & retry ladder
 
 Write strategies tried in order: `positionSize`, `sizeOnly`, `sizePositionSize`,
@@ -162,6 +184,7 @@ export * from "./world.js";       // World, WorkspaceState, ProfileStore, Parkin
 createEngine(options: {
   adapter: PlatformAdapter;
   configSource: ConfigSource;
+  observationStore?: ObservationStore;
   clock: Clock;                    // { now(): number; sleep(ms): Effect<void> }
   random?: Random                  // seeded, optional
 }): Effect<Engine>
@@ -209,7 +232,8 @@ Global keybinds use chord strings as object keys (JSON cannot use arrays as keys
 Modifiers are unordered and side-aware: `shift` accepts either side, while `lshift` and
 `rshift` match those physical keys independently. The persistent macOS sidecar applies
 bindings on config load/hotload and sends actions on matching keydown events; Input
-Monitoring permission is required. Key events remain visible to other applications.
+Monitoring permission is required. Matched non-repeat keydown events are suppressed;
+modifier, repeated, and unmatched events remain visible to other applications.
 
 ## Command execution layer (single source of truth)
 

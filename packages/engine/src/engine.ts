@@ -102,6 +102,14 @@ import {
   type Config,
   type EffectiveWorkspaceSettings,
 } from "./config.ts";
+import {
+  learningFromObservationDocument,
+  mergeLearningChanges,
+  observationDocumentFromLearning,
+  ObservationStoreError,
+  type ObservationSnapshot,
+  type ObservationStore,
+} from "./observation-store.ts";
 
 // Engine pipeline — docs/rewrite/engine-guide.md §Pipeline.
 // Platform events are HINTS that trigger re-querying snapshots; rules produce
@@ -112,6 +120,8 @@ export interface EngineOptions {
   adapter: PlatformAdapter;
   configSource: ConfigSource;
   clock: Clock;
+  /** Optional durable learning boundary. Implementations live in the host. */
+  observationStore?: ObservationStore;
   /** Start observation/config/event processing while suppressing mutations. */
   initiallyPaused?: boolean;
 }
@@ -140,21 +150,45 @@ const TOMBSTONE_TTL_MS = 5 * 60 * 1000;
 
 export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
   Effect.gen(function* () {
-    const { adapter, configSource, clock } = options;
+    const { adapter, configSource, clock, observationStore } = options;
+
+    const loadedObservations: Either.Either<ObservationSnapshot | null, ObservationStoreError> =
+      observationStore === undefined
+      ? Either.right(null)
+      : yield* Effect.either(observationStore.load());
+    let observationStoreFailed = loadedObservations._tag === "Left";
+    let observationRevision = "memory";
+    let initialLearning = emptyLearningStore();
+    if (loadedObservations._tag === "Right" && loadedObservations.right !== null) {
+      try {
+        if (
+          loadedObservations.right.revision.length === 0 ||
+          loadedObservations.right.revision.length > 256
+        ) {
+          throw new ObservationStoreError("invalid", "observation revision is invalid");
+        }
+        initialLearning = learningFromObservationDocument(loadedObservations.right.document);
+        observationRevision = loadedObservations.right.revision;
+      } catch {
+        observationStoreFailed = true;
+      }
+    }
 
     let world: World = {
       topology: { displays: [] },
       windows: new Map(),
       workspaces: new Map([["1", emptyWorkspace("1")]]),
       focusedWorkspace: "1",
-      profiles: new Map(),
+      profiles: new Map(initialLearning.profiles),
       parkingFacts: [],
       paused: options.initiallyPaused ?? false,
       epoch: 0,
       focusIntent: null,
     };
     let config: Config = {};
-    let learning: LearningStore = emptyLearningStore();
+    let learning: LearningStore = initialLearning;
+    let persistedLearning: LearningStore = initialLearning;
+    let learningDirty = false;
     const tombstones = new Map<WindowId, TombstoneRecord>();
     const overrides = { managed: new Set<WindowId>(), unmanaged: new Set<WindowId>() };
     const firstSeen = new Map<WindowId, Frame>();
@@ -206,12 +240,15 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     });
     /** Exclusive command/reconcile mutex (review round 3, issue 6). */
     const reconcileGate = yield* Effect.makeSemaphore(1);
+    let reconciling = false;
+    let reconcileAgain = false;
 
     const setHealth = (next: HealthState, issue?: string): void => {
       if (issue !== undefined && !health.issues.includes(issue)) health.issues.push(issue);
       health.state = next;
       bus.publish("health", { state: next, issues: [...health.issues] });
     };
+    if (observationStoreFailed) setHealth("degraded", "observation_store_unavailable");
 
     // ------------------------------------------------------------------
     // Observation helpers
@@ -290,6 +327,133 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       world = { ...world, profiles: new Map(learning.profiles) };
     };
 
+    const setLearning = (next: LearningStore): void => {
+      if (next === learning) return;
+      learning = next;
+      learningDirty = true;
+      syncProfiles();
+    };
+
+    const persistLearning = (): Effect.Effect<void, ObservationStoreError> => {
+      if (!learningDirty || observationStore === undefined) {
+        learningDirty = false;
+        return Effect.void;
+      }
+      return Effect.gen(function* () {
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          const base = persistedLearning;
+          const local = learning;
+          const document = yield* Effect.try({
+            try: () => observationDocumentFromLearning(local),
+            catch: (error) => error instanceof ObservationStoreError
+              ? error
+              : new ObservationStoreError("invalid", String(error)),
+          });
+          const saved = yield* Effect.either(observationStore.save(observationRevision, document));
+          if (saved._tag === "Right") {
+            const installed = yield* Effect.try({
+              try: () => {
+                if (saved.right.revision.length === 0 || saved.right.revision.length > 256) {
+                  throw new ObservationStoreError("invalid", "observation revision is invalid");
+                }
+                return learningFromObservationDocument(saved.right.document);
+              },
+              catch: (error) => error instanceof ObservationStoreError
+                ? error
+                : new ObservationStoreError("invalid", String(error)),
+            });
+            learning = installed;
+            persistedLearning = learning;
+            observationRevision = saved.right.revision;
+            learningDirty = false;
+            observationStoreFailed = false;
+            syncProfiles();
+            return;
+          }
+          if (saved.left.code === "durability" && saved.left.committed !== undefined) {
+            const committed = saved.left.committed;
+            const installed = yield* Effect.try({
+              try: () => {
+                if (committed.revision.length === 0 || committed.revision.length > 256) {
+                  throw new ObservationStoreError("invalid", "observation revision is invalid");
+                }
+                return learningFromObservationDocument(committed.document);
+              },
+              catch: (error) => error instanceof ObservationStoreError
+                ? error
+                : new ObservationStoreError("invalid", String(error)),
+            });
+            learning = installed;
+            persistedLearning = installed;
+            observationRevision = committed.revision;
+            learningDirty = false;
+            observationStoreFailed = true;
+            syncProfiles();
+            setHealth("degraded", "observation_store_durability");
+            return;
+          }
+          if (saved.left.code === "busy" && attempt < 3) {
+            yield* clock.sleep(25 * (attempt + 1));
+            continue;
+          }
+          if (saved.left.code === "conflict" && attempt < 3) {
+            const remoteSnapshot = yield* observationStore.load();
+            const remote = yield* Effect.try({
+              try: () => {
+                if (remoteSnapshot.revision.length === 0 || remoteSnapshot.revision.length > 256) {
+                  throw new ObservationStoreError("invalid", "observation revision is invalid");
+                }
+                return learningFromObservationDocument(remoteSnapshot.document);
+              },
+              catch: (error) => error instanceof ObservationStoreError
+                ? error
+                : new ObservationStoreError("invalid", String(error)),
+            });
+            learning = mergeLearningChanges(base, local, remote);
+            persistedLearning = remote;
+            observationRevision = remoteSnapshot.revision;
+            learningDirty = true;
+            reconcileAgain = true;
+            syncProfiles();
+            continue;
+          }
+          return yield* Effect.fail(saved.left);
+        }
+      });
+    };
+
+    const persistLearningBestEffort = (): Effect.Effect<void> =>
+      Effect.catchAll(persistLearning(), (error) =>
+        Effect.sync(() => {
+          learning = persistedLearning;
+          learningDirty = false;
+          syncProfiles();
+          observationStoreFailed = true;
+          setHealth("degraded", `observation_store_${error.code}`);
+        }));
+
+    const installObservationSnapshot = (
+      snapshot: ObservationSnapshot,
+    ): Effect.Effect<boolean, ObservationStoreError> =>
+      Effect.try({
+        try: () => {
+          if (snapshot.revision === observationRevision) return false;
+          if (snapshot.revision.length === 0 || snapshot.revision.length > 256) {
+            throw new ObservationStoreError("invalid", "observation revision is invalid");
+          }
+          learning = learningFromObservationDocument(snapshot.document);
+          persistedLearning = learning;
+          observationRevision = snapshot.revision;
+          learningDirty = false;
+          observationStoreFailed = false;
+          syncProfiles();
+          return true;
+        },
+        catch: (error) => error instanceof ObservationStoreError
+          ? error
+          : new ObservationStoreError("invalid", String(error)),
+      });
+
     const learnFrom = (
       observation: WindowObservation,
       requested: Frame,
@@ -304,8 +468,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       if (outcome === "exact") {
         // Exact contradiction replaces a learned bound + resets pending.
         const result = noteExactFrame(learning, key, observed, 1);
-        learning = result.store;
-        if (result.replaced.length > 0) syncProfiles();
+        if (result.replaced.length > 0) setLearning(result.store);
         return;
       }
       if (outcome !== "constrained" && outcome !== "stableClamp") return;
@@ -322,10 +485,11 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         });
       if (scan.candidates.length > 0) {
         const evidenceSamples = confirmed ? Math.max(samples, PROMOTION_SAMPLES) : samples;
+        let next = learning;
         for (let sample = 0; sample < evidenceSamples; sample += 1) {
-          learning = recordCandidates(learning, key, scan.candidates).store;
+          next = recordCandidates(next, key, scan.candidates).store;
         }
-        syncProfiles();
+        setLearning(next);
       }
     };
 
@@ -527,8 +691,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           // Resistant behavior marks cooperation (profile-informed skip ahead).
           const key = profileKeyOfObs(observation);
           if (key !== null) {
-            learning = markCooperation(learning, key, true);
-            syncProfiles();
+            setLearning(markCooperation(learning, key, true));
           }
           return yield* Effect.fail(stepFailure(result.left));
         }
@@ -907,6 +1070,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           };
         }
         const receipt = submitted.right;
+        yield* persistLearningBestEffort();
         if (receipt.status === "failed" && receipt.error !== undefined) {
           bus.publish("diagnostic", {
             code: receipt.error.code,
@@ -1002,7 +1166,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             appliedSteps: outcome.applied,
           });
         }
-        if (health.state === "degraded") setHealth("healthy");
+        if (health.state === "degraded" && !observationStoreFailed) setHealth("healthy");
         if (outcome.failure !== null) return yield* Effect.fail(outcome.failure);
       });
 
@@ -1037,9 +1201,6 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             }
           }),
       );
-
-    let reconciling = false;
-    let reconcileAgain = false;
 
     const gatedReconcile = (): Effect.Effect<void> =>
       Effect.flatMap(Effect.sync(() => !reconciling), (canRun) => {
@@ -1414,8 +1575,55 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       draft: World;
       finalDraft: World;
       learning: LearningStore;
+      persistedLearning: LearningStore;
+      observationRevision: string;
+      observationStoreFailed: boolean;
+      learningDirty: boolean;
+      committed: boolean;
       appliedActions: number;
     }
+
+    const rollbackCompound = (ctx: CompoundCtx): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        learning = ctx.learning;
+        persistedLearning = ctx.persistedLearning;
+        observationRevision = ctx.observationRevision;
+        observationStoreFailed = ctx.observationStoreFailed;
+        learningDirty = ctx.learningDirty;
+        syncProfiles();
+        let incomplete = false;
+        for (const cap of [...ctx.preFrames].reverse()) {
+          const observedNow = yield* Effect.either(adapter.getWindow(cap.id));
+          if (observedNow._tag === "Left" || observedNow.right === null) {
+            incomplete = true;
+            continue;
+          }
+          if (windowIdentityFingerprint(observedNow.right) !== cap.identity) {
+            incomplete = true;
+            bus.publish("diagnostic", {
+              code: "rollback_identity_changed",
+              detail: `window ${cap.id}: replacement detected; compensation skipped`,
+            });
+            continue;
+          }
+          if (withinTolerance(observedNow.right.frame, cap.frame, DEFAULT_TOLERANCE)) continue;
+          const written = yield* Effect.either(
+            adapter.setWindowFrame(cap.id, { ...cap.frame }, { ...cap.expected }),
+          );
+          if (written._tag === "Left") {
+            incomplete = true;
+            bus.publish("diagnostic", {
+              code: "rollback_write_refused",
+              detail: `window ${cap.id}: restoration refused (${written.left.code})`,
+            });
+            continue;
+          }
+          if (!withinTolerance(written.right.observed, cap.frame, DEFAULT_TOLERANCE)) {
+            incomplete = true;
+          }
+        }
+        if (incomplete) setHealth("degraded", "rollback_incomplete");
+      });
 
     /**
      * Execute a compound command transactionally (see block comment above).
@@ -1465,6 +1673,11 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             draft: world,
             finalDraft: world,
             learning,
+            persistedLearning,
+            observationRevision,
+            observationStoreFailed,
+            learningDirty,
+            committed: false,
             appliedActions: 0,
           };
 
@@ -1699,11 +1912,23 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               }
               ctx.appliedActions = applied;
               ctx.finalDraft = finalDraft;
+              yield* Effect.uninterruptible(
+                Effect.gen(function* () {
+                  yield* Effect.mapError(
+                    persistLearning(),
+                    (error) => new CommandError({
+                      code: "internal_error",
+                      message: `observation persistence failed: ${error.message}`,
+                    }),
+                  );
+                  ctx.committed = true;
+                }),
+              );
               return ctx.draft;
             }),
             (exit) =>
               Effect.gen(function* () {
-                if (exit._tag === "Success") {
+                if (exit._tag === "Success" || ctx.committed) {
                   world = {
                     ...ctx.finalDraft,
                     profiles: new Map(learning.profiles),
@@ -1717,43 +1942,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   });
                   return;
                 }
-                learning = ctx.learning;
-                syncProfiles();
-                let incomplete = false;
-                for (const cap of [...ctx.preFrames].reverse()) {
-                  const observedNow = yield* Effect.either(adapter.getWindow(cap.id));
-                  if (observedNow._tag === "Left" || observedNow.right === null) {
-                    incomplete = true;
-                    continue;
-                  }
-                  if (windowIdentityFingerprint(observedNow.right) !== cap.identity) {
-                    incomplete = true;
-                    bus.publish("diagnostic", {
-                      code: "rollback_identity_changed",
-                      detail: `window ${cap.id}: replacement detected; compensation skipped`,
-                    });
-                    continue;
-                  }
-                  if (withinTolerance(observedNow.right.frame, cap.frame, DEFAULT_TOLERANCE)) continue;
-                  // ATOMIC identity-guarded restore (issue 3): the adapter
-                  // re-validates `expected` immediately before mutating, so a
-                  // replacement inserted between our read and this write
-                  // aborts `stale` untouched. Never retried unguarded.
-                  const written = yield* Effect.either(
-                    adapter.setWindowFrame(cap.id, { ...cap.frame }, { ...cap.expected }),
-                  );
-                  if (written._tag === "Left") {
-                    incomplete = true;
-                    bus.publish("diagnostic", {
-                      code: "rollback_write_refused",
-                      detail: `window ${cap.id}: restoration refused (${written.left.code})`,
-                    });
-                    continue;
-                  }
-                  const verified = withinTolerance(written.right.observed, cap.frame, DEFAULT_TOLERANCE);
-                  if (!verified) incomplete = true;
-                }
-                if (incomplete) setHealth("degraded", "rollback_incomplete");
+                yield* rollbackCompound(ctx);
               }),
           );
         }),
@@ -2413,8 +2602,25 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               ...(maxHeight.kind === "exact" ? { maxHeight: maxHeight.value } : {}),
             };
             if (Object.keys(verifiedConstraints).length > 0) {
-              learning = setVerifiedConstraints(learning, key, verifiedConstraints);
-              syncProfiles();
+              const previousLearning = learning;
+              const previousPersistedLearning = persistedLearning;
+              const previousObservationRevision = observationRevision;
+              const previousObservationStoreFailed = observationStoreFailed;
+              const previousDirty = learningDirty;
+              setLearning(setVerifiedConstraints(learning, key, verifiedConstraints));
+              const persisted = yield* Effect.either(persistLearning());
+              if (persisted._tag === "Left") {
+                learning = previousLearning;
+                persistedLearning = previousPersistedLearning;
+                observationRevision = previousObservationRevision;
+                observationStoreFailed = previousObservationStoreFailed;
+                learningDirty = previousDirty;
+                syncProfiles();
+                return yield* Effect.fail(new CommandError({
+                  code: "internal_error",
+                  message: `observation persistence failed: ${persisted.left.message}`,
+                }));
+              }
               profileUpdated = true;
             }
           }
@@ -2915,7 +3121,13 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                       width: command.size.width,
                       height: command.size.height,
                     };
-            const outcome = yield* Effect.either(writeFrame(command.windowId, target));
+            const outcome = yield* runExclusive(
+              Effect.gen(function* () {
+                const written = yield* Effect.either(writeFrame(command.windowId, target));
+                yield* persistLearningBestEffort();
+                return written;
+              }),
+            );
             if (outcome._tag === "Left") {
               return yield* Effect.fail(
                 new CommandError({
@@ -2991,6 +3203,29 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             else setHealth("degraded", "config_invalid");
           } else {
             setHealth("degraded", "config_unavailable");
+          }
+
+          if (observationStore !== undefined) {
+            fibers.push(
+              yield* Stream.runForEach(
+                observationStore.changes(observationRevision),
+                (snapshot) => Effect.gen(function* () {
+                  const installed = yield* Effect.either(
+                    runExclusive(installObservationSnapshot(snapshot)),
+                  );
+                  if (installed._tag === "Left") {
+                    setHealth("degraded", `observation_store_${installed.left.code}`);
+                    return;
+                  }
+                  if (installed.right) yield* gatedReconcile();
+                }),
+              ).pipe(
+                Effect.catchAll((error) => Effect.sync(() => {
+                  setHealth("degraded", `observation_store_${error.code}`);
+                })),
+                Effect.forkDaemon,
+              ),
+            );
           }
 
           // Hotload: delta-reload each change; invalid candidate keeps prior.

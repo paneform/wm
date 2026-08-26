@@ -22,6 +22,15 @@ the sidecar once and native keybind actions travel over its existing IPC pipe;
 skhd must remain disabled to avoid duplicate bindings. Config changes hotload
 without restarting the service.
 
+Learned geometry profiles and pending evidence are stored at
+`${WM_OBSERVATIONS:-${XDG_STATE_HOME:-~/.local/state}/wm/observations.json}`. The
+daemon loads this catalog before its first layout and watches atomic replacements
+for external corrections. A concurrent writer must use the adjacent
+`observations.json.lock` protocol and compare the content revision; direct editing is
+safe only while the daemon is stopped. A stale lock is not stolen automatically because
+doing so could admit two writers; remove it only after confirming its recorded PID is
+gone. An invalid startup file is renamed with a `.corrupt-<timestamp>` suffix and rebuilt.
+
 The launchd-owned native host launches one TypeScript child over private inherited
 protocol pipes. That child also runs the SketchyBar publisher, which converts
 TypeScript state to the existing bar snapshot shape and triggers

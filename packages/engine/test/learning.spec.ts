@@ -127,6 +127,26 @@ describe("work-area-flushing clamps NEVER learn", () => {
     expect(result.store.profiles.size).toBe(0);
     expect(result.store.pending.get(profileKeyString(KEY_A))).toBeUndefined();
   });
+
+  test("repeated trailing-edge maximum evidence never becomes pending or promoted", () => {
+    const scan = candidatesFrom({
+      outcome: "stableClamp",
+      requested: f(789, 38, 1000, 900),
+      observed: f(789, 38, 723, 900),
+      initial: f(0, 38, 723, 900),
+      workArea: f(0, 38, 1512, 944),
+      tolerance: 1,
+      confirmed: true,
+    });
+    let store = emptyLearningStore();
+    for (let sample = 0; sample < 3; sample += 1) {
+      store = recordCandidates(store, KEY_A, scan.candidates).store;
+    }
+
+    expect(scan.candidates).toEqual([]);
+    expect(store.pending.get(profileKeyString(KEY_A))).toBeUndefined();
+    expect(store.profiles.get(profileKeyString(KEY_A))).toBeUndefined();
+  });
 });
 
 describe("monotone tightening of learned bounds", () => {

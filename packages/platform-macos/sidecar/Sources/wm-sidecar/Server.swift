@@ -377,7 +377,7 @@ final class SidecarServer {
         observed: write.observed, stable: write.stable,
         stableReads: write.stableReads, error: nil)
     } catch let error as AdapterError {
-      return batchFailure(operation, code: error.wireCode, detail: "batch operation failed")
+      return batchFailure(operation, code: error.wireCode, detail: "batch operation failed (\(error.wireCode))")
     } catch {
       return batchFailure(operation, code: "rejected", detail: "batch operation failed")
     }

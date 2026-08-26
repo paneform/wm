@@ -140,7 +140,7 @@ describe("classifyWrite outcomes", () => {
 });
 
 describe("learning guards on the write pipeline (±2pt flush, initial frame)", () => {
-  test(`observation flush with any work-area edge within ${WORK_AREA_FLUSH_GUARD_PT} pt is skipped`, () => {
+  test(`minimum observation flush with any work-area edge within ${WORK_AREA_FLUSH_GUARD_PT} pt is skipped`, () => {
     const scan = learnScan({
       outcome: "stableClamp",
       requested: f(0, 38, 1400, 900),
@@ -152,6 +152,61 @@ describe("learning guards on the write pipeline (±2pt flush, initial frame)", (
     expect(scan.skipped).toEqual([
       { axis: "width", direction: "min", value: 1512, reason: "work_area_flush" },
       { axis: "height", direction: "min", value: 944, reason: "work_area_flush" },
+    ]);
+  });
+
+  test("a leading-edge tile can teach an interior maximum", () => {
+    const scan = learnScan({
+      outcome: "stableClamp",
+      requested: f(0, 32, 1512, 950),
+      observed: f(0, 32, 723, 950),
+      initial: f(-722, 930, 723, 950),
+      workArea: f(0, 32, 1512, 950),
+      confirmed: true,
+    });
+
+    expect(scan.candidates).toEqual([{ axis: "width", direction: "max", value: 723 }]);
+    expect(scan.skipped).toEqual([]);
+  });
+
+  test("a trailing-edge maximum remains protected as display-clamped evidence", () => {
+    const scan = learnScan({
+      outcome: "stableClamp",
+      requested: f(789, 32, 1000, 950),
+      observed: f(789, 32, 723, 950),
+      initial: f(0, 32, 723, 950),
+      workArea: f(0, 32, 1512, 950),
+      confirmed: true,
+    });
+
+    expect(scan.candidates).toEqual([]);
+    expect(scan.skipped).toEqual([
+      { axis: "width", direction: "max", value: 723, reason: "work_area_flush" },
+    ]);
+  });
+
+  test("a top-edge tile can teach an interior maximum height", () => {
+    const accepted = learnScan({
+      outcome: "stableClamp",
+      requested: f(100, 32, 600, 950),
+      observed: f(100, 32, 600, 700),
+      initial: f(100, 282, 600, 700),
+      workArea: f(0, 32, 1512, 950),
+      confirmed: true,
+    });
+    const bottomClamped = learnScan({
+      outcome: "stableClamp",
+      requested: f(100, 282, 600, 950),
+      observed: f(100, 282, 600, 700),
+      initial: f(100, 32, 600, 700),
+      workArea: f(0, 32, 1512, 950),
+      confirmed: true,
+    });
+
+    expect(accepted.candidates).toEqual([{ axis: "height", direction: "max", value: 700 }]);
+    expect(bottomClamped.candidates).toEqual([]);
+    expect(bottomClamped.skipped).toEqual([
+      { axis: "height", direction: "max", value: 700, reason: "work_area_flush" },
     ]);
   });
 
