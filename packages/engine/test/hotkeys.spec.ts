@@ -253,9 +253,58 @@ describe("moveFocusedWorkspaceToNextDisplay", () => {
 
     const after = await h.snapshot();
     const wsAfter = workspaceOf(after, "1");
+    expect(after.epoch).toBe(before.epoch);
     expect(wsAfter?.visibleOnDisplay).toBe(wsBefore?.visibleOnDisplay);
     expect(wsAfter?.pinnedDisplayOverride).toBe(wsBefore?.pinnedDisplayOverride);
     expect(h.fake.writes().length).toBe(writesBefore); // no geometry churn
+  });
+
+  test("moves the workspace containing an externally focused window", async () => {
+    const h = await bootstrap();
+    const docker = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    await h.run({ type: "reconcile" });
+    await h.run({ type: "moveWindowToWorkspace", windowId: docker, workspace: "D" });
+    await h.run({
+      type: "moveWorkspaceToDisplay",
+      workspace: "D",
+      displayId: "display:sim-primary",
+    });
+    expect((await h.snapshot()).focusedWorkspace).not.toBe("D");
+
+    h.fake.focusWindowExternal(docker);
+    await h.run({ type: "reconcile" });
+    await h.run({ type: "moveFocusedWorkspaceToNextDisplay" });
+
+    const snap = await h.snapshot();
+    expect(workspaceOf(snap, "D")?.visibleOnDisplay).toBe("display:sim-left");
+    expect(workspaceOf(snap, "D")?.pinnedDisplayOverride).toBe("display:sim-left");
+    expect(workspaceOf(snap, "1")?.pinnedDisplayOverride).toBeNull();
+
+    await h.run({
+      type: "moveWorkspaceToDisplay",
+      workspace: "1",
+      displayId: "display:sim-left",
+    });
+    const displaced = await h.snapshot();
+    expect(workspaceOf(displaced, "D")?.visibleOnDisplay).toBeNull();
+    expect(workspaceOf(displaced, "D")?.pinnedDisplayOverride).toBe("display:sim-left");
+
+    const terminal = h.fake.addWindow(makeWindow({ x: 200, y: 200 }));
+    await h.run({ type: "reconcile" });
+    await h.run({ type: "moveWindowToWorkspace", windowId: terminal, workspace: "T" });
+    await h.run({
+      type: "moveWorkspaceToDisplay",
+      workspace: "T",
+      displayId: "display:sim-primary",
+    });
+    h.fake.focusWindowExternal(terminal);
+    await h.run({ type: "reconcile" });
+    await h.run({ type: "moveFocusedWindowToWorkspace", workspace: "D" });
+
+    const moved = await h.snapshot();
+    expect(moved.windows.find((window) => window.id === terminal)?.workspace).toBe("D");
+    expect(workspaceOf(moved, "D")?.visibleOnDisplay).toBe("display:sim-left");
+    expect(h.fake.frameOf(terminal)?.x).toBeLessThan(0);
   });
 });
 
@@ -1637,6 +1686,46 @@ describe("pending focus signal observed by waiting command (final issue 4)", () 
     // stale origin w1 would have wrapped right back to w2.
     expect(h.fake.focusedWindowId()).toBe(w1);
     expect((await h.snapshot()).focusedWindow).toBe(w1);
+  });
+
+  test("queued workspace move resolves the workspace from the pending focus signal", async () => {
+    const gate = makeGate();
+    const h = await bootstrap(undefined, gate.wrapper);
+    const docker = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const primary = h.fake.addWindow(makeWindow({ x: 900, y: 100 }));
+    await h.run({ type: "reconcile" });
+    await h.run({ type: "moveWindowToWorkspace", windowId: docker, workspace: "D" });
+    await h.run({
+      type: "moveWorkspaceToDisplay",
+      workspace: "D",
+      displayId: "display:sim-primary",
+    });
+    expect((await h.snapshot()).focusedWorkspace).not.toBe("D");
+    h.fake.focusWindowExternal(primary);
+    await h.run({ type: "reconcile" });
+    expect((await h.snapshot()).focusedWindow).toBe(primary);
+
+    DEADLINE.deadlineMs = 4000;
+    const dockerFrame = (await frameOf(h, docker))!;
+    gate.arm((id, op) => id === docker && op === "frame");
+    const heldWrite = h.run({
+      type: "setWindowFrame",
+      windowId: docker,
+      frame: { ...dockerFrame, width: dockerFrame.width - 30 },
+    });
+    await waitFor(() => gate.isSuspended());
+
+    h.fake.emitFocusEvent(docker);
+    const queuedMove = h.run({ type: "moveFocusedWorkspaceToNextDisplay" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    gate.resume();
+    await Promise.all([heldWrite, queuedMove]);
+    DEADLINE.deadlineMs = 3;
+
+    const snap = await h.snapshot();
+    expect(workspaceOf(snap, "D")?.visibleOnDisplay).toBe("display:sim-left");
+    expect(workspaceOf(snap, "D")?.pinnedDisplayOverride).toBe("display:sim-left");
+    expect(workspaceOf(snap, "1")?.pinnedDisplayOverride).toBeNull();
   });
 });
 

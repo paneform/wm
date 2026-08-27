@@ -1629,7 +1629,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
      * Execute a compound command transactionally (see block comment above).
      */
     const executeCompound = (
-      trackedIds: readonly WindowId[],
+      trackedIds: readonly WindowId[] | (() => readonly WindowId[] | null),
       reduce: (tools: {
         intents: CompoundIntent[];
         buffer: BufferedEvent[];
@@ -1645,7 +1645,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           // required affected window that is missing/unreadable fails
           // inventory_stale with ZERO mutations performed.
           const preFrames: CapturedFrame[] = [];
-          for (const id of trackedIds) {
+          const capturedIds = typeof trackedIds === "function" ? trackedIds() : trackedIds;
+          if (capturedIds === null) return;
+          for (const id of capturedIds) {
             const current = yield* Effect.either(adapter.getWindow(id));
             if (current._tag === "Left" || current.right === null) {
               return yield* Effect.fail(
@@ -2039,6 +2041,17 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           }),
         );
       });
+
+    const focusedWorkspaceForCommand = (): WorkspaceState | undefined => {
+      const focused = logicalFocusedObservation() ?? anyFocusedObservation();
+      const containing = focused === null
+        ? undefined
+        : workspaceContainingIn(world, focused.id);
+      if (containing !== undefined) return containing;
+      return world.focusedWorkspace === null
+        ? undefined
+        : world.workspaces.get(world.focusedWorkspace);
+    };
 
     interface DirectionContext {
       readonly workspaceName: WorkspaceName;
@@ -2745,55 +2758,72 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             break;
           }
           case "moveFocusedWorkspaceToNextDisplay": {
-            const wsName = world.focusedWorkspace;
-            const ws = wsName === null ? undefined : world.workspaces.get(wsName);
-            if (wsName === null || ws === undefined) {
-              return yield* Effect.fail(
-                new CommandError({ code: "workspace_not_found", message: "no focused workspace" }),
-              );
-            }
-            const displays = world.topology.displays;
-            if (displays.length === 0) {
-              return yield* Effect.fail(
-                new CommandError({
-                  code: "topology_unstable",
-                  message: "no connected displays",
-                }),
-              );
-            }
-            // A single display cycles onto itself: succeed without mutating.
-            if (displays.length > 1) {
-              const currentId =
-                ws.visibleOnDisplay ?? ws.pinnedDisplayOverride ?? ws.preferredDisplay;
-              // Canonical order = topology observation order (adapter-delivered).
-              // An unknown/stale current display cycles to index 0.
-              const currentIndex = displays.findIndex((d) => d.id === currentId);
-              const next = displays[(currentIndex + 1 + displays.length) % displays.length]!;
-              const displaced = [...world.workspaces.values()].find(
-                (w) => w.name !== wsName && w.visibleOnDisplay === next.id,
-              );
-              const affected = Array.from(
-                new Set([
-                  ...memberIdsOf(wsName),
-                  ...(displaced ? memberIdsOf(displaced.name) : []),
-                  ...occupantIdsOfDisplay(next.id),
-                ]),
-              );
-              yield* executeCompound(affected, ({ intents }) => (w0) => {
-                let w = ensureWorkspaceIn(w0, wsName);
-                w = {
-                  ...w,
-                  workspaces: new Map(w.workspaces).set(wsName, {
-                    ...(w.workspaces.get(wsName)!),
-                    pinnedDisplayOverride: next.id,
+            let selectedWorkspaceName: WorkspaceName | null = null;
+            let selectedDisplayId: DisplayId | null = null;
+            let capturedDisplayIds = "";
+            yield* executeCompound(
+              () => {
+                const selected = focusedWorkspaceForCommand();
+                selectedWorkspaceName = selected?.name ?? null;
+                capturedDisplayIds = world.topology.displays.map((display) => display.id).join("\0");
+                if (selected === undefined || world.topology.displays.length === 0) return [];
+                if (world.topology.displays.length === 1) return null;
+                const currentId =
+                  selected.visibleOnDisplay ??
+                  selected.pinnedDisplayOverride ??
+                  selected.preferredDisplay;
+                const currentIndex = world.topology.displays.findIndex(
+                  (display) => display.id === currentId,
+                );
+                selectedDisplayId = world.topology.displays[
+                  (currentIndex + 1 + world.topology.displays.length) % world.topology.displays.length
+                ]!.id;
+                const displaced = [...world.workspaces.values()].find(
+                  (workspace) =>
+                    workspace.name !== selected.name &&
+                    workspace.visibleOnDisplay === selectedDisplayId,
+                );
+                return Array.from(
+                  new Set([
+                    ...memberIdsOf(selected.name),
+                    ...(displaced === undefined ? [] : memberIdsOf(displaced.name)),
+                    ...occupantIdsOfDisplay(selectedDisplayId),
+                  ]),
+                );
+              },
+              ({ intents }) => (w0) => {
+                if (selectedWorkspaceName === null || selectedDisplayId === null) return w0;
+                const ws = w0.workspaces.get(selectedWorkspaceName);
+                if (ws === undefined) return w0;
+                const w = {
+                  ...w0,
+                  workspaces: new Map(w0.workspaces).set(selectedWorkspaceName, {
+                    ...ws,
+                    pinnedDisplayOverride: selectedDisplayId,
                   }),
                 };
-                void intents;
-                return revealIn(w, intents, wsName, next.id);
-              });
-            } else {
-              // Single-display cycle is a documented true no-op.
-            }
+                return revealIn(w, intents, selectedWorkspaceName, selectedDisplayId);
+              },
+              (draft) => {
+                if (selectedWorkspaceName === null || !draft.workspaces.has(selectedWorkspaceName)) {
+                  return new CommandError({
+                    code: "workspace_not_found",
+                    message: "no focused workspace",
+                  });
+                }
+                return draft.topology.displays.length === 0
+                  ? new CommandError({
+                      code: "topology_unstable",
+                      message: "no connected displays",
+                    })
+                  : draft.topology.displays.map((display) => display.id).join("\0") !== capturedDisplayIds
+                    ? new CommandError({
+                        code: "topology_unstable",
+                        message: "display topology changed during workspace move",
+                      })
+                    : null;
+              },
+            );
             break;
           }
           case "focusDirection": {
