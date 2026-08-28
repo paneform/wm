@@ -10,7 +10,10 @@
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "eslint src test"
+    "lint": "oxlint src test vitest.config.ts",
+    "lint:fix": "oxlint --fix src test vitest.config.ts",
+    "format": "oxfmt src test vitest.config.ts package.json tsconfig.json .oxlintrc.json .oxfmtrc.json",
+    "format:check": "oxfmt --check src test vitest.config.ts package.json tsconfig.json .oxlintrc.json .oxfmtrc.json"
   },
   "dependencies": {
     "effect": "3.22.1"
@@ -18,6 +21,8 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "fast-check": "^4.9.0",
+    "oxfmt": "0.65.0",
+    "oxlint": "1.80.0",
     "typescript": "^5.9.0",
     "vitest": "^4.1.11"
   }
