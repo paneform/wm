@@ -1,11 +1,11 @@
 ---
 # wm-dux7
 title: TypeScript core rewrite with platform adapter
-status: in-progress
+status: completed
 type: milestone
 priority: normal
 created_at: 2026-08-23T11:24:01Z
-updated_at: 2026-08-28T19:18:56Z
+updated_at: 2026-08-28T19:19:14Z
 ---
 
 Rebuild wm on a new architecture: portable TypeScript layout engine core using Effect.ts rules + probes, validated with Effect Schema; dumb macOS-specific adapter translating observations/events and commands; headless test suite covering known platform edge cases; TS CLI + WebSocket as thin wrappers over one command execution layer; web-based renderer for visualization/debugging of edge cases across multiple pseudo-displays.
@@ -43,9 +43,13 @@ platforms (per-axis continuous clamp model).
 - [x] Run full workspace tests
 - [x] Run workspace lint and formatting checks
 - [x] Run workspace typechecks and builds
-- [ ] Fast-forward main to the validated TypeScript rewrite
-- [ ] Confirm main points at the validated commit
+- [x] Fast-forward main to the validated TypeScript rewrite
+- [x] Confirm main points at the validated commit
 
 ## Final Validation
 
 Validated on 2026-08-28 with pnpm test, pnpm lint, pnpm typecheck, pnpm build, and the engine formatting check. Fixed stale ESLint scripts by standardizing the remaining TypeScript packages on Oxlint and cleared all reported warnings before merge.
+
+## Merge Result
+
+Fast-forwarded main to rewrite/typescript-core at commit 53435ec. Both branch references were verified to point to the same commit.
