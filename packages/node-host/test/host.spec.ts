@@ -27,29 +27,46 @@ describe("stripJsonc", () => {
 });
 
 describe("SketchyBar compatibility", () => {
-  test("groups workspaces by stable display intent and preserves native display ids", () => {
+  test("groups workspaces by actual display state and preserves native display ids", () => {
     const snapshot = {
       health: "healthy",
       focusedWorkspace: "T",
       topology: [
-        { id: "display:built-in", nativeId: "1", primary: true },
-        { id: "display:dell", nativeId: "4", primary: false },
+        {
+          id: "display:built-in",
+          nativeId: "1",
+          primary: true,
+          frame: { x: 0, y: 0, width: 1512, height: 982 },
+        },
+        {
+          id: "display:dell",
+          nativeId: "4",
+          primary: false,
+          frame: { x: 1512, y: 0, width: 1920, height: 1080 },
+        },
       ],
-      windows: [{ id: "w1", executablePath: "/Applications/Ghostty.app/Contents/MacOS/ghostty" }],
+      windows: [
+        {
+          id: "w1",
+          executablePath: "/Applications/Ghostty.app/Contents/MacOS/ghostty",
+          // Hidden workspace T is parked with a one-point strip on the built-in display.
+          frame: { x: -1511, y: 930, width: 1512, height: 950 },
+        },
+      ],
       workspaces: [
         { name: "1", members: [], floating: [], preferredDisplay: "display:built-in", visibleOnDisplay: null, pinnedDisplayOverride: null },
-        { name: "T", members: ["w1"], floating: [], preferredDisplay: "display:dell", visibleOnDisplay: "display:dell", pinnedDisplayOverride: null },
+        { name: "T", members: ["w1"], floating: [], preferredDisplay: "display:dell", visibleOnDisplay: null, pinnedDisplayOverride: "display:dell" },
       ],
     } as unknown as StateSnapshot;
 
     expect(legacySketchybarSnapshot(snapshot)).toMatchObject({
       focused_workspace_name: "T",
       displays: [
-        { identifiers: { cg_direct_display_id: "1" }, workspaces: [{ name: "1" }] },
         {
-          identifiers: { cg_direct_display_id: "4" },
-          workspaces: [{ name: "T", windows: [{ app_name: "ghostty" }] }],
+          identifiers: { cg_direct_display_id: "1" },
+          workspaces: [{ name: "1" }, { name: "T", windows: [{ app_name: "ghostty" }] }],
         },
+        { identifiers: { cg_direct_display_id: "4" }, workspaces: [] },
       ],
     });
   });
