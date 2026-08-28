@@ -1,11 +1,6 @@
 import { Effect } from "effect";
 import type { PlatformAdapter, Clock } from "./platform.ts";
-import type {
-  Capabilities,
-  Frame,
-  WindowId,
-  WindowObservation,
-} from "./schema.ts";
+import type { Capabilities, Frame, WindowId, WindowObservation } from "./schema.ts";
 import {
   PROBE_DELTA,
   PROBE_MATCH_THRESHOLD,
@@ -64,11 +59,12 @@ const readWindow = (
   id: WindowId,
 ): Effect.Effect<WindowObservation, ProbeError> =>
   Effect.flatMap(
-    Effect.mapError(adapter.getWindow(id), (e): ProbeError => ({ kind: "platform", detail: e.detail ?? "readback failed" })),
+    Effect.mapError(adapter.getWindow(id), (e): ProbeError => ({
+      kind: "platform",
+      detail: e.detail ?? "readback failed",
+    })),
     (observed) =>
-      observed === null
-        ? Effect.fail<ProbeError>({ kind: "not_found" })
-        : Effect.succeed(observed),
+      observed === null ? Effect.fail<ProbeError>({ kind: "not_found" }) : Effect.succeed(observed),
   );
 
 const validateIdentity = (
@@ -158,10 +154,9 @@ const writeComponent = (
       () => ({ kind: "platform" as const }),
     );
   }
-  return Effect.mapError(
-    adapter.setWindowPosition(id, { x: frame.x, y: frame.y }),
-    () => ({ kind: "platform" as const }),
-  );
+  return Effect.mapError(adapter.setWindowPosition(id, { x: frame.x, y: frame.y }), () => ({
+    kind: "platform" as const,
+  }));
 };
 
 const rejectedOutcome = (dimension: ProbeDimension): DimensionProbeOutcome => ({
@@ -173,11 +168,7 @@ const rejectedOutcome = (dimension: ProbeDimension): DimensionProbeOutcome => ({
   supportsCapability: false,
 });
 
-const otherComponentsMoved = (
-  before: Frame,
-  after: Frame,
-  dimension: ProbeDimension,
-): boolean => {
+const otherComponentsMoved = (before: Frame, after: Frame, dimension: ProbeDimension): boolean => {
   const touched = touchedComponent(dimension);
   const components: FrameComponent[] = ["x", "y", "width", "height"];
   return components.some(
@@ -201,9 +192,7 @@ const restoreComponent = (
     for (let attempt = 0; attempt < SETTLE_MAX_READS; attempt++) {
       const identityCheck = yield* Effect.either(validateIdentity(adapter, id, identity));
       if (identityCheck._tag === "Left") return false;
-      const written = yield* Effect.either(
-        writeComponent(adapter, id, dimension, originalFrame),
-      );
+      const written = yield* Effect.either(writeComponent(adapter, id, dimension, originalFrame));
       if (written._tag === "Left") return false;
       const settled = yield* Effect.either(settleRead(adapter, clock, id));
       if (settled._tag === "Left") return false;

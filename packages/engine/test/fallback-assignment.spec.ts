@@ -120,4 +120,5 @@ describe("unmatched normal-window fallback assignment", () => {
 const execute = (
   engine: { execute(command: Command): Effect.Effect<CommandResult, unknown> },
   command: Command,
-): Promise<CommandResult> => Effect.runPromise(engine.execute(command) as Effect.Effect<CommandResult>);
+): Promise<CommandResult> =>
+  Effect.runPromise(engine.execute(command) as Effect.Effect<CommandResult>);

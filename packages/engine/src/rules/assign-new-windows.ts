@@ -1,4 +1,12 @@
-import { insertLeaf, firstLeaf, planLayout, contentRect, tiledMembers, constraintsResolver, isEmptyTree } from "../layout/bsp.ts";
+import {
+  insertLeaf,
+  firstLeaf,
+  planLayout,
+  contentRect,
+  tiledMembers,
+  constraintsResolver,
+  isEmptyTree,
+} from "../layout/bsp.ts";
 import type { Action } from "../actions.ts";
 import type { Frame } from "../schema.ts";
 import type { World } from "../world.ts";
@@ -28,13 +36,17 @@ export const assignNewWindows: Rule = {
   name: "assign-new-windows",
   applies: (world: World, ctx: RuleContext): boolean => {
     for (const observation of world.windows.values()) {
-      if (!isIgnoredSurface(world, ctx, observation) && findMembership(world, observation.id) === null) {
+      if (
+        !isIgnoredSurface(world, ctx, observation) &&
+        findMembership(world, observation.id) === null
+      ) {
         const tombstone = ctx.tombstones.get(observation.id);
         if (
           tombstone !== undefined &&
           ctx.now - tombstone.at <= 5 * 60 * 1000 &&
           world.workspaces.has(tombstone.workspace)
-        ) continue;
+        )
+          continue;
         return true;
       }
     }
@@ -50,7 +62,8 @@ export const assignNewWindows: Rule = {
         tombstone !== undefined &&
         ctx.now - tombstone.at <= 5 * 60 * 1000 &&
         world.workspaces.has(tombstone.workspace)
-      ) continue;
+      )
+        continue;
       // Only normal windows are auto-placed; transients follow parents (rule 6).
       if (windowClass(observation) === "transient") continue;
 

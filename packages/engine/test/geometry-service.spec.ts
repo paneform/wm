@@ -181,9 +181,7 @@ describe("geometry-service guarded writes", () => {
 
     const exit = await run(adapter);
     expect(Exit.isSuccess(exit)).toBe(true);
-    expect(seen).toEqual([
-      { part: "frame", expected: { fingerprint: '[4242,"AXWindow",null]' } },
-    ]);
+    expect(seen).toEqual([{ part: "frame", expected: { fingerprint: '[4242,"AXWindow",null]' } }]);
   });
 
   test("compound primary succeeds where independent component writes reanchor each other", async () => {
@@ -245,9 +243,7 @@ describe("geometry-service guarded writes", () => {
     ["not_controllable", "rejected"],
   ] as const)("maps observation errorKind %s to %s", async (errorKind, code) => {
     const exit = await run(
-      adapterWith((_part, _expected, current) =>
-        writeResult(TARGET, current.frame, errorKind),
-      ),
+      adapterWith((_part, _expected, current) => writeResult(TARGET, current.frame, errorKind)),
     );
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {

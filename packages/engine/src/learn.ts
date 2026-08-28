@@ -50,15 +50,13 @@ const flushGuard = (
 ): boolean => {
   if (axis === "width") {
     return (
-      (direction === "min" &&
-        Math.abs(observed.x - workArea.x) <= WORK_AREA_FLUSH_GUARD_PT) ||
+      (direction === "min" && Math.abs(observed.x - workArea.x) <= WORK_AREA_FLUSH_GUARD_PT) ||
       Math.abs(observed.x + observed.width - (workArea.x + workArea.width)) <=
         WORK_AREA_FLUSH_GUARD_PT
     );
   }
   return (
-    (direction === "min" &&
-      Math.abs(observed.y - workArea.y) <= WORK_AREA_FLUSH_GUARD_PT) ||
+    (direction === "min" && Math.abs(observed.y - workArea.y) <= WORK_AREA_FLUSH_GUARD_PT) ||
     Math.abs(observed.y + observed.height - (workArea.y + workArea.height)) <=
       WORK_AREA_FLUSH_GUARD_PT
   );
@@ -109,15 +107,11 @@ export function candidatesFrom(input: LearningInput): CandidateScan {
 // Profile store
 // ---------------------------------------------------------------------------
 
-const pendingId = (axis: ConstraintAxis, direction: BoundDirection): string => `${axis}:${direction}`;
+const pendingId = (axis: ConstraintAxis, direction: BoundDirection): string =>
+  `${axis}:${direction}`;
 
 export function profileKeyString(key: ProfileKey): string {
-  return [
-    key.application,
-    key.role,
-    key.subrole ?? "",
-    key.contextFingerprint,
-  ].join("\u0000");
+  return [key.application, key.role, key.subrole ?? "", key.contextFingerprint].join("\u0000");
 }
 
 /** FNV-1a over a string; no crypto dependencies in engine code. */
@@ -189,16 +183,12 @@ const withBound = (
       ? {
           ...constraints,
           minWidth:
-            constraints.minWidth === undefined
-              ? value
-              : Math.max(constraints.minWidth, value),
+            constraints.minWidth === undefined ? value : Math.max(constraints.minWidth, value),
         }
       : {
           ...constraints,
           minHeight:
-            constraints.minHeight === undefined
-              ? value
-              : Math.max(constraints.minHeight, value),
+            constraints.minHeight === undefined ? value : Math.max(constraints.minHeight, value),
         };
   }
   return axis === "width"
@@ -223,9 +213,13 @@ const replaceBound = (
   value: number,
 ): Constraints => {
   if (direction === "min") {
-    return axis === "width" ? { ...constraints, minWidth: value } : { ...constraints, minHeight: value };
+    return axis === "width"
+      ? { ...constraints, minWidth: value }
+      : { ...constraints, minHeight: value };
   }
-  return axis === "width" ? { ...constraints, maxWidth: value } : { ...constraints, maxHeight: value };
+  return axis === "width"
+    ? { ...constraints, maxWidth: value }
+    : { ...constraints, maxHeight: value };
 };
 
 const copyBucket = (
@@ -359,7 +353,12 @@ export function noteExactFrame(
 
   let constraints: Constraints = profile.constraints;
   for (const contradiction of contradictions) {
-    constraints = replaceBound(constraints, contradiction.axis, contradiction.direction, contradiction.value);
+    constraints = replaceBound(
+      constraints,
+      contradiction.axis,
+      contradiction.direction,
+      contradiction.value,
+    );
   }
 
   const pending = new Map(store.pending);
@@ -417,12 +416,10 @@ export function markCooperation(
 // ---------------------------------------------------------------------------
 
 export const isMinViable = (observed: number, bound: number): boolean =>
-  observed + VIABILITY_MARGIN_PT < bound ||
-  Math.abs(observed - bound) < VIABILITY_MARGIN_PT;
+  observed + VIABILITY_MARGIN_PT < bound || Math.abs(observed - bound) < VIABILITY_MARGIN_PT;
 
 export const isMaxViable = (observed: number, bound: number): boolean =>
-  observed - VIABILITY_MARGIN_PT > bound ||
-  Math.abs(observed - bound) < VIABILITY_MARGIN_PT;
+  observed - VIABILITY_MARGIN_PT > bound || Math.abs(observed - bound) < VIABILITY_MARGIN_PT;
 
 /** Filter bounds to those still viable against a live observation. */
 export function viableConstraints(
@@ -459,14 +456,18 @@ export function effectiveConstraints(
     merged = {
       ...merged,
       minWidth:
-        merged.minWidth === undefined ? viable.minWidth : Math.max(merged.minWidth, viable.minWidth),
+        merged.minWidth === undefined
+          ? viable.minWidth
+          : Math.max(merged.minWidth, viable.minWidth),
     };
   }
   if (viable.maxWidth !== undefined) {
     merged = {
       ...merged,
       maxWidth:
-        merged.maxWidth === undefined ? viable.maxWidth : Math.min(merged.maxWidth, viable.maxWidth),
+        merged.maxWidth === undefined
+          ? viable.maxWidth
+          : Math.min(merged.maxWidth, viable.maxWidth),
     };
   }
   if (viable.minHeight !== undefined) {

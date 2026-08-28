@@ -58,12 +58,7 @@ export const WireSnapshot = Schema.Struct({
 });
 export type WireSnapshot = Schema.Schema.Type<typeof WireSnapshot>;
 
-export const WireMessage = Schema.Union(
-  WireRequest,
-  WireResponse,
-  WireEvent,
-  WireSnapshot,
-);
+export const WireMessage = Schema.Union(WireRequest, WireResponse, WireEvent, WireSnapshot);
 export type WireMessage = typeof WireMessage.Type;
 
 export function encodeWireMessage(message: WireMessage): string {

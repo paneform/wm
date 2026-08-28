@@ -86,7 +86,10 @@ const nonNegativeInteger = (value: unknown, name: string): number => {
 
 const nonEmptyString = (value: unknown, name: string): string => {
   if (typeof value !== "string" || value.length === 0 || value.includes("\u0000")) {
-    throw new ObservationStoreError("invalid", `${name} must be a non-empty string without NUL characters`);
+    throw new ObservationStoreError(
+      "invalid",
+      `${name} must be a non-empty string without NUL characters`,
+    );
   }
   return value;
 };
@@ -123,13 +126,15 @@ const decodeConstraints = (value: unknown): Constraints => {
       : { maxHeight: finitePositive(value["maxHeight"], "maxHeight") }),
   };
   if (
-    constraints.minWidth !== undefined && constraints.maxWidth !== undefined &&
+    constraints.minWidth !== undefined &&
+    constraints.maxWidth !== undefined &&
     constraints.minWidth > constraints.maxWidth
   ) {
     throw new ObservationStoreError("invalid", "minWidth cannot exceed maxWidth");
   }
   if (
-    constraints.minHeight !== undefined && constraints.maxHeight !== undefined &&
+    constraints.minHeight !== undefined &&
+    constraints.maxHeight !== undefined &&
     constraints.minHeight > constraints.maxHeight
   ) {
     throw new ObservationStoreError("invalid", "minHeight cannot exceed maxHeight");
@@ -165,7 +170,8 @@ const decodeProfile = (value: unknown): Profile => {
 };
 
 const decodeSamples = (value: unknown): Partial<Record<PendingId, readonly number[]>> => {
-  if (!isObject(value)) throw new ObservationStoreError("invalid", "pending samples must be an object");
+  if (!isObject(value))
+    throw new ObservationStoreError("invalid", "pending samples must be an object");
   assertKnownKeys(value, PENDING_IDS, "pending samples");
   const samples: Partial<Record<PendingId, readonly number[]>> = {};
   for (const id of PENDING_IDS) {
@@ -196,14 +202,16 @@ export function decodeObservationDocument(value: unknown): ObservationDocument {
   const profiles = value["profiles"].map((entry) => {
     const profile = decodeProfile(entry);
     const key = profileKeyString(profile.key);
-    if (profileKeys.has(key)) throw new ObservationStoreError("invalid", `duplicate profile ${key}`);
+    if (profileKeys.has(key))
+      throw new ObservationStoreError("invalid", `duplicate profile ${key}`);
     profileKeys.add(key);
     return profile;
   });
 
   const pendingKeys = new Set<string>();
   const pending = value["pending"].map((entry) => {
-    if (!isObject(entry)) throw new ObservationStoreError("invalid", "pending evidence must be an object");
+    if (!isObject(entry))
+      throw new ObservationStoreError("invalid", "pending evidence must be an object");
     assertKnownKeys(entry, ["key", "samples"], "pending evidence");
     const key = decodeKey(entry["key"]);
     const keyString = profileKeyString(key);
@@ -219,8 +227,14 @@ export function decodeObservationDocument(value: unknown): ObservationDocument {
 
 const keyFromString = (value: string): ProfileKey => {
   const parts = value.split("\u0000");
-  if (parts.length !== 4) throw new ObservationStoreError("invalid", "invalid internal profile key");
-  const [application, role, subrole, contextFingerprint] = parts as [string, string, string, string];
+  if (parts.length !== 4)
+    throw new ObservationStoreError("invalid", "invalid internal profile key");
+  const [application, role, subrole, contextFingerprint] = parts as [
+    string,
+    string,
+    string,
+    string,
+  ];
   return decodeKey({
     application,
     role,
@@ -231,7 +245,7 @@ const keyFromString = (value: string): ProfileKey => {
 
 export function observationDocumentFromLearning(store: LearningStore): ObservationDocument {
   const profiles = [...store.profiles.values()].sort((a, b) =>
-    profileKeyString(a.key).localeCompare(profileKeyString(b.key))
+    profileKeyString(a.key).localeCompare(profileKeyString(b.key)),
   );
   const pending = [...store.pending.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
@@ -282,8 +296,12 @@ const mergeConstraints = (
   }
   const result = merged as Constraints;
   if (
-    (result.minWidth !== undefined && result.maxWidth !== undefined && result.minWidth > result.maxWidth) ||
-    (result.minHeight !== undefined && result.maxHeight !== undefined && result.minHeight > result.maxHeight)
+    (result.minWidth !== undefined &&
+      result.maxWidth !== undefined &&
+      result.minWidth > result.maxWidth) ||
+    (result.minHeight !== undefined &&
+      result.maxHeight !== undefined &&
+      result.minHeight > result.maxHeight)
   ) {
     return { ...local };
   }
@@ -293,12 +311,16 @@ const mergeConstraints = (
 const mergeProfile = (base: Profile, local: Profile, remote: Profile): Profile => ({
   ...remote,
   constraints: mergeConstraints(base.constraints, local.constraints, remote.constraints),
-  sampleCount: sameValue(base.sampleCount, local.sampleCount) ? remote.sampleCount : local.sampleCount,
+  sampleCount: sameValue(base.sampleCount, local.sampleCount)
+    ? remote.sampleCount
+    : local.sampleCount,
   confidence: sameValue(base.confidence, local.confidence) ? remote.confidence : local.confidence,
   correctiveAttemptCount: sameValue(base.correctiveAttemptCount, local.correctiveAttemptCount)
     ? remote.correctiveAttemptCount
     : local.correctiveAttemptCount,
-  cooperative: sameValue(base.cooperative, local.cooperative) ? remote.cooperative : local.cooperative,
+  cooperative: sameValue(base.cooperative, local.cooperative)
+    ? remote.cooperative
+    : local.cooperative,
 });
 
 const confidenceRank: Record<Confidence, number> = { tentative: 0, learned: 1, strong: 2 };
@@ -307,9 +329,10 @@ const mergeAddedProfile = (local: Profile, remote: Profile): Profile => ({
   ...remote,
   constraints: mergeConstraints({}, local.constraints, remote.constraints),
   sampleCount: Math.max(local.sampleCount, remote.sampleCount),
-  confidence: confidenceRank[local.confidence] >= confidenceRank[remote.confidence]
-    ? local.confidence
-    : remote.confidence,
+  confidence:
+    confidenceRank[local.confidence] >= confidenceRank[remote.confidence]
+      ? local.confidence
+      : remote.confidence,
   correctiveAttemptCount: Math.max(local.correctiveAttemptCount, remote.correctiveAttemptCount),
   cooperative: local.cooperative || remote.cooperative,
 });
@@ -333,8 +356,8 @@ export function mergeLearningChanges(
         remoteProfile === undefined
           ? after
           : before === undefined
-          ? mergeAddedProfile(after, remoteProfile)
-          : mergeProfile(before, after, remoteProfile),
+            ? mergeAddedProfile(after, remoteProfile)
+            : mergeProfile(before, after, remoteProfile),
       );
     }
   }

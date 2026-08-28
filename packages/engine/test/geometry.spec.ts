@@ -36,8 +36,7 @@ const f = (x: number, y: number, width: number, height: number): Frame => ({
 const classify = (
   input: Pick<ClassifyInput, "requested" | "observed"> &
     Partial<Omit<ClassifyInput, "requested" | "observed">>,
-): GeometryOutcome =>
-  classifyWrite({ tolerance: DEFAULT_TOLERANCE, stable: true, ...input });
+): GeometryOutcome => classifyWrite({ tolerance: DEFAULT_TOLERANCE, stable: true, ...input });
 
 const learnScan = (
   input: Pick<LearningInput, "outcome" | "requested" | "observed"> &
@@ -54,9 +53,15 @@ const FAR_WORK_AREA = f(-1000, -1000, 9000, 9000);
 
 describe("classifyWrite outcomes", () => {
   test("exact: observed within tolerance of requested", () => {
-    expect(classify({ requested: f(100, 50, 800, 600), observed: f(100, 50, 800, 600) })).toBe("exact");
-    expect(classify({ requested: f(100, 50, 800, 600), observed: f(101, 50, 799, 601) })).toBe("exact");
-    expect(classify({ requested: f(100, 50, 800, 600), observed: f(101, 50, 799, 601), tolerance: 0 })).toBe("failed");
+    expect(classify({ requested: f(100, 50, 800, 600), observed: f(100, 50, 800, 600) })).toBe(
+      "exact",
+    );
+    expect(classify({ requested: f(100, 50, 800, 600), observed: f(101, 50, 799, 601) })).toBe(
+      "exact",
+    );
+    expect(
+      classify({ requested: f(100, 50, 800, 600), observed: f(101, 50, 799, 601), tolerance: 0 }),
+    ).toBe("failed");
   });
 
   test("constrained: matches a KNOWN learned bound with position honored", () => {

@@ -71,9 +71,9 @@ export const AssignWorkspaceDisplayAction = Schema.Struct({
   workspace: Schema.String,
   displayId: Schema.String,
 });
-export interface AssignWorkspaceDisplayAction
-  extends Schema.Schema.Type<typeof AssignWorkspaceDisplayAction>
-{}
+export interface AssignWorkspaceDisplayAction extends Schema.Schema.Type<
+  typeof AssignWorkspaceDisplayAction
+> {}
 
 export const LearnConstraintsAction = Schema.Struct({
   kind: Schema.Literal("learnConstraints"),
@@ -140,4 +140,3 @@ export function dedupeActions(actions: readonly Action[]): Action[] {
   }
   return out;
 }
-

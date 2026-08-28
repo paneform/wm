@@ -1,10 +1,6 @@
 import { Effect, Either, Fiber, Schema, Stream } from "effect";
 import type { ConfigSource, PlatformAdapter, Clock } from "./platform.ts";
-import {
-  TopologyObservation,
-  WindowObservation,
-  windowIdentityFingerprint,
-} from "./schema.ts";
+import { TopologyObservation, WindowObservation, windowIdentityFingerprint } from "./schema.ts";
 import type {
   Constraints,
   DisplayId,
@@ -93,11 +89,7 @@ import { createEventBus, type DomainEvent, type EventBus } from "./events.ts";
 import { RULES } from "./rules/index.ts";
 import type { RuleContext, TombstoneRecord } from "./rules/index.ts";
 import { isSuppressedWhenPaused } from "./rules/respect-pause.ts";
-import {
-  createTransactionQueue,
-  type TransactionQueue,
-  type WorkUnit,
-} from "./transactions.ts";
+import { createTransactionQueue, type TransactionQueue, type WorkUnit } from "./transactions.ts";
 import {
   applyConfigDelta,
   applyConfigFull,
@@ -159,8 +151,8 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
 
     const loadedObservations: Either.Either<ObservationSnapshot | null, ObservationStoreError> =
       observationStore === undefined
-      ? Either.right(null)
-      : yield* Effect.either(observationStore.load());
+        ? Either.right(null)
+        : yield* Effect.either(observationStore.load());
     let observationStoreFailed = loadedObservations._tag === "Left";
     let observationRevision = "memory";
     let initialLearning = emptyLearningStore();
@@ -323,9 +315,12 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
 
     const constraintsFor = (observation: WindowObservation) => {
       const key = profileKeyOfObs(observation);
-      const learnedProfile =
-        key === null ? undefined : world.profiles.get(profileKeyString(key));
-      return effectiveConstraints(observation.constraints, learnedProfile?.constraints, observation.frame);
+      const learnedProfile = key === null ? undefined : world.profiles.get(profileKeyString(key));
+      return effectiveConstraints(
+        observation.constraints,
+        learnedProfile?.constraints,
+        observation.frame,
+      );
     };
 
     const focusSatisfied = (
@@ -339,19 +334,21 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       ) {
         return false;
       }
-      return result.focused === true ||
-        (result.frontmostPid === observation.pid && result.main === true);
+      return (
+        result.focused === true || (result.frontmostPid === observation.pid && result.main === true)
+      );
     };
 
     const refreshWindowAfterStale = (id: WindowId): Effect.Effect<void> =>
       Effect.matchEffect(adapter.getWindow(id), {
         onFailure: () => Effect.void,
-        onSuccess: (current) => Effect.sync(() => {
-          const windows = new Map(world.windows);
-          if (current === null) windows.delete(id);
-          else windows.set(id, current);
-          world = { ...world, windows };
-        }),
+        onSuccess: (current) =>
+          Effect.sync(() => {
+            const windows = new Map(world.windows);
+            if (current === null) windows.delete(id);
+            else windows.set(id, current);
+            world = { ...world, windows };
+          }),
       });
 
     const hasStableSizeClampEvidence = (
@@ -390,9 +387,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           const local = learning;
           const document = yield* Effect.try({
             try: () => observationDocumentFromLearning(local),
-            catch: (error) => error instanceof ObservationStoreError
-              ? error
-              : new ObservationStoreError("invalid", String(error)),
+            catch: (error) =>
+              error instanceof ObservationStoreError
+                ? error
+                : new ObservationStoreError("invalid", String(error)),
           });
           const saved = yield* Effect.either(observationStore.save(observationRevision, document));
           if (saved._tag === "Right") {
@@ -403,9 +401,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 }
                 return learningFromObservationDocument(saved.right.document);
               },
-              catch: (error) => error instanceof ObservationStoreError
-                ? error
-                : new ObservationStoreError("invalid", String(error)),
+              catch: (error) =>
+                error instanceof ObservationStoreError
+                  ? error
+                  : new ObservationStoreError("invalid", String(error)),
             });
             learning = installed;
             persistedLearning = learning;
@@ -424,9 +423,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 }
                 return learningFromObservationDocument(committed.document);
               },
-              catch: (error) => error instanceof ObservationStoreError
-                ? error
-                : new ObservationStoreError("invalid", String(error)),
+              catch: (error) =>
+                error instanceof ObservationStoreError
+                  ? error
+                  : new ObservationStoreError("invalid", String(error)),
             });
             learning = installed;
             persistedLearning = installed;
@@ -450,9 +450,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 }
                 return learningFromObservationDocument(remoteSnapshot.document);
               },
-              catch: (error) => error instanceof ObservationStoreError
-                ? error
-                : new ObservationStoreError("invalid", String(error)),
+              catch: (error) =>
+                error instanceof ObservationStoreError
+                  ? error
+                  : new ObservationStoreError("invalid", String(error)),
             });
             learning = mergeLearningChanges(base, local, remote);
             persistedLearning = remote;
@@ -475,7 +476,8 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           syncProfiles();
           observationStoreFailed = true;
           setHealth("degraded", `observation_store_${error.code}`);
-        }));
+        }),
+      );
 
     const installObservationSnapshot = (
       snapshot: ObservationSnapshot,
@@ -494,9 +496,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           syncProfiles();
           return true;
         },
-        catch: (error) => error instanceof ObservationStoreError
-          ? error
-          : new ObservationStoreError("invalid", String(error)),
+        catch: (error) =>
+          error instanceof ObservationStoreError
+            ? error
+            : new ObservationStoreError("invalid", String(error)),
       });
 
     const learnFrom = (
@@ -603,8 +606,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         tree,
         floating,
         parkedFrames,
-        lastFocusedMember:
-          from.lastFocusedMember === windowId ? null : from.lastFocusedMember,
+        lastFocusedMember: from.lastFocusedMember === windowId ? null : from.lastFocusedMember,
       };
     };
 
@@ -628,7 +630,8 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           : workspace.lastFocusedMember !== null && members.includes(workspace.lastFocusedMember)
             ? workspace.lastFocusedMember
             : members[0];
-      const observedBesideFrame = beside === undefined ? undefined : world.windows.get(beside)?.frame;
+      const observedBesideFrame =
+        beside === undefined ? undefined : world.windows.get(beside)?.frame;
       const insertionHost = insertionDisplay(world, workspace, observedBesideFrame);
       const besideFrame = insertionTargetFrame(
         world,
@@ -773,7 +776,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     const chooseCorner = (
       display: DisplayObservation,
       size: { width: number; height: number },
-    ): { corner: (typeof CORNER_PRIORITY)[number]; visibility: { horizontal: number; vertical: number } } => {
+    ): {
+      corner: (typeof CORNER_PRIORITY)[number];
+      visibility: { horizontal: number; vertical: number };
+    } => {
       for (const corner of CORNER_PRIORITY) {
         const fact = findParkingFact(world.parkingFacts, display, corner);
         const visibility = fact?.visibility ?? defaultParkingVisibility();
@@ -788,9 +794,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     const factFingerprint = (display: DisplayObservation): string =>
       `${display.id}|${display.scale}|${JSON.stringify(display.frame)}|${JSON.stringify(display.workArea)}`;
 
-    const parkMembersOf = (
-      workspaceName: string,
-    ): Effect.Effect<void, StepFailure> =>
+    const parkMembersOf = (workspaceName: string): Effect.Effect<void, StepFailure> =>
       Effect.gen(function* () {
         const workspace = world.workspaces.get(workspaceName);
         if (workspace === undefined) return;
@@ -801,20 +805,24 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           primaryDisplay();
         if (display === undefined) return;
 
-        const members = [
-          ...tiledMembers(workspace.tree),
-          ...[...workspace.floating],
-        ].filter((id) => {
-          if (id === EMPTY_TREE_LEAF) return false;
-          const obs = world.windows.get(id);
-          return obs !== undefined && !obs.minimized && !obs.hidden && classify(obs) !== "transient";
-        });
+        const members = [...tiledMembers(workspace.tree), ...[...workspace.floating]].filter(
+          (id) => {
+            if (id === EMPTY_TREE_LEAF) return false;
+            const obs = world.windows.get(id);
+            return (
+              obs !== undefined && !obs.minimized && !obs.hidden && classify(obs) !== "transient"
+            );
+          },
+        );
 
         for (const id of members) {
           const observation = world.windows.get(id);
           if (observation === undefined) continue;
           const intended = workspace.parkedFrames.get(id);
-          if (intended !== undefined && withinTolerance(observation.frame, intended, PARKING_ACCEPTANCE_PT)) {
+          if (
+            intended !== undefined &&
+            withinTolerance(observation.frame, intended, PARKING_ACCEPTANCE_PT)
+          ) {
             continue; // already at durable intent
           }
 
@@ -833,7 +841,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           if (current !== undefined) {
             commitWorkspace({
               ...current,
-              parkedFrames: new Map(current.parkedFrames).set(id, result.right.frame satisfies Frame),
+              parkedFrames: new Map(current.parkedFrames).set(
+                id,
+                result.right.frame satisfies Frame,
+              ),
             });
           }
           world = {
@@ -850,9 +861,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         }
       });
 
-    const retileVisible = (
-      workspaceName: string,
-    ): Effect.Effect<void, StepFailure> =>
+    const retileVisible = (workspaceName: string): Effect.Effect<void, StepFailure> =>
       Effect.gen(function* () {
         const workspace = world.workspaces.get(workspaceName);
         if (workspace === undefined || workspace.mode !== "bsp") return;
@@ -902,9 +911,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         yield* retileVisible(workspaceName);
       });
 
-    const applyAction = (
-      action: Action,
-    ): Effect.Effect<unknown, StepFailure> =>
+    const applyAction = (action: Action): Effect.Effect<unknown, StepFailure> =>
       Effect.gen(function* () {
         switch (action.kind) {
           case "setFrame":
@@ -923,37 +930,38 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               y: action.point.y,
             });
           }
-          case "focusWindow":
-            {
-              const observation = world.windows.get(action.windowId);
-              if (observation === undefined) {
-                return yield* Effect.fail({
-                  code: "window_not_found",
-                  message: `unknown window ${action.windowId}`,
-                } satisfies StepFailure);
-              }
-              const attempted = yield* Effect.either(
-                adapter.focusWindow(action.windowId, {
-                  fingerprint: windowIdentityFingerprint(observation),
-                }),
-              );
-              if (attempted._tag === "Left") {
-                if (attempted.left.code === "stale") yield* refreshWindowAfterStale(action.windowId);
-                return yield* Effect.fail({
-                  code: attempted.left.code === "stale" ? "inventory_stale" : "window_not_controllable",
-                  message: attempted.left.detail ?? "focus refused",
-                } satisfies StepFailure);
-              }
-              const result = attempted.right;
-              if (!focusSatisfied(result, observation)) {
-                if (result.error?.code === "stale") yield* refreshWindowAfterStale(action.windowId);
-                return yield* Effect.fail({
-                  code: result.error?.code === "stale" ? "inventory_stale" : "window_not_controllable",
-                  message: result.error?.detail ?? "focus refused",
-                } satisfies StepFailure);
-              }
-              return result;
+          case "focusWindow": {
+            const observation = world.windows.get(action.windowId);
+            if (observation === undefined) {
+              return yield* Effect.fail({
+                code: "window_not_found",
+                message: `unknown window ${action.windowId}`,
+              } satisfies StepFailure);
             }
+            const attempted = yield* Effect.either(
+              adapter.focusWindow(action.windowId, {
+                fingerprint: windowIdentityFingerprint(observation),
+              }),
+            );
+            if (attempted._tag === "Left") {
+              if (attempted.left.code === "stale") yield* refreshWindowAfterStale(action.windowId);
+              return yield* Effect.fail({
+                code:
+                  attempted.left.code === "stale" ? "inventory_stale" : "window_not_controllable",
+                message: attempted.left.detail ?? "focus refused",
+              } satisfies StepFailure);
+            }
+            const result = attempted.right;
+            if (!focusSatisfied(result, observation)) {
+              if (result.error?.code === "stale") yield* refreshWindowAfterStale(action.windowId);
+              return yield* Effect.fail({
+                code:
+                  result.error?.code === "stale" ? "inventory_stale" : "window_not_controllable",
+                message: result.error?.detail ?? "focus refused",
+              } satisfies StepFailure);
+            }
+            return result;
+          }
           case "insertWindow":
             // A startup inventory and its matching window_added event can plan
             // concurrently. Preserve the first committed membership.
@@ -968,7 +976,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 observation.id === action.windowId
               ) {
                 const workspace = ensureWorkspace(action.workspace);
-                const surviving = tiledMembers(tombstone.tree).filter((id) => id !== action.windowId);
+                const surviving = tiledMembers(tombstone.tree).filter(
+                  (id) => id !== action.windowId,
+                );
                 if (
                   !tombstone.floating &&
                   surviving.length === tiledMembers(workspace.tree).length &&
@@ -981,7 +991,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                     parkedFrames:
                       tombstone.parkedFrame === null
                         ? workspace.parkedFrames
-                        : new Map(workspace.parkedFrames).set(action.windowId, tombstone.parkedFrame),
+                        : new Map(workspace.parkedFrames).set(
+                            action.windowId,
+                            tombstone.parkedFrame,
+                          ),
                   });
                   tombstones.delete(action.windowId);
                   return;
@@ -1029,16 +1042,11 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           case "learnConstraints": {
             const observation = world.windows.get(action.windowId);
             if (observation !== undefined) {
-              learnFrom(
-                observation,
-                observation.frame,
-                "stableClamp",
-                {
-                  ...observation.frame,
-                  ...(action.minWidth !== undefined ? { width: action.minWidth } : {}),
-                  ...(action.minHeight !== undefined ? { height: action.minHeight } : {}),
-                },
-              );
+              learnFrom(observation, observation.frame, "stableClamp", {
+                ...observation.frame,
+                ...(action.minWidth !== undefined ? { width: action.minWidth } : {}),
+                ...(action.minHeight !== undefined ? { height: action.minHeight } : {}),
+              });
             }
             return;
           }
@@ -1066,9 +1074,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           });
         }
       }
-      return dedupeActions(
-        actions.filter((a) => !(world.paused && isSuppressedWhenPaused(a))),
-      );
+      return dedupeActions(actions.filter((a) => !(world.paused && isSuppressedWhenPaused(a))));
     };
 
     /** Command-visible reconcile failure (review issue 1: propagate, never swallow). */
@@ -1087,8 +1093,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         if (actions.length === 0) return { applied: 0, failure: null };
 
         const steps = actions.map((action) => {
-          const windowId: WindowId | null =
-            "windowId" in action ? action.windowId : null;
+          const windowId: WindowId | null = "windowId" in action ? action.windowId : null;
           const compensatable =
             windowId !== null && (action.kind === "setFrame" || action.kind === "setPosition");
           let previousFrame: Frame | null = null;
@@ -1132,7 +1137,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           return {
             applied: 0,
             failure: {
-              code: submitted.left.code === "queue_full" ? "queue_full" : mapStepCode(submitted.left.code),
+              code:
+                submitted.left.code === "queue_full"
+                  ? "queue_full"
+                  : mapStepCode(submitted.left.code),
               message: "plan submission rejected",
             },
           };
@@ -1177,7 +1185,11 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           return;
         }
 
-        if (windowsResult.right.length === 0 && world.windows.size > 0 && topology.right.displays.length > 0) {
+        if (
+          windowsResult.right.length === 0 &&
+          world.windows.size > 0 &&
+          topology.right.displays.length > 0
+        ) {
           setHealth("degraded", "inventory_stale");
           bus.publish("diagnostic", {
             code: "inventory_unavailable",
@@ -1278,16 +1290,19 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       );
 
     const gatedReconcile = (): Effect.Effect<void> =>
-      Effect.flatMap(Effect.sync(() => !reconciling), (canRun) => {
-        if (!canRun) {
-          // Busy: coalesce this request — the exclusive-section release
-          // applies pending focus signals, clears the flag, and KICKS the
-          // deferred rerun (post-release convergence guarantee).
-          reconcileAgain = true;
-          return Effect.void;
-        }
-        return runExclusive(Effect.ignore(runReconcile()));
-      });
+      Effect.flatMap(
+        Effect.sync(() => !reconciling),
+        (canRun) => {
+          if (!canRun) {
+            // Busy: coalesce this request — the exclusive-section release
+            // applies pending focus signals, clears the flag, and KICKS the
+            // deferred rerun (post-release convergence guarantee).
+            reconcileAgain = true;
+            return Effect.void;
+          }
+          return runExclusive(Effect.ignore(runReconcile()));
+        },
+      );
 
     // ------------------------------------------------------------------
     // Compound command transaction core — pure reducer → scoped plan →
@@ -1567,8 +1582,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         // was already cleared in the draft, so the intent carries it.
         const display = originalDisplayId
           ? displayOfIn(draft, originalDisplayId)
-          : (displayOfIn(draft, ws.visibleOnDisplay ?? ws.pinnedDisplayOverride ?? ws.preferredDisplay) ??
-            primaryDisplayIn(draft));
+          : (displayOfIn(
+              draft,
+              ws.visibleOnDisplay ?? ws.pinnedDisplayOverride ?? ws.preferredDisplay,
+            ) ?? primaryDisplayIn(draft));
         if (display === undefined) {
           if (originalDisplayId !== null) {
             return new CommandError({
@@ -1622,7 +1639,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           draft = {
             ...draft,
             workspaces: new Map(draft.workspaces).set(wsName, {
-              ...(draft.workspaces.get(wsName)!),
+              ...draft.workspaces.get(wsName)!,
               parkedFrames: new Map(ws.parkedFrames).set(id, target),
             }),
           };
@@ -1781,7 +1798,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               const windowsFresh = yield* Effect.either(validatedWindows());
               if (windowsFresh._tag === "Left") {
                 return yield* Effect.fail(
-                  new CommandError({ code: "inventory_stale", message: "window inventory invalid" }),
+                  new CommandError({
+                    code: "inventory_stale",
+                    message: "window inventory invalid",
+                  }),
                 );
               }
               const topoFresh = yield* Effect.either(validatedTopology());
@@ -1836,26 +1856,36 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               const operations: PlatformBatchOperation[] = [
                 ...writeOperations,
                 ...(focusId !== null && focusCapture !== undefined
-                  ? [{
-                      operationId: `focus:${focusId}`,
-                      kind: "focus" as const,
-                      windowId: focusId,
-                      expectedIdentity: focusCapture.expected,
-                      dependsOn: writeOperations
-                        .filter((operation) => operation.windowId === focusId)
-                        .map((operation) => operation.operationId),
-                    }]
+                  ? [
+                      {
+                        operationId: `focus:${focusId}`,
+                        kind: "focus" as const,
+                        windowId: focusId,
+                        expectedIdentity: focusCapture.expected,
+                        dependsOn: writeOperations
+                          .filter((operation) => operation.windowId === focusId)
+                          .map((operation) => operation.operationId),
+                      },
+                    ]
                   : []),
               ];
               const sequentialBatch = () =>
                 Effect.gen(function* () {
                   const results: PlatformBatchOperationResult[] = [];
                   for (const operation of operations) {
-                    const effect = operation.kind === "setFrame"
-                        ? adapter.setWindowFrame(operation.windowId, operation.frame, operation.expectedIdentity)
+                    const effect =
+                      operation.kind === "setFrame"
+                        ? adapter.setWindowFrame(
+                            operation.windowId,
+                            operation.frame,
+                            operation.expectedIdentity,
+                          )
                         : adapter.focusWindow(operation.windowId, operation.expectedIdentity);
                     const outcome = yield* Effect.either(
-                      effect as Effect.Effect<WriteObservation | PlatformFocusResult, PlatformError>,
+                      effect as Effect.Effect<
+                        WriteObservation | PlatformFocusResult,
+                        PlatformError
+                      >,
                     );
                     if (outcome._tag === "Left") {
                       results.push({ operationId: operation.operationId, error: outcome.left });
@@ -1885,7 +1915,11 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 operations.length === 0
                   ? Effect.succeed({ operations: [], completed: 0, failed: 0 })
                   : (adapter.executeBatch?.({ operations }) ?? sequentialBatch()),
-                (error) => new CommandError({ code: mapStepCode(error.code), message: error.detail ?? "native batch failed" }),
+                (error) =>
+                  new CommandError({
+                    code: mapStepCode(error.code),
+                    message: error.detail ?? "native batch failed",
+                  }),
               );
               for (let index = 0; index < built.writes.length; index += 1) {
                 const wr = built.writes[index]!;
@@ -1900,14 +1934,17 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   observed,
                   tolerance,
                 );
-                const rejectedClamp = stableSizeClamp &&
+                const rejectedClamp =
+                  stableSizeClamp &&
                   (batchResult.error?.code === "rejected" ||
                     batchResult.error?.code === "not_controllable");
                 if (batchResult.error !== undefined && !rejectedClamp) {
-                  return yield* Effect.fail(new CommandError({
-                    code: mapStepCode(batchResult.error.code),
-                    message: `window ${wr.windowId}: ${batchResult.error.detail ?? "native batch operation failed"}`,
-                  }));
+                  return yield* Effect.fail(
+                    new CommandError({
+                      code: mapStepCode(batchResult.error.code),
+                      message: `window ${wr.windowId}: ${batchResult.error.detail ?? "native batch operation failed"}`,
+                    }),
+                  );
                 }
                 const classifiedOutcome = classifyWrite({
                   requested: wr.frame,
@@ -1921,24 +1958,30 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 });
                 const nativeConfirmedSizeClamp = stableSizeClamp;
                 const outcome = nativeConfirmedSizeClamp ? "stableClamp" : classifiedOutcome;
-                const confirmedStableClamp =
-                  outcome === "stableClamp" && nativeConfirmedSizeClamp;
-                const parkingSafe = wr.parkingDisplayId === undefined || (
-                  !finalDraft.topology.displays.some((display) =>
-                    containsPoint(display.frame, center(observed))) &&
-                  cornerFeasible(observed, wr.parkingDisplayId, finalDraft.topology.displays)
-                );
-                const acceptedInitial = parkingSafe && (
-                  outcome === "exact" || outcome === "constrained" ||
-                  (outcome === "stableClamp" &&
-                    (wr.parkingDisplayId !== undefined || confirmedStableClamp))
-                );
+                const confirmedStableClamp = outcome === "stableClamp" && nativeConfirmedSizeClamp;
+                const parkingSafe =
+                  wr.parkingDisplayId === undefined ||
+                  (!finalDraft.topology.displays.some((display) =>
+                    containsPoint(display.frame, center(observed)),
+                  ) &&
+                    cornerFeasible(observed, wr.parkingDisplayId, finalDraft.topology.displays));
+                const acceptedInitial =
+                  parkingSafe &&
+                  (outcome === "exact" ||
+                    outcome === "constrained" ||
+                    (outcome === "stableClamp" &&
+                      (wr.parkingDisplayId !== undefined || confirmedStableClamp)));
                 const result = acceptedInitial
                   ? { _tag: "Right" as const, right: { frame: observed, outcome } }
-                  : yield* Effect.either(writeFrame(
-                      wr.windowId, wr.frame, wr.tolerance, wr.parkingDisplayId,
-                      finalDraft.topology.displays,
-                    ));
+                  : yield* Effect.either(
+                      writeFrame(
+                        wr.windowId,
+                        wr.frame,
+                        wr.tolerance,
+                        wr.parkingDisplayId,
+                        finalDraft.topology.displays,
+                      ),
+                    );
                 if (result._tag === "Left") {
                   return yield* Effect.fail(
                     new CommandError({
@@ -1984,27 +2027,36 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 applied += 1;
               }
               const focusResult = batch.operations[built.writes.length];
-              const focusObservation = focusId === null ? undefined : finalDraft.windows.get(focusId);
+              const focusObservation =
+                focusId === null ? undefined : finalDraft.windows.get(focusId);
               if (
                 focusResult !== undefined &&
                 focusObservation !== undefined &&
                 !focusSatisfied(focusResult, focusObservation)
               ) {
-                return yield* Effect.fail(new CommandError({
-                  code: mapStepCode(focusResult.error?.code),
-                  message: focusResult.error?.detail ?? `focus ${focusId} failed`,
-                }));
+                return yield* Effect.fail(
+                  new CommandError({
+                    code: mapStepCode(focusResult.error?.code),
+                    message: focusResult.error?.detail ?? `focus ${focusId} failed`,
+                  }),
+                );
               }
               if (focusId !== null && focusResult !== undefined) {
                 focusGeneration += 1;
-                finalDraft = { ...finalDraft, focusIntent: { id: focusId, generation: focusGeneration } };
-                const focusedWorkspace = finalDraft.focusedWorkspace === null
-                  ? undefined : finalDraft.workspaces.get(finalDraft.focusedWorkspace);
+                finalDraft = {
+                  ...finalDraft,
+                  focusIntent: { id: focusId, generation: focusGeneration },
+                };
+                const focusedWorkspace =
+                  finalDraft.focusedWorkspace === null
+                    ? undefined
+                    : finalDraft.workspaces.get(finalDraft.focusedWorkspace);
                 if (focusedWorkspace !== undefined) {
                   finalDraft = {
                     ...finalDraft,
                     workspaces: new Map(finalDraft.workspaces).set(focusedWorkspace.name, {
-                      ...focusedWorkspace, lastFocusedMember: focusId,
+                      ...focusedWorkspace,
+                      lastFocusedMember: focusId,
                     }),
                   };
                 }
@@ -2016,10 +2068,11 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 Effect.gen(function* () {
                   yield* Effect.mapError(
                     persistLearning(),
-                    (error) => new CommandError({
-                      code: "internal_error",
-                      message: `observation persistence failed: ${error.message}`,
-                    }),
+                    (error) =>
+                      new CommandError({
+                        code: "internal_error",
+                        message: `observation persistence failed: ${error.message}`,
+                      }),
                   );
                   ctx.committed = true;
                 }),
@@ -2069,9 +2122,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       const intent = world.focusIntent;
       if (intent === null) return null;
       const observation = world.windows.get(intent.id);
-      return observation !== undefined && classify(observation) === "normal"
-        ? observation
-        : null;
+      return observation !== undefined && classify(observation) === "normal" ? observation : null;
     };
 
     const isMemberOf = (workspace: WorkspaceState, windowId: WindowId): boolean =>
@@ -2142,9 +2193,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
 
     const focusedWorkspaceForCommand = (): WorkspaceState | undefined => {
       const focused = logicalFocusedObservation() ?? anyFocusedObservation();
-      const containing = focused === null
-        ? undefined
-        : workspaceContainingIn(world, focused.id);
+      const containing = focused === null ? undefined : workspaceContainingIn(world, focused.id);
       if (containing !== undefined) return containing;
       return world.focusedWorkspace === null
         ? undefined
@@ -2185,8 +2234,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         const logical = logicalFocusedObservation();
         const observed = anyFocusedObservation();
         const focusedNormal =
-          logical ??
-          (observed !== null && classify(observed) === "normal" ? observed : null);
+          logical ?? (observed !== null && classify(observed) === "normal" ? observed : null);
 
         const fallback =
           workspace.lastFocusedMember !== null &&
@@ -2232,7 +2280,8 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             issues: [...parsed.error.issues],
           };
         }
-        const candidate = mode === "delta" ? applyConfigDelta(config, raw) : applyConfigFull(config, raw);
+        const candidate =
+          mode === "delta" ? applyConfigDelta(config, raw) : applyConfigFull(config, raw);
         if (configSource.prepare !== undefined) {
           const prepared = yield* Effect.either(configSource.prepare(candidate, mode));
           if (prepared._tag === "Left") {
@@ -2278,26 +2327,37 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     const probeWindowLimits = (windowId: WindowId): Effect.Effect<CommandResult, CommandError> =>
       runExclusive(
         Effect.gen(function* () {
-          const initial = yield* Effect.mapError(adapter.getWindow(windowId), (error) =>
-            new CommandError({ code: mapStepCode(error.code), message: error.detail ?? "window read failed" }),
+          const initial = yield* Effect.mapError(
+            adapter.getWindow(windowId),
+            (error) =>
+              new CommandError({
+                code: mapStepCode(error.code),
+                message: error.detail ?? "window read failed",
+              }),
           );
           if (initial === null) {
-            return yield* Effect.fail(new CommandError({
-              code: "window_not_found",
-              message: `unknown window ${windowId}`,
-            }));
+            return yield* Effect.fail(
+              new CommandError({
+                code: "window_not_found",
+                message: `unknown window ${windowId}`,
+              }),
+            );
           }
           if (initial.hidden || initial.minimized || initial.fullscreen) {
-            return yield* Effect.fail(new CommandError({
-              code: "window_not_controllable",
-              message: `window ${windowId} must be non-hidden, non-minimized, and non-fullscreen`,
-            }));
+            return yield* Effect.fail(
+              new CommandError({
+                code: "window_not_controllable",
+                message: `window ${windowId} must be non-hidden, non-minimized, and non-fullscreen`,
+              }),
+            );
           }
           if (classify(initial) !== "normal") {
-            return yield* Effect.fail(new CommandError({
-              code: "window_not_controllable",
-              message: `window ${windowId} is not a controllable normal window`,
-            }));
+            return yield* Effect.fail(
+              new CommandError({
+                code: "window_not_controllable",
+                message: `window ${windowId} is not a controllable normal window`,
+              }),
+            );
           }
 
           const identity = windowIdentityFingerprint(initial);
@@ -2305,21 +2365,29 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           const originalFrame = { ...initial.frame };
           let restorationPending = false;
           let expectedPhysicalFrame = originalFrame;
-          const topology = yield* Effect.mapError(validatedTopology(), (message) =>
-            new CommandError({ code: "topology_unstable", message }),
+          const topology = yield* Effect.mapError(
+            validatedTopology(),
+            (message) => new CommandError({ code: "topology_unstable", message }),
           );
           if (topology.displays.length === 0) {
-            return yield* Effect.fail(new CommandError({
-              code: "topology_unstable",
-              message: "no connected display work areas",
-            }));
+            return yield* Effect.fail(
+              new CommandError({
+                code: "topology_unstable",
+                message: "no connected display work areas",
+              }),
+            );
           }
-          const maxTestWidth = Math.max(...topology.displays.map((display) => display.workArea.width));
-          const maxTestHeight = Math.max(...topology.displays.map((display) => display.workArea.height));
+          const maxTestWidth = Math.max(
+            ...topology.displays.map((display) => display.workArea.width),
+          );
+          const maxTestHeight = Math.max(
+            ...topology.displays.map((display) => display.workArea.height),
+          );
           const topologyKey = JSON.stringify(topology.displays);
           const topologyFingerprint = contextFingerprint(topology);
           const parkedWorkspace = [...world.workspaces.values()].find(
-            (workspace) => workspace.visibleOnDisplay === null && workspace.parkedFrames.has(windowId),
+            (workspace) =>
+              workspace.visibleOnDisplay === null && workspace.parkedFrames.has(windowId),
           );
           const durableParkedFrame = parkedWorkspace?.parkedFrames.get(windowId);
           const parkedCandidates: Array<{
@@ -2353,10 +2421,12 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               }
             }
             if (parkedCandidates.length !== 1) {
-              return yield* Effect.fail(new CommandError({
-                code: "geometry_verification_failed",
-                message: `durable parked intent for ${windowId} cannot be attributed safely`,
-              }));
+              return yield* Effect.fail(
+                new CommandError({
+                  code: "geometry_verification_failed",
+                  message: `durable parked intent for ${windowId} cannot be attributed safely`,
+                }),
+              );
             }
           }
           const parked = parkedCandidates[0];
@@ -2364,13 +2434,21 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           const exactFrame = (a: Frame, b: Frame): boolean =>
             a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
           if (parked === undefined) {
-            return yield* Effect.fail(new CommandError({
-              code: "window_not_controllable",
-              message: `window ${windowId} must have uniquely attributable durable parked intent`,
-            }));
+            return yield* Effect.fail(
+              new CommandError({
+                code: "window_not_controllable",
+                message: `window ${windowId} must have uniquely attributable durable parked intent`,
+              }),
+            );
           }
 
-          type SampleName = "capabilityWidth" | "capabilityHeight" | "minWidth" | "minHeight" | "maxWidth" | "maxHeight";
+          type SampleName =
+            | "capabilityWidth"
+            | "capabilityHeight"
+            | "minWidth"
+            | "minHeight"
+            | "maxWidth"
+            | "maxHeight";
           type PositionDiagnostic = {
             sample: SampleName;
             correction: "verified" | "clamped";
@@ -2392,57 +2470,105 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           const safelyParked = (frame: Frame): boolean => {
             const visibility = retainedVisibility(frame);
             const midpoint = center(frame);
-            const centerOnDisplay = topology.displays.some((display) =>
-              midpoint.x >= display.frame.x && midpoint.x <= display.frame.x + display.frame.width &&
-              midpoint.y >= display.frame.y && midpoint.y <= display.frame.y + display.frame.height);
-            const overlapsOtherDisplay = topology.displays.some((display) => display.id !== parked.display.id &&
-              Math.max(0, Math.min(frame.x + frame.width, display.frame.x + display.frame.width) - Math.max(frame.x, display.frame.x)) *
-                Math.max(0, Math.min(frame.y + frame.height, display.frame.y + display.frame.height) - Math.max(frame.y, display.frame.y)) > 0);
+            const centerOnDisplay = topology.displays.some(
+              (display) =>
+                midpoint.x >= display.frame.x &&
+                midpoint.x <= display.frame.x + display.frame.width &&
+                midpoint.y >= display.frame.y &&
+                midpoint.y <= display.frame.y + display.frame.height,
+            );
+            const overlapsOtherDisplay = topology.displays.some(
+              (display) =>
+                display.id !== parked.display.id &&
+                Math.max(
+                  0,
+                  Math.min(frame.x + frame.width, display.frame.x + display.frame.width) -
+                    Math.max(frame.x, display.frame.x),
+                ) *
+                  Math.max(
+                    0,
+                    Math.min(frame.y + frame.height, display.frame.y + display.frame.height) -
+                      Math.max(frame.y, display.frame.y),
+                  ) >
+                  0,
+            );
             const endpointKeepsCenterOffDisplay =
               visibility.horizontal <= frame.width || visibility.vertical <= frame.height;
-            return visibility.horizontal > 0 && visibility.vertical > 0 &&
-              (visibility.horizontal <= frame.width || frame.width <= parked.visibility.horizontal) &&
+            return (
+              visibility.horizontal > 0 &&
+              visibility.vertical > 0 &&
+              (visibility.horizontal <= frame.width ||
+                frame.width <= parked.visibility.horizontal) &&
               (visibility.vertical <= frame.height || frame.height <= parked.visibility.vertical) &&
-              !centerOnDisplay && !overlapsOtherDisplay && endpointKeepsCenterOffDisplay &&
-              cornerFeasible(frame, parked.display.id, topology.displays);
+              !centerOnDisplay &&
+              !overlapsOtherDisplay &&
+              endpointKeepsCenterOffDisplay &&
+              cornerFeasible(frame, parked.display.id, topology.displays)
+            );
           };
 
           const verifyGuards = (): Effect.Effect<void, CommandError> =>
             Effect.gen(function* () {
-              const currentTopology = yield* Effect.mapError(validatedTopology(), (message) =>
-                new CommandError({ code: "topology_unstable", message }),
+              const currentTopology = yield* Effect.mapError(
+                validatedTopology(),
+                (message) => new CommandError({ code: "topology_unstable", message }),
               );
               if (JSON.stringify(currentTopology.displays) !== topologyKey) {
-                return yield* Effect.fail(new CommandError({
-                  code: "topology_unstable",
-                  message: "display topology changed during limit probe",
-                }));
+                return yield* Effect.fail(
+                  new CommandError({
+                    code: "topology_unstable",
+                    message: "display topology changed during limit probe",
+                  }),
+                );
               }
-              if (contextFingerprint(world.topology) !== topologyFingerprint ||
-                JSON.stringify(world.topology.displays) !== topologyKey) {
-                return yield* Effect.fail(new CommandError({
-                  code: "topology_unstable",
-                  message: "committed topology no longer matches the captured probe topology",
-                }));
+              if (
+                contextFingerprint(world.topology) !== topologyFingerprint ||
+                JSON.stringify(world.topology.displays) !== topologyKey
+              ) {
+                return yield* Effect.fail(
+                  new CommandError({
+                    code: "topology_unstable",
+                    message: "committed topology no longer matches the captured probe topology",
+                  }),
+                );
               }
-              const currentWorkspace = parkedWorkspaceName === undefined
-                ? undefined
-                : world.workspaces.get(parkedWorkspaceName);
+              const currentWorkspace =
+                parkedWorkspaceName === undefined
+                  ? undefined
+                  : world.workspaces.get(parkedWorkspaceName);
               const currentDurableFrame = currentWorkspace?.parkedFrames.get(windowId);
-              const currentParkingFact = world.parkingFacts.find((fact) =>
-                fact.displayId === parked.display.id && fact.corner === parked.corner &&
-                fact.fingerprint === factFingerprint(parked.display));
-              if (currentWorkspace === undefined || currentWorkspace.visibleOnDisplay !== null ||
-                (!tiledMembers(currentWorkspace.tree).includes(windowId) && !currentWorkspace.floating.has(windowId)) ||
-                currentDurableFrame === undefined || !exactFrame(currentDurableFrame, durableParkedFrame!) ||
+              const currentParkingFact = world.parkingFacts.find(
+                (fact) =>
+                  fact.displayId === parked.display.id &&
+                  fact.corner === parked.corner &&
+                  fact.fingerprint === factFingerprint(parked.display),
+              );
+              if (
+                currentWorkspace === undefined ||
+                currentWorkspace.visibleOnDisplay !== null ||
+                (!tiledMembers(currentWorkspace.tree).includes(windowId) &&
+                  !currentWorkspace.floating.has(windowId)) ||
+                currentDurableFrame === undefined ||
+                !exactFrame(currentDurableFrame, durableParkedFrame!) ||
                 currentParkingFact === undefined ||
                 currentParkingFact.visibility.horizontal !== parked.visibility.horizontal ||
                 currentParkingFact.visibility.vertical !== parked.visibility.vertical ||
-                !exactFrame(cornerTarget(parked.display, parked.corner, currentDurableFrame, currentParkingFact.visibility), currentDurableFrame)) {
-                return yield* Effect.fail(new CommandError({
-                  code: "inventory_stale",
-                  message: `workspace membership, visibility, parked intent, or parking fact for ${windowId} changed during limit probe`,
-                }));
+                !exactFrame(
+                  cornerTarget(
+                    parked.display,
+                    parked.corner,
+                    currentDurableFrame,
+                    currentParkingFact.visibility,
+                  ),
+                  currentDurableFrame,
+                )
+              ) {
+                return yield* Effect.fail(
+                  new CommandError({
+                    code: "inventory_stale",
+                    message: `workspace membership, visibility, parked intent, or parking fact for ${windowId} changed during limit probe`,
+                  }),
+                );
               }
             });
 
@@ -2452,44 +2578,71 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           ): Effect.Effect<WindowObservation, CommandError> =>
             Effect.gen(function* () {
               if (checkDiagnosticGuards) yield* verifyGuards();
-              const observation = yield* Effect.mapError(adapter.getWindow(windowId), (error) =>
-                new CommandError({ code: mapStepCode(error.code), message: error.detail ?? "window read failed" }),
+              const observation = yield* Effect.mapError(
+                adapter.getWindow(windowId),
+                (error) =>
+                  new CommandError({
+                    code: mapStepCode(error.code),
+                    message: error.detail ?? "window read failed",
+                  }),
               );
               if (observation === null || windowIdentityFingerprint(observation) !== identity) {
-                return yield* Effect.fail(new CommandError({
-                  code: "inventory_stale",
-                  message: `window ${windowId} identity changed during limit probe`,
-                }));
+                return yield* Effect.fail(
+                  new CommandError({
+                    code: "inventory_stale",
+                    message: `window ${windowId} identity changed during limit probe`,
+                  }),
+                );
               }
-              if (checkDiagnosticGuards && (observation.hidden || observation.minimized || observation.fullscreen ||
-                classify(observation) !== "normal" || observation.capabilities.movable === "fixed" ||
-                observation.capabilities.resizable === "fixed")) {
-                return yield* Effect.fail(new CommandError({
-                  code: "window_not_controllable",
-                  message: `window ${windowId} became hidden, minimized, fullscreen, non-normal, or fixed during limit probe`,
-                }));
+              if (
+                checkDiagnosticGuards &&
+                (observation.hidden ||
+                  observation.minimized ||
+                  observation.fullscreen ||
+                  classify(observation) !== "normal" ||
+                  observation.capabilities.movable === "fixed" ||
+                  observation.capabilities.resizable === "fixed")
+              ) {
+                return yield* Effect.fail(
+                  new CommandError({
+                    code: "window_not_controllable",
+                    message: `window ${windowId} became hidden, minimized, fullscreen, non-normal, or fixed during limit probe`,
+                  }),
+                );
               }
               if (requiredFrame !== undefined && !exactFrame(observation.frame, requiredFrame)) {
-                return yield* Effect.fail(new CommandError({
-                  code: "inventory_stale",
-                  message: `window ${windowId} physical frame drifted during limit probe`,
-                }));
+                return yield* Effect.fail(
+                  new CommandError({
+                    code: "inventory_stale",
+                    message: `window ${windowId} physical frame drifted during limit probe`,
+                  }),
+                );
               }
               return observation;
             });
 
-          const writeAndRead = (frame: Frame, checkDiagnosticGuards = true): Effect.Effect<Frame, CommandError> =>
+          const writeAndRead = (
+            frame: Frame,
+            checkDiagnosticGuards = true,
+          ): Effect.Effect<Frame, CommandError> =>
             Effect.gen(function* () {
               yield* readSame(checkDiagnosticGuards, expectedPhysicalFrame);
               restorationPending = true;
-              const write = yield* Effect.mapError(adapter.setWindowFrame(windowId, frame, expected), (error) =>
-                new CommandError({ code: mapStepCode(error.code), message: error.detail ?? "probe write failed" }),
+              const write = yield* Effect.mapError(
+                adapter.setWindowFrame(windowId, frame, expected),
+                (error) =>
+                  new CommandError({
+                    code: mapStepCode(error.code),
+                    message: error.detail ?? "probe write failed",
+                  }),
               );
               if (!write.stable) {
-                return yield* Effect.fail(new CommandError({
-                  code: "geometry_verification_failed",
-                  message: `window ${windowId} did not settle during limit probe`,
-                }));
+                return yield* Effect.fail(
+                  new CommandError({
+                    code: "geometry_verification_failed",
+                    message: `window ${windowId} did not settle during limit probe`,
+                  }),
+                );
               }
               const observed = (yield* readSame(checkDiagnosticGuards)).frame;
               expectedPhysicalFrame = observed;
@@ -2499,20 +2652,30 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           const restore = (): Effect.Effect<Frame, CommandError> =>
             Effect.gen(function* () {
               yield* readSame(false);
-              const write = yield* Effect.mapError(adapter.setWindowFrame(windowId, originalFrame, expected), (error) =>
-                new CommandError({ code: mapStepCode(error.code), message: error.detail ?? "restore write failed" }));
+              const write = yield* Effect.mapError(
+                adapter.setWindowFrame(windowId, originalFrame, expected),
+                (error) =>
+                  new CommandError({
+                    code: mapStepCode(error.code),
+                    message: error.detail ?? "restore write failed",
+                  }),
+              );
               if (!write.stable) {
-                return yield* Effect.fail(new CommandError({
-                  code: "geometry_verification_failed",
-                  message: `window ${windowId} did not settle while restoring the limit probe`,
-                }));
+                return yield* Effect.fail(
+                  new CommandError({
+                    code: "geometry_verification_failed",
+                    message: `window ${windowId} did not settle while restoring the limit probe`,
+                  }),
+                );
               }
               const restored = (yield* readSame(false)).frame;
               if (!exactFrame(restored, originalFrame)) {
-                return yield* Effect.fail(new CommandError({
-                  code: "geometry_verification_failed",
-                  message: `failed to restore window ${windowId} after limit probe`,
-                }));
+                return yield* Effect.fail(
+                  new CommandError({
+                    code: "geometry_verification_failed",
+                    message: `failed to restore window ${windowId} after limit probe`,
+                  }),
+                );
               }
               expectedPhysicalFrame = originalFrame;
               restorationPending = false;
@@ -2530,255 +2693,349 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               };
               const requested = cornerTarget(parked.display, parked.corner, size, trialVisibility);
               if (!cornerFeasible(requested, parked.display.id, topology.displays)) {
-                return yield* Effect.fail(new CommandError({
-                  code: "geometry_verification_failed",
-                  message: `parked trial for ${windowId} would overlap another display`,
-                }));
-              }
-              const outcome = yield* Effect.either(Effect.gen(function* () {
-                const observed = yield* writeAndRead(requested);
-                const probesWidth = name === "capabilityWidth" || name === "minWidth" || name === "maxWidth";
-                if ((probesWidth && observed.height !== size.height) || (!probesWidth && observed.width !== size.width)) {
-                  return yield* Effect.fail(new CommandError({
+                return yield* Effect.fail(
+                  new CommandError({
                     code: "geometry_verification_failed",
-                    message: `limit probe changed the orthogonal dimension for ${windowId}`,
-                  }));
-                }
-                const correctedTarget = cornerTarget(parked.display, parked.corner, observed, {
-                  horizontal: Math.min(parked.visibility.horizontal, observed.width),
-                  vertical: Math.min(parked.visibility.vertical, observed.height),
-                });
-                if (!cornerFeasible(correctedTarget, parked.display.id, topology.displays)) {
-                  return yield* Effect.fail(new CommandError({
-                    code: "geometry_verification_failed",
-                    message: `clamped parked trial for ${windowId} would overlap another display`,
-                  }));
-                }
-                yield* readSame();
-                const correction = yield* Effect.mapError(
-                  adapter.setWindowPosition(
-                    windowId,
-                    { x: correctedTarget.x, y: correctedTarget.y },
-                    expected,
-                  ),
-                  (error) => new CommandError({
-                    code: mapStepCode(error.code),
-                    message: error.detail ?? "parking correction failed",
+                    message: `parked trial for ${windowId} would overlap another display`,
                   }),
                 );
-                if (!correction.stable) {
-                  return yield* Effect.fail(new CommandError({
-                    code: "geometry_verification_failed",
-                    message: `window ${windowId} did not settle after parking correction`,
-                  }));
-                }
-                const corrected = (yield* readSame()).frame;
-                if (corrected.width !== observed.width || corrected.height !== observed.height) {
-                  return yield* Effect.fail(new CommandError({
-                    code: "geometry_verification_failed",
-                    message: `parking correction changed measured dimensions for ${windowId}`,
-                  }));
-                }
-                if (!safelyParked(corrected)) {
-                  return yield* Effect.fail(new CommandError({
-                    code: "geometry_verification_failed",
-                    message: `parking correction moved ${windowId} onscreen, to another corner, or across displays`,
-                  }));
-                }
-                const correctionStatus = exactFrame(corrected, correctedTarget) ? "verified" as const : "clamped" as const;
-                return {
-                  frame: corrected,
-                  diagnostic: {
-                    sample: name,
-                    correction: correctionStatus,
-                    requestedIdealPoint: { x: correctedTarget.x, y: correctedTarget.y },
-                    observedPoint: { x: corrected.x, y: corrected.y },
-                    idealRetainedVisibility: trialVisibility,
-                    actualRetainedVisibility: retainedVisibility(corrected),
-                  },
-                };
-              }));
+              }
+              const outcome = yield* Effect.either(
+                Effect.gen(function* () {
+                  const observed = yield* writeAndRead(requested);
+                  const probesWidth =
+                    name === "capabilityWidth" || name === "minWidth" || name === "maxWidth";
+                  if (
+                    (probesWidth && observed.height !== size.height) ||
+                    (!probesWidth && observed.width !== size.width)
+                  ) {
+                    return yield* Effect.fail(
+                      new CommandError({
+                        code: "geometry_verification_failed",
+                        message: `limit probe changed the orthogonal dimension for ${windowId}`,
+                      }),
+                    );
+                  }
+                  const correctedTarget = cornerTarget(parked.display, parked.corner, observed, {
+                    horizontal: Math.min(parked.visibility.horizontal, observed.width),
+                    vertical: Math.min(parked.visibility.vertical, observed.height),
+                  });
+                  if (!cornerFeasible(correctedTarget, parked.display.id, topology.displays)) {
+                    return yield* Effect.fail(
+                      new CommandError({
+                        code: "geometry_verification_failed",
+                        message: `clamped parked trial for ${windowId} would overlap another display`,
+                      }),
+                    );
+                  }
+                  yield* readSame();
+                  const correction = yield* Effect.mapError(
+                    adapter.setWindowPosition(
+                      windowId,
+                      { x: correctedTarget.x, y: correctedTarget.y },
+                      expected,
+                    ),
+                    (error) =>
+                      new CommandError({
+                        code: mapStepCode(error.code),
+                        message: error.detail ?? "parking correction failed",
+                      }),
+                  );
+                  if (!correction.stable) {
+                    return yield* Effect.fail(
+                      new CommandError({
+                        code: "geometry_verification_failed",
+                        message: `window ${windowId} did not settle after parking correction`,
+                      }),
+                    );
+                  }
+                  const corrected = (yield* readSame()).frame;
+                  if (corrected.width !== observed.width || corrected.height !== observed.height) {
+                    return yield* Effect.fail(
+                      new CommandError({
+                        code: "geometry_verification_failed",
+                        message: `parking correction changed measured dimensions for ${windowId}`,
+                      }),
+                    );
+                  }
+                  if (!safelyParked(corrected)) {
+                    return yield* Effect.fail(
+                      new CommandError({
+                        code: "geometry_verification_failed",
+                        message: `parking correction moved ${windowId} onscreen, to another corner, or across displays`,
+                      }),
+                    );
+                  }
+                  const correctionStatus = exactFrame(corrected, correctedTarget)
+                    ? ("verified" as const)
+                    : ("clamped" as const);
+                  return {
+                    frame: corrected,
+                    diagnostic: {
+                      sample: name,
+                      correction: correctionStatus,
+                      requestedIdealPoint: { x: correctedTarget.x, y: correctedTarget.y },
+                      observedPoint: { x: corrected.x, y: corrected.y },
+                      idealRetainedVisibility: trialVisibility,
+                      actualRetainedVisibility: retainedVisibility(corrected),
+                    },
+                  };
+                }),
+              );
               const restored = yield* Effect.either(restore());
               if (restored._tag === "Left") {
-                return yield* Effect.fail(new CommandError({
-                  code: "geometry_verification_failed",
-                  message: `limit probe aborted and original frame restoration failed: ${restored.left.message}`,
-                }));
+                return yield* Effect.fail(
+                  new CommandError({
+                    code: "geometry_verification_failed",
+                    message: `limit probe aborted and original frame restoration failed: ${restored.left.message}`,
+                  }),
+                );
               }
               if (outcome._tag === "Left") return yield* Effect.fail(outcome.left);
               return outcome.right;
             });
 
-          return yield* Effect.onExit(Effect.gen(function* () {
-          if (!exactFrame(initial.frame, durableParkedFrame!) || !safelyParked(initial.frame)) {
-            return yield* Effect.fail(new CommandError({
-              code: "inventory_stale",
-              message: `window ${windowId} is no longer physically parked at its durable frame`,
-            }));
-          }
-          const positionNudge = {
-            x: originalFrame.x + (parked.corner === "bottomLeft" || parked.corner === "topLeft" ? 1 : -1),
-            y: originalFrame.y + (parked.corner === "bottomLeft" || parked.corner === "bottomRight" ? -1 : 1),
-          };
-          yield* readSame(true, expectedPhysicalFrame);
-          restorationPending = true;
-          const positionWrite = yield* Effect.mapError(
-            adapter.setWindowPosition(windowId, positionNudge, expected),
-            (error) => new CommandError({ code: mapStepCode(error.code), message: error.detail ?? "capability position write failed" }),
-          );
-          const positionObserved = (yield* readSame()).frame;
-          expectedPhysicalFrame = positionObserved;
-          const positionSupported = positionWrite.stable && positionObserved.x === positionNudge.x &&
-            positionObserved.y === positionNudge.y && positionObserved.width === originalFrame.width &&
-            positionObserved.height === originalFrame.height && safelyParked(positionObserved);
-          const capabilityRestore = yield* Effect.either(restore());
-          if (capabilityRestore._tag === "Left") {
-            return yield* Effect.fail(new CommandError({
-              code: "geometry_verification_failed",
-              message: `capability probe aborted and original frame restoration failed: ${capabilityRestore.left.message}`,
-            }));
-          }
-          if (!positionSupported) {
-            return yield* Effect.fail(new CommandError({
-              code: "window_not_controllable",
-              message: `parked behavioral capability probe found fixed or inconclusive positioning for ${windowId}`,
-            }));
-          }
-
-          let capabilityWidth = yield* sample("capabilityWidth", { width: Math.max(1, originalFrame.width - 1), height: originalFrame.height });
-          if (capabilityWidth.frame.width === originalFrame.width) {
-            capabilityWidth = yield* sample("capabilityWidth", { width: originalFrame.width + 1, height: originalFrame.height });
-          }
-          let capabilityHeight = yield* sample("capabilityHeight", { width: originalFrame.width, height: Math.max(1, originalFrame.height - 1) });
-          if (capabilityHeight.frame.height === originalFrame.height) {
-            capabilityHeight = yield* sample("capabilityHeight", { width: originalFrame.width, height: originalFrame.height + 1 });
-          }
-          const widthResizable = capabilityWidth.frame.width !== originalFrame.width && capabilityWidth.frame.height === originalFrame.height;
-          const heightResizable = capabilityHeight.frame.height !== originalFrame.height && capabilityHeight.frame.width === originalFrame.width;
-          if (!widthResizable || !heightResizable) {
-            return yield* Effect.fail(new CommandError({
-              code: "window_not_controllable",
-              message: `parked behavioral capability probe found fixed or inconclusive sizing for ${windowId}`,
-            }));
-          }
-          const minWidth = yield* sample("minWidth", { width: 1, height: originalFrame.height });
-          const minHeight = yield* sample("minHeight", { width: originalFrame.width, height: 1 });
-          const maxWidthSample = yield* sample("maxWidth", { width: maxTestWidth, height: originalFrame.height });
-          const maxHeightSample = yield* sample("maxHeight", { width: originalFrame.width, height: maxTestHeight });
-          const minWidthFrame = minWidth.frame;
-          const minHeightFrame = minHeight.frame;
-          const maxWidthFrame = maxWidthSample.frame;
-          const maxHeightFrame = maxHeightSample.frame;
-          const positionDiagnostics = [
-            capabilityWidth.diagnostic,
-            capabilityHeight.diagnostic,
-            minWidth.diagnostic,
-            minHeight.diagnostic,
-            maxWidthSample.diagnostic,
-            maxHeightSample.diagnostic,
-          ];
-          const restoredFrame = (yield* readSame()).frame;
-          if (!exactFrame(restoredFrame, originalFrame)) {
-            return yield* Effect.fail(new CommandError({
-              code: "geometry_verification_failed",
-              message: `window ${windowId} was not restored after limit probe`,
-            }));
-          }
-
-          const minWidthFinding = minWidthFrame.width === 1
-            ? ({ kind: "noClampDownTo", value: 1 } as const)
-            : ({ kind: "exact", value: minWidthFrame.width } as const);
-          const minHeightFinding = minHeightFrame.height === 1
-            ? ({ kind: "noClampDownTo", value: 1 } as const)
-            : ({ kind: "exact", value: minHeightFrame.height } as const);
-          const maxWidth = maxWidthFrame.width < maxTestWidth
-            ? ({ kind: "exact", value: maxWidthFrame.width } as const)
-            : ({ kind: "noClampThrough", value: maxTestWidth } as const);
-          const maxHeight = maxHeightFrame.height < maxTestHeight
-            ? ({ kind: "exact", value: maxHeightFrame.height } as const)
-            : ({ kind: "noClampThrough", value: maxTestHeight } as const);
-          const application = initial.bundleId ?? initial.executablePath;
-          const key: ProfileKey | null = application === undefined ? null : {
-            application,
-            role: initial.role,
-            ...(initial.subrole !== undefined ? { subrole: initial.subrole } : {}),
-            contextFingerprint: topologyFingerprint,
-          };
-          let profileUpdated = false;
-          if (key !== null) {
-            const verifiedConstraints = {
-              ...(minWidthFinding.kind === "exact" ? { minWidth: minWidthFinding.value } : {}),
-              ...(minHeightFinding.kind === "exact" ? { minHeight: minHeightFinding.value } : {}),
-              ...(maxWidth.kind === "exact" ? { maxWidth: maxWidth.value } : {}),
-              ...(maxHeight.kind === "exact" ? { maxHeight: maxHeight.value } : {}),
-            };
-            if (Object.keys(verifiedConstraints).length > 0) {
-              const previousLearning = learning;
-              const previousPersistedLearning = persistedLearning;
-              const previousObservationRevision = observationRevision;
-              const previousObservationStoreFailed = observationStoreFailed;
-              const previousDirty = learningDirty;
-              setLearning(setVerifiedConstraints(learning, key, verifiedConstraints));
-              const persisted = yield* Effect.either(persistLearning());
-              if (persisted._tag === "Left") {
-                learning = previousLearning;
-                persistedLearning = previousPersistedLearning;
-                observationRevision = previousObservationRevision;
-                observationStoreFailed = previousObservationStoreFailed;
-                learningDirty = previousDirty;
-                syncProfiles();
-                return yield* Effect.fail(new CommandError({
-                  code: "internal_error",
-                  message: `observation persistence failed: ${persisted.left.message}`,
-                }));
+          return yield* Effect.onExit(
+            Effect.gen(function* () {
+              if (!exactFrame(initial.frame, durableParkedFrame!) || !safelyParked(initial.frame)) {
+                return yield* Effect.fail(
+                  new CommandError({
+                    code: "inventory_stale",
+                    message: `window ${windowId} is no longer physically parked at its durable frame`,
+                  }),
+                );
               }
-              profileUpdated = true;
-            }
-          }
-          return {
-            type: "windowLimitsProbe" as const,
-            windowId,
-            identity,
-            target: {
-              mode: "parked" as const,
-              hostDisplayId: parked.display.id,
-              corner: parked.corner,
-              retainedVisibility: parked.visibility,
-              positionCorrection: positionDiagnostics.some((entry) => entry.correction === "clamped") ? "clamped" as const : "verified" as const,
-            },
-            phases: {
-              capability: "verified",
-              parking: "adoptedVerified",
-              minimumSize: "verified",
-              maximumSize: "verified",
-              restore: "verifiedExact",
-            } as const,
-            capability: { source: "parkedBehavioralProbe", movable: "supported", resizable: "supported" } as const,
-            positionDiagnostics,
-            originalFrame,
-            restoredFrame,
-            restoreStatus: "verifiedExact" as const,
-            testedRanges: {
-              width: { min: 1, max: maxTestWidth },
-              height: { min: 1, max: maxTestHeight },
-            },
-            findings: {
-              minWidth: minWidthFinding,
-              minHeight: minHeightFinding,
-              maxWidth,
-              maxHeight,
-            },
-            profileUpdated,
-          };
-          }), () => restorationPending
-            ? Effect.uninterruptible(restore()).pipe(Effect.ignore)
-            : Effect.void);
+              const positionNudge = {
+                x:
+                  originalFrame.x +
+                  (parked.corner === "bottomLeft" || parked.corner === "topLeft" ? 1 : -1),
+                y:
+                  originalFrame.y +
+                  (parked.corner === "bottomLeft" || parked.corner === "bottomRight" ? -1 : 1),
+              };
+              yield* readSame(true, expectedPhysicalFrame);
+              restorationPending = true;
+              const positionWrite = yield* Effect.mapError(
+                adapter.setWindowPosition(windowId, positionNudge, expected),
+                (error) =>
+                  new CommandError({
+                    code: mapStepCode(error.code),
+                    message: error.detail ?? "capability position write failed",
+                  }),
+              );
+              const positionObserved = (yield* readSame()).frame;
+              expectedPhysicalFrame = positionObserved;
+              const positionSupported =
+                positionWrite.stable &&
+                positionObserved.x === positionNudge.x &&
+                positionObserved.y === positionNudge.y &&
+                positionObserved.width === originalFrame.width &&
+                positionObserved.height === originalFrame.height &&
+                safelyParked(positionObserved);
+              const capabilityRestore = yield* Effect.either(restore());
+              if (capabilityRestore._tag === "Left") {
+                return yield* Effect.fail(
+                  new CommandError({
+                    code: "geometry_verification_failed",
+                    message: `capability probe aborted and original frame restoration failed: ${capabilityRestore.left.message}`,
+                  }),
+                );
+              }
+              if (!positionSupported) {
+                return yield* Effect.fail(
+                  new CommandError({
+                    code: "window_not_controllable",
+                    message: `parked behavioral capability probe found fixed or inconclusive positioning for ${windowId}`,
+                  }),
+                );
+              }
+
+              let capabilityWidth = yield* sample("capabilityWidth", {
+                width: Math.max(1, originalFrame.width - 1),
+                height: originalFrame.height,
+              });
+              if (capabilityWidth.frame.width === originalFrame.width) {
+                capabilityWidth = yield* sample("capabilityWidth", {
+                  width: originalFrame.width + 1,
+                  height: originalFrame.height,
+                });
+              }
+              let capabilityHeight = yield* sample("capabilityHeight", {
+                width: originalFrame.width,
+                height: Math.max(1, originalFrame.height - 1),
+              });
+              if (capabilityHeight.frame.height === originalFrame.height) {
+                capabilityHeight = yield* sample("capabilityHeight", {
+                  width: originalFrame.width,
+                  height: originalFrame.height + 1,
+                });
+              }
+              const widthResizable =
+                capabilityWidth.frame.width !== originalFrame.width &&
+                capabilityWidth.frame.height === originalFrame.height;
+              const heightResizable =
+                capabilityHeight.frame.height !== originalFrame.height &&
+                capabilityHeight.frame.width === originalFrame.width;
+              if (!widthResizable || !heightResizable) {
+                return yield* Effect.fail(
+                  new CommandError({
+                    code: "window_not_controllable",
+                    message: `parked behavioral capability probe found fixed or inconclusive sizing for ${windowId}`,
+                  }),
+                );
+              }
+              const minWidth = yield* sample("minWidth", {
+                width: 1,
+                height: originalFrame.height,
+              });
+              const minHeight = yield* sample("minHeight", {
+                width: originalFrame.width,
+                height: 1,
+              });
+              const maxWidthSample = yield* sample("maxWidth", {
+                width: maxTestWidth,
+                height: originalFrame.height,
+              });
+              const maxHeightSample = yield* sample("maxHeight", {
+                width: originalFrame.width,
+                height: maxTestHeight,
+              });
+              const minWidthFrame = minWidth.frame;
+              const minHeightFrame = minHeight.frame;
+              const maxWidthFrame = maxWidthSample.frame;
+              const maxHeightFrame = maxHeightSample.frame;
+              const positionDiagnostics = [
+                capabilityWidth.diagnostic,
+                capabilityHeight.diagnostic,
+                minWidth.diagnostic,
+                minHeight.diagnostic,
+                maxWidthSample.diagnostic,
+                maxHeightSample.diagnostic,
+              ];
+              const restoredFrame = (yield* readSame()).frame;
+              if (!exactFrame(restoredFrame, originalFrame)) {
+                return yield* Effect.fail(
+                  new CommandError({
+                    code: "geometry_verification_failed",
+                    message: `window ${windowId} was not restored after limit probe`,
+                  }),
+                );
+              }
+
+              const minWidthFinding =
+                minWidthFrame.width === 1
+                  ? ({ kind: "noClampDownTo", value: 1 } as const)
+                  : ({ kind: "exact", value: minWidthFrame.width } as const);
+              const minHeightFinding =
+                minHeightFrame.height === 1
+                  ? ({ kind: "noClampDownTo", value: 1 } as const)
+                  : ({ kind: "exact", value: minHeightFrame.height } as const);
+              const maxWidth =
+                maxWidthFrame.width < maxTestWidth
+                  ? ({ kind: "exact", value: maxWidthFrame.width } as const)
+                  : ({ kind: "noClampThrough", value: maxTestWidth } as const);
+              const maxHeight =
+                maxHeightFrame.height < maxTestHeight
+                  ? ({ kind: "exact", value: maxHeightFrame.height } as const)
+                  : ({ kind: "noClampThrough", value: maxTestHeight } as const);
+              const application = initial.bundleId ?? initial.executablePath;
+              const key: ProfileKey | null =
+                application === undefined
+                  ? null
+                  : {
+                      application,
+                      role: initial.role,
+                      ...(initial.subrole !== undefined ? { subrole: initial.subrole } : {}),
+                      contextFingerprint: topologyFingerprint,
+                    };
+              let profileUpdated = false;
+              if (key !== null) {
+                const verifiedConstraints = {
+                  ...(minWidthFinding.kind === "exact" ? { minWidth: minWidthFinding.value } : {}),
+                  ...(minHeightFinding.kind === "exact"
+                    ? { minHeight: minHeightFinding.value }
+                    : {}),
+                  ...(maxWidth.kind === "exact" ? { maxWidth: maxWidth.value } : {}),
+                  ...(maxHeight.kind === "exact" ? { maxHeight: maxHeight.value } : {}),
+                };
+                if (Object.keys(verifiedConstraints).length > 0) {
+                  const previousLearning = learning;
+                  const previousPersistedLearning = persistedLearning;
+                  const previousObservationRevision = observationRevision;
+                  const previousObservationStoreFailed = observationStoreFailed;
+                  const previousDirty = learningDirty;
+                  setLearning(setVerifiedConstraints(learning, key, verifiedConstraints));
+                  const persisted = yield* Effect.either(persistLearning());
+                  if (persisted._tag === "Left") {
+                    learning = previousLearning;
+                    persistedLearning = previousPersistedLearning;
+                    observationRevision = previousObservationRevision;
+                    observationStoreFailed = previousObservationStoreFailed;
+                    learningDirty = previousDirty;
+                    syncProfiles();
+                    return yield* Effect.fail(
+                      new CommandError({
+                        code: "internal_error",
+                        message: `observation persistence failed: ${persisted.left.message}`,
+                      }),
+                    );
+                  }
+                  profileUpdated = true;
+                }
+              }
+              return {
+                type: "windowLimitsProbe" as const,
+                windowId,
+                identity,
+                target: {
+                  mode: "parked" as const,
+                  hostDisplayId: parked.display.id,
+                  corner: parked.corner,
+                  retainedVisibility: parked.visibility,
+                  positionCorrection: positionDiagnostics.some(
+                    (entry) => entry.correction === "clamped",
+                  )
+                    ? ("clamped" as const)
+                    : ("verified" as const),
+                },
+                phases: {
+                  capability: "verified",
+                  parking: "adoptedVerified",
+                  minimumSize: "verified",
+                  maximumSize: "verified",
+                  restore: "verifiedExact",
+                } as const,
+                capability: {
+                  source: "parkedBehavioralProbe",
+                  movable: "supported",
+                  resizable: "supported",
+                } as const,
+                positionDiagnostics,
+                originalFrame,
+                restoredFrame,
+                restoreStatus: "verifiedExact" as const,
+                testedRanges: {
+                  width: { min: 1, max: maxTestWidth },
+                  height: { min: 1, max: maxTestHeight },
+                },
+                findings: {
+                  minWidth: minWidthFinding,
+                  minHeight: minHeightFinding,
+                  maxWidth,
+                  maxHeight,
+                },
+                profileUpdated,
+              };
+            }),
+            () =>
+              restorationPending
+                ? Effect.uninterruptible(restore()).pipe(Effect.ignore)
+                : Effect.void,
+          );
         }),
       );
 
-    const applyMutation = (
-      command: Command,
-    ): Effect.Effect<CommandResult, CommandError> =>
+    const applyMutation = (command: Command): Effect.Effect<CommandResult, CommandError> =>
       Effect.gen(function* () {
         switch (command.type) {
           case "pause":
@@ -2863,7 +3120,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               () => {
                 const selected = focusedWorkspaceForCommand();
                 selectedWorkspaceName = selected?.name ?? null;
-                capturedDisplayIds = world.topology.displays.map((display) => display.id).join("\0");
+                capturedDisplayIds = world.topology.displays
+                  .map((display) => display.id)
+                  .join("\0");
                 if (selected === undefined || world.topology.displays.length === 0) return [];
                 if (world.topology.displays.length === 1) return null;
                 const currentId =
@@ -2873,9 +3132,11 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 const currentIndex = world.topology.displays.findIndex(
                   (display) => display.id === currentId,
                 );
-                selectedDisplayId = world.topology.displays[
-                  (currentIndex + 1 + world.topology.displays.length) % world.topology.displays.length
-                ]!.id;
+                selectedDisplayId =
+                  world.topology.displays[
+                    (currentIndex + 1 + world.topology.displays.length) %
+                      world.topology.displays.length
+                  ]!.id;
                 const displaced = [...world.workspaces.values()].find(
                   (workspace) =>
                     workspace.name !== selected.name &&
@@ -2889,21 +3150,25 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   ]),
                 );
               },
-              ({ intents }) => (w0) => {
-                if (selectedWorkspaceName === null || selectedDisplayId === null) return w0;
-                const ws = w0.workspaces.get(selectedWorkspaceName);
-                if (ws === undefined) return w0;
-                const w = {
-                  ...w0,
-                  workspaces: new Map(w0.workspaces).set(selectedWorkspaceName, {
-                    ...ws,
-                    pinnedDisplayOverride: selectedDisplayId,
-                  }),
-                };
-                return revealIn(w, intents, selectedWorkspaceName, selectedDisplayId);
-              },
+              ({ intents }) =>
+                (w0) => {
+                  if (selectedWorkspaceName === null || selectedDisplayId === null) return w0;
+                  const ws = w0.workspaces.get(selectedWorkspaceName);
+                  if (ws === undefined) return w0;
+                  const w = {
+                    ...w0,
+                    workspaces: new Map(w0.workspaces).set(selectedWorkspaceName, {
+                      ...ws,
+                      pinnedDisplayOverride: selectedDisplayId,
+                    }),
+                  };
+                  return revealIn(w, intents, selectedWorkspaceName, selectedDisplayId);
+                },
               (draft) => {
-                if (selectedWorkspaceName === null || !draft.workspaces.has(selectedWorkspaceName)) {
+                if (
+                  selectedWorkspaceName === null ||
+                  !draft.workspaces.has(selectedWorkspaceName)
+                ) {
                   return new CommandError({
                     code: "workspace_not_found",
                     message: "no focused workspace",
@@ -2914,7 +3179,8 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                       code: "topology_unstable",
                       message: "no connected displays",
                     })
-                  : draft.topology.displays.map((display) => display.id).join("\0") !== capturedDisplayIds
+                  : draft.topology.displays.map((display) => display.id).join("\0") !==
+                      capturedDisplayIds
                     ? new CommandError({
                         code: "topology_unstable",
                         message: "display topology changed during workspace move",
@@ -2987,7 +3253,8 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               return yield* Effect.fail(
                 new CommandError({
                   code: "window_not_manageable",
-                  message: "the focused window is floating; directional swaps require tiled windows",
+                  message:
+                    "the focused window is floating; directional swaps require tiled windows",
                 }),
               );
             }
@@ -3008,7 +3275,8 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               return yield* Effect.fail(
                 new CommandError({
                   code: "window_not_manageable",
-                  message: "the directional swap target is floating; floating windows are not swapped",
+                  message:
+                    "the directional swap target is floating; floating windows are not swapped",
                 }),
               );
             }
@@ -3075,7 +3343,12 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               ]),
             );
             yield* executeCompound(affected, ({ intents, base }) => (w0) => {
-              const w = moveWindowBetweenWorkspacesIn(w0, command.windowId, command.workspace, base);
+              const w = moveWindowBetweenWorkspacesIn(
+                w0,
+                command.windowId,
+                command.workspace,
+                base,
+              );
               intents.push({ kind: "retile", workspace: command.workspace });
               if (
                 sourceWs !== undefined &&
@@ -3095,7 +3368,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             const prevName = world.focusedWorkspace;
             const existingNext = world.workspaces.get(command.name);
             const connectedDisplay = (id: DisplayId | null): DisplayId | null =>
-              id !== null && world.topology.displays.some((display) => display.id === id) ? id : null;
+              id !== null && world.topology.displays.some((display) => display.id === id)
+                ? id
+                : null;
             const desiredDisplayPre = existingNext
               ? (connectedDisplay(existingNext.visibleOnDisplay) ??
                 connectedDisplay(existingNext.pinnedDisplayOverride) ??
@@ -3113,7 +3388,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             const desiredDisplayIn = (draft: World): DisplayId | null => {
               const nextWs = draft.workspaces.get(command.name);
               const connected = (id: DisplayId | null): DisplayId | null =>
-                id !== null && draft.topology.displays.some((display) => display.id === id) ? id : null;
+                id !== null && draft.topology.displays.some((display) => display.id === id)
+                  ? id
+                  : null;
               return nextWs
                 ? (connected(nextWs.visibleOnDisplay) ??
                     connected(nextWs.pinnedDisplayOverride) ??
@@ -3124,16 +3401,17 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             };
             yield* executeCompound(
               affected,
-              ({ intents, buffer }) => (w0) => {
-                let w = ensureWorkspaceIn(w0, command.name);
-                const desiredDisplay = desiredDisplayIn(w);
-                w = { ...w, focusedWorkspace: command.name };
-                buffer.push({ topic: "focus", payload: { workspace: command.name } });
-                if (desiredDisplay !== null) {
-                  w = revealIn(w, intents, command.name, desiredDisplay);
-                }
-                return w;
-              },
+              ({ intents, buffer }) =>
+                (w0) => {
+                  let w = ensureWorkspaceIn(w0, command.name);
+                  const desiredDisplay = desiredDisplayIn(w);
+                  w = { ...w, focusedWorkspace: command.name };
+                  buffer.push({ topic: "focus", payload: { workspace: command.name } });
+                  if (desiredDisplay !== null) {
+                    w = revealIn(w, intents, command.name, desiredDisplay);
+                  }
+                  return w;
+                },
               (draft) =>
                 desiredDisplayIn(draft) === desiredDisplayPre
                   ? null
@@ -3147,7 +3425,8 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 const members = [...tiledMembers(workspace.tree), ...workspace.floating].filter(
                   (id) => id !== EMPTY_TREE_LEAF && draft.windows.has(id),
                 );
-                return workspace.lastFocusedMember !== null && members.includes(workspace.lastFocusedMember)
+                return workspace.lastFocusedMember !== null &&
+                  members.includes(workspace.lastFocusedMember)
                   ? workspace.lastFocusedMember
                   : (members[0] ?? null);
               },
@@ -3167,17 +3446,18 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             );
             yield* executeCompound(
               affected,
-              ({ intents }) => (w0) => {
-                let w = ensureWorkspaceIn(w0, command.workspace);
-                w = {
-                  ...w,
-                  workspaces: new Map(w.workspaces).set(command.workspace, {
-                    ...(w.workspaces.get(command.workspace)!),
-                    pinnedDisplayOverride: command.displayId,
-                  }),
-                };
-                return revealIn(w, intents, command.workspace, command.displayId);
-              },
+              ({ intents }) =>
+                (w0) => {
+                  let w = ensureWorkspaceIn(w0, command.workspace);
+                  w = {
+                    ...w,
+                    workspaces: new Map(w.workspaces).set(command.workspace, {
+                      ...w.workspaces.get(command.workspace)!,
+                      pinnedDisplayOverride: command.displayId,
+                    }),
+                  };
+                  return revealIn(w, intents, command.workspace, command.displayId);
+                },
               (draft) =>
                 draft.topology.displays.some((display) => display.id === command.displayId)
                   ? null
@@ -3237,10 +3517,12 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                     focusIntent: { id: command.windowId, generation: focusGeneration },
                   };
                 } else if (applied.left.code !== "window_not_controllable") {
-                  return yield* Effect.fail(new CommandError({
-                    code: mapStepCode(applied.left.code),
-                    message: applied.left.message,
-                  }));
+                  return yield* Effect.fail(
+                    new CommandError({
+                      code: mapStepCode(applied.left.code),
+                      message: applied.left.message,
+                    }),
+                  );
                 }
               }),
             );
@@ -3278,7 +3560,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             if (outcome._tag === "Left") {
               return yield* Effect.fail(
                 new CommandError({
-                  code: outcome.left.code === "inventory_stale" ? "inventory_stale" : "geometry_rejected",
+                  code:
+                    outcome.left.code === "inventory_stale"
+                      ? "inventory_stale"
+                      : "geometry_rejected",
                   message: outcome.left.message,
                 }),
               );
@@ -3336,27 +3621,29 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           if (loaded._tag === "Right") {
             const parsed = parseConfigSafe(loaded.right);
             if (parsed.ok) {
-              const prepared = configSource.prepare === undefined
-                ? Either.right(undefined)
-                : yield* Effect.either(configSource.prepare(parsed.config, "full"));
+              const prepared =
+                configSource.prepare === undefined
+                  ? Either.right(undefined)
+                  : yield* Effect.either(configSource.prepare(parsed.config, "full"));
               if (prepared._tag === "Right") {
                 config = parsed.config;
                 syncConfiguredWorkspaces();
               } else {
                 setHealth("degraded", "config_invalid");
-                bus.publish("config", { status: "invalid", issues: prepared.left.issues.slice(0, 4) });
+                bus.publish("config", {
+                  status: "invalid",
+                  issues: prepared.left.issues.slice(0, 4),
+                });
               }
-            }
-            else setHealth("degraded", "config_invalid");
+            } else setHealth("degraded", "config_invalid");
           } else {
             setHealth("degraded", "config_unavailable");
           }
 
           if (observationStore !== undefined) {
             fibers.push(
-              yield* Stream.runForEach(
-                observationStore.changes(observationRevision),
-                (snapshot) => Effect.gen(function* () {
+              yield* Stream.runForEach(observationStore.changes(observationRevision), (snapshot) =>
+                Effect.gen(function* () {
                   const installed = yield* Effect.either(
                     runExclusive(installObservationSnapshot(snapshot)),
                   );
@@ -3367,9 +3654,11 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   if (installed.right) yield* gatedReconcile();
                 }),
               ).pipe(
-                Effect.catchAll((error) => Effect.sync(() => {
-                  setHealth("degraded", `observation_store_${error.code}`);
-                })),
+                Effect.catchAll((error) =>
+                  Effect.sync(() => {
+                    setHealth("degraded", `observation_store_${error.code}`);
+                  }),
+                ),
                 Effect.forkDaemon,
               ),
             );
@@ -3438,11 +3727,12 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         }),
       execute: (command: Command) =>
         Effect.flatMap(
-            Effect.try({
-              try: () => decodeCommandSync(command),
-              catch: () => new CommandError({ code: "invalid_request", message: "malformed command" }),
-            }),
-            (validated) => commandBus.execute(validated),
+          Effect.try({
+            try: () => decodeCommandSync(command),
+            catch: () =>
+              new CommandError({ code: "invalid_request", message: "malformed command" }),
+          }),
+          (validated) => commandBus.execute(validated),
         ),
       state: () => Effect.succeed(projectSnapshot(world, health.state, pendingMeta())),
       events: () => bus.events(),

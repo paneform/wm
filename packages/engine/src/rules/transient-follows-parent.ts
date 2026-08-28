@@ -28,8 +28,7 @@ export const transientFollowsParent: Rule = {
       if (findMembership(world, observation.id) !== null) continue;
 
       const parent = findParent(world, observation);
-      const target =
-        parent !== null ? membershipWorkspace(world, parent) : world.focusedWorkspace;
+      const target = parent !== null ? membershipWorkspace(world, parent) : world.focusedWorkspace;
       if (target === null || !world.workspaces.has(target)) continue;
 
       actions.push({

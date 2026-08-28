@@ -37,8 +37,7 @@ export const defaultParkingVisibility = (): ParkingVisibility => ({
   vertical: PARKING_TYPICAL_VISIBILITY.vertical,
 });
 
-const isLeft = (corner: ParkingCorner): boolean =>
-  corner === "bottomLeft" || corner === "topLeft";
+const isLeft = (corner: ParkingCorner): boolean => corner === "bottomLeft" || corner === "topLeft";
 const isBottom = (corner: ParkingCorner): boolean =>
   corner === "bottomLeft" || corner === "bottomRight";
 
@@ -104,10 +103,7 @@ export function feasibleCorners(
 // Facts — fingerprinted per display-local geometry (+OS version)
 // ---------------------------------------------------------------------------
 
-export function displayParkingFingerprint(
-  display: DisplayObservation,
-  osVersion?: string,
-): string {
+export function displayParkingFingerprint(display: DisplayObservation, osVersion?: string): string {
   const local = [
     display.id,
     display.scale,

@@ -12,12 +12,12 @@ import type { Rule, RuleContext } from "./rule.ts";
 
 export const parkInvisibleWorkspaces: Rule = {
   name: "park-invisible-workspaces",
-  applies: (world: World, ctx: RuleContext): boolean =>
-    scanForPending(world, ctx).pending,
+  applies: (world: World, ctx: RuleContext): boolean => scanForPending(world, ctx).pending,
   run: (world: World, ctx: RuleContext): Action[] => {
     const actions: Action[] = [];
     for (const workspace of world.workspaces.values()) {
-      if (workspace.visibleOnDisplay !== null || workspace.name === world.focusedWorkspace) continue;
+      if (workspace.visibleOnDisplay !== null || workspace.name === world.focusedWorkspace)
+        continue;
       if (memberNeedsPark(world, ctx, workspace)) {
         actions.push({ kind: "parkWorkspace", workspace: workspace.name });
       }

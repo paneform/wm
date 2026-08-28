@@ -1,12 +1,7 @@
 import { Effect, Schema } from "effect";
 import type { Clock } from "./platform.ts";
 import { Direction } from "./direction.ts";
-import {
-  Capabilities,
-  DisplayObservation,
-  Frame,
-  WindowObservation,
-} from "./schema.ts";
+import { Capabilities, DisplayObservation, Frame, WindowObservation } from "./schema.ts";
 import { EMPTY_TREE_LEAF } from "./constants.ts";
 import type { BspNode } from "./world.ts";
 import { tiledMembers } from "./layout/bsp.ts";
@@ -70,8 +65,16 @@ export const Command = Schema.Union(
     frame: Frame,
     tolerance: Schema.optional(Schema.Number),
   }),
-  Schema.Struct({ type: Schema.Literal("moveWindow"), windowId: Schema.String, point: PointStruct }),
-  Schema.Struct({ type: Schema.Literal("resizeWindow"), windowId: Schema.String, size: SizeStruct }),
+  Schema.Struct({
+    type: Schema.Literal("moveWindow"),
+    windowId: Schema.String,
+    point: PointStruct,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("resizeWindow"),
+    windowId: Schema.String,
+    size: SizeStruct,
+  }),
   Schema.Struct({ type: Schema.Literal("floatWindow"), windowId: Schema.String }),
   Schema.Struct({ type: Schema.Literal("tileWindow"), windowId: Schema.String }),
   Schema.Struct({ type: Schema.Literal("manageWindow"), windowId: Schema.String }),
@@ -209,7 +212,7 @@ export const BspTreeSnapshotSchema: Schema.Schema<BspTreeSnapshot> = Schema.susp
       first: BspTreeSnapshotSchema,
       second: BspTreeSnapshotSchema,
     }),
-  )
+  ),
 );
 
 export const WorkspaceSnapshot = Schema.Struct({
@@ -231,9 +234,9 @@ export const PendingTransactionSnapshot = Schema.Struct({
   coalesceKey: Schema.NullOr(Schema.String),
   submittedAt: Schema.Number,
 });
-export interface PendingTransactionSnapshot
-  extends Schema.Schema.Type<typeof PendingTransactionSnapshot>
-{}
+export interface PendingTransactionSnapshot extends Schema.Schema.Type<
+  typeof PendingTransactionSnapshot
+> {}
 
 export const HealthState = Schema.Literal("healthy", "degraded", "recovering", "unhealthy");
 export type HealthState = typeof HealthState.Type;
@@ -260,7 +263,10 @@ export const CommandResult = Schema.Union(
     window: Schema.NullOr(WindowObservation),
   }),
   Schema.Struct({ type: Schema.Literal("displays"), displays: Schema.Array(DisplayObservation) }),
-  Schema.Struct({ type: Schema.Literal("workspaces"), workspaces: Schema.Array(WorkspaceSnapshot) }),
+  Schema.Struct({
+    type: Schema.Literal("workspaces"),
+    workspaces: Schema.Array(WorkspaceSnapshot),
+  }),
   Schema.Struct({
     type: Schema.Literal("transaction"),
     id: Schema.String,
@@ -303,14 +309,29 @@ export const CommandResult = Schema.Union(
       movable: Schema.Literal("supported"),
       resizable: Schema.Literal("supported"),
     }),
-    positionDiagnostics: Schema.Array(Schema.Struct({
-      sample: Schema.Literal("capabilityWidth", "capabilityHeight", "minWidth", "minHeight", "maxWidth", "maxHeight"),
-      correction: Schema.Literal("verified", "clamped"),
-      requestedIdealPoint: Schema.Struct({ x: Schema.Number, y: Schema.Number }),
-      observedPoint: Schema.Struct({ x: Schema.Number, y: Schema.Number }),
-      idealRetainedVisibility: Schema.Struct({ horizontal: Schema.Number, vertical: Schema.Number }),
-      actualRetainedVisibility: Schema.Struct({ horizontal: Schema.Number, vertical: Schema.Number }),
-    })),
+    positionDiagnostics: Schema.Array(
+      Schema.Struct({
+        sample: Schema.Literal(
+          "capabilityWidth",
+          "capabilityHeight",
+          "minWidth",
+          "minHeight",
+          "maxWidth",
+          "maxHeight",
+        ),
+        correction: Schema.Literal("verified", "clamped"),
+        requestedIdealPoint: Schema.Struct({ x: Schema.Number, y: Schema.Number }),
+        observedPoint: Schema.Struct({ x: Schema.Number, y: Schema.Number }),
+        idealRetainedVisibility: Schema.Struct({
+          horizontal: Schema.Number,
+          vertical: Schema.Number,
+        }),
+        actualRetainedVisibility: Schema.Struct({
+          horizontal: Schema.Number,
+          vertical: Schema.Number,
+        }),
+      }),
+    ),
     originalFrame: Frame,
     restoredFrame: Frame,
     restoreStatus: Schema.Literal("verifiedExact"),
@@ -353,7 +374,8 @@ export function projectSnapshot(
   const memberToWorkspace = new Map<string, { workspace: string; floating: boolean }>();
   for (const ws of world.workspaces.values()) {
     for (const id of tiledMembers(ws.tree)) {
-      if (id !== EMPTY_TREE_LEAF) memberToWorkspace.set(id, { workspace: ws.name, floating: false });
+      if (id !== EMPTY_TREE_LEAF)
+        memberToWorkspace.set(id, { workspace: ws.name, floating: false });
     }
     for (const id of ws.floating) {
       memberToWorkspace.set(id, { workspace: ws.name, floating: true });
@@ -516,31 +538,31 @@ export function createCommandBus(deps: CommandBusDeps): CommandBus {
       steps: [
         {
           name: command.type,
-          run: () => command.type === "probeWindowLimits"
-            ? Effect.tap(deps.probeWindowLimits(command.windowId), (result) =>
-                Effect.sync(() => { structuredResult = result; }))
-            : deps.applyMutation(command),
+          run: () =>
+            command.type === "probeWindowLimits"
+              ? Effect.tap(deps.probeWindowLimits(command.windowId), (result) =>
+                  Effect.sync(() => {
+                    structuredResult = result;
+                  }),
+                )
+              : deps.applyMutation(command),
         },
       ],
     };
 
-    return Effect.flatMap(
-      Effect.mapError(deps.queue.submit(unit), mapSubmitError),
-      (receipt) =>
-        receipt.status === "completed"
-          ? structuredResult !== undefined
-            ? Effect.succeed(structuredResult)
-            : Effect.succeed<CommandResult>({ type: "ok", detail: receipt.id })
-          : receipt.status === "timeout"
-            ? Effect.fail(
-                new CommandError({ code: "timeout", message: "operation timed out" }),
-              )
-            : Effect.fail(
-                new CommandError({
-                  code: mapStepCode(receipt.error?.code),
-                  message: receipt.error?.message ?? "operation failed",
-                }),
-              ),
+    return Effect.flatMap(Effect.mapError(deps.queue.submit(unit), mapSubmitError), (receipt) =>
+      receipt.status === "completed"
+        ? structuredResult !== undefined
+          ? Effect.succeed(structuredResult)
+          : Effect.succeed<CommandResult>({ type: "ok", detail: receipt.id })
+        : receipt.status === "timeout"
+          ? Effect.fail(new CommandError({ code: "timeout", message: "operation timed out" }))
+          : Effect.fail(
+              new CommandError({
+                code: mapStepCode(receipt.error?.code),
+                message: receipt.error?.message ?? "operation failed",
+              }),
+            ),
     );
   };
 

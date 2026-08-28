@@ -19,29 +19,32 @@ const CLOCK: Clock = {
 };
 
 const CONFIG: ConfigSource = {
-  load: () => Effect.succeed({
-    defaults: {
-      gap: 0,
-      margins: { top: 0, right: 0, bottom: 0, left: 0 },
-    },
-  }),
+  load: () =>
+    Effect.succeed({
+      defaults: {
+        gap: 0,
+        margins: { top: 0, right: 0, bottom: 0, left: 0 },
+      },
+    }),
   changes: () => Stream.empty,
 };
 
 const profileDocument = (fingerprint: string, maxWidth: number): ObservationDocument => ({
   schemaVersion: 1,
-  profiles: [{
-    key: {
-      application: "com.apple.systempreferences",
-      role: "AXWindow",
-      contextFingerprint: fingerprint,
-    },
-    constraints: { maxWidth },
-    sampleCount: 3,
-    confidence: "learned",
-    correctiveAttemptCount: 0,
-    cooperative: false,
-  } satisfies Profile],
+  profiles: [
+    {
+      key: {
+        application: "com.apple.systempreferences",
+        role: "AXWindow",
+        contextFingerprint: fingerprint,
+      },
+      constraints: { maxWidth },
+      sampleCount: 3,
+      confidence: "learned",
+      correctiveAttemptCount: 0,
+      cooperative: false,
+    } satisfies Profile,
+  ],
   pending: [],
 });
 
@@ -55,15 +58,18 @@ const createTestStore = (
   const saved: ObservationDocument[] = [];
   const store: ObservationStore = {
     load: () => Effect.succeed(snapshot),
-    changes: () => Stream.asyncPush<ObservationSnapshot>((emit) =>
-      Effect.acquireRelease(
-        Effect.sync(() => {
-          listener = (next) => emit.single(next);
-        }),
-        () => Effect.sync(() => {
-          listener = undefined;
-        }),
-      )),
+    changes: () =>
+      Stream.asyncPush<ObservationSnapshot>((emit) =>
+        Effect.acquireRelease(
+          Effect.sync(() => {
+            listener = (next) => emit.single(next);
+          }),
+          () =>
+            Effect.sync(() => {
+              listener = undefined;
+            }),
+        ),
+      ),
     save: (expectedRevision, document) => {
       if (options.failSaves === true) {
         return Effect.fail(new ObservationStoreError("io", "test persistence failure"));
@@ -102,52 +108,61 @@ describe("engine observation-store integration", () => {
       workArea: { x: 0, y: 32, width: 1512, height: 950 },
     });
     const fake = createFakePlatform({ clock: CLOCK, displays: [display] });
-    const settings = fake.addWindow(makeWindow({
-      id: "window:settings-learning",
-      bundleId: "com.apple.systempreferences",
-      x: 100,
-      y: 100,
-      width: 723,
-      height: 950,
-      personality: { kind: "minMaxClamp", constraints: { maxWidth: 723 } },
-    }));
-    fake.addWindow(makeWindow({
-      id: "window:terminal-learning",
-      bundleId: "com.example.terminal",
-      x: 900,
-      y: 100,
-      width: 600,
-      height: 950,
-    }));
-    const configSource: ConfigSource = {
-      load: () => Effect.succeed({
-        defaults: {
-          gap: 0,
-          margins: { top: 0, right: 0, bottom: 0, left: 0 },
-        },
-        workspaces: [
-          { name: "C", assign: [{ bundleId: "com.apple.systempreferences" }] },
-          { name: "T", assign: [{ bundleId: "com.example.terminal" }] },
-        ],
+    const settings = fake.addWindow(
+      makeWindow({
+        id: "window:settings-learning",
+        bundleId: "com.apple.systempreferences",
+        x: 100,
+        y: 100,
+        width: 723,
+        height: 950,
+        personality: { kind: "minMaxClamp", constraints: { maxWidth: 723 } },
       }),
+    );
+    fake.addWindow(
+      makeWindow({
+        id: "window:terminal-learning",
+        bundleId: "com.example.terminal",
+        x: 900,
+        y: 100,
+        width: 600,
+        height: 950,
+      }),
+    );
+    const configSource: ConfigSource = {
+      load: () =>
+        Effect.succeed({
+          defaults: {
+            gap: 0,
+            margins: { top: 0, right: 0, bottom: 0, left: 0 },
+          },
+          workspaces: [
+            { name: "C", assign: [{ bundleId: "com.apple.systempreferences" }] },
+            { name: "T", assign: [{ bundleId: "com.example.terminal" }] },
+          ],
+        }),
       changes: () => Stream.empty,
     };
     const observations = createTestStore(emptyObservationDocument());
-    const engine = await Effect.runPromise(createEngine({
-      adapter: fake.adapter,
-      configSource,
-      observationStore: observations.store,
-      clock: CLOCK,
-      initiallyPaused: true,
-    }));
+    const engine = await Effect.runPromise(
+      createEngine({
+        adapter: fake.adapter,
+        configSource,
+        observationStore: observations.store,
+        clock: CLOCK,
+        initiallyPaused: true,
+      }),
+    );
     await Effect.runPromise(engine.start());
     await Effect.runPromise(engine.reconcile());
     expect(fake.writes()).toEqual([]);
 
     await Effect.runPromise(engine.execute({ type: "resume" }));
     await Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "T" }));
-    expect((await Effect.runPromise(engine.state())).windows.find((window) =>
-      window.id === settings)?.parked).toBe(true);
+    expect(
+      (await Effect.runPromise(engine.state())).windows.find((window) => window.id === settings)
+        ?.parked,
+    ).toBe(true);
 
     fake.rejectNextBatchWrite(settings);
     fake.rejectNextBatchFocus(settings);
@@ -157,8 +172,12 @@ describe("engine observation-store integration", () => {
     const focused = await Effect.runPromise(engine.state());
     expect(focused.focusedWorkspace).toBe("C");
     expect(focused.windows.find((window) => window.id === settings)?.parked).toBe(false);
-    expect(observations.saved.at(-1)?.profiles.find((profile) =>
-      profile.key.application === "com.apple.systempreferences")?.constraints.maxWidth).toBe(723);
+    expect(
+      observations.saved
+        .at(-1)
+        ?.profiles.find((profile) => profile.key.application === "com.apple.systempreferences")
+        ?.constraints.maxWidth,
+    ).toBe(723);
 
     fake.nudgeSilent(settings, { width: 900 });
     await Effect.runPromise(engine.execute({ type: "retile", workspace: "C" }));
@@ -166,7 +185,9 @@ describe("engine observation-store integration", () => {
 
     await Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "T" }));
     fake.rejectNextBatchFocus(settings, "stale");
-    await expect(Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "C" }))).rejects.toThrow();
+    await expect(
+      Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "C" })),
+    ).rejects.toThrow();
     expect((await Effect.runPromise(engine.state())).focusedWorkspace).toBe("T");
     await Effect.runPromise(engine.stop());
   });
@@ -174,19 +195,27 @@ describe("engine observation-store integration", () => {
   test("hydrates learned bounds before the first useful layout", async () => {
     const display = makeDisplay();
     const fake = createFakePlatform({ clock: CLOCK, displays: [display] });
-    const settings = fake.addWindow(makeWindow({
-      id: "window:settings",
-      bundleId: "com.apple.systempreferences",
-      width: 900,
-    }));
-    const chat = fake.addWindow(makeWindow({ id: "window:chat", bundleId: "com.openai.codex", width: 900 }));
-    const observations = createTestStore(profileDocument(contextFingerprint({ displays: [display] }), 723));
-    const engine = await Effect.runPromise(createEngine({
-      adapter: fake.adapter,
-      configSource: CONFIG,
-      observationStore: observations.store,
-      clock: CLOCK,
-    }));
+    const settings = fake.addWindow(
+      makeWindow({
+        id: "window:settings",
+        bundleId: "com.apple.systempreferences",
+        width: 900,
+      }),
+    );
+    const chat = fake.addWindow(
+      makeWindow({ id: "window:chat", bundleId: "com.openai.codex", width: 900 }),
+    );
+    const observations = createTestStore(
+      profileDocument(contextFingerprint({ displays: [display] }), 723),
+    );
+    const engine = await Effect.runPromise(
+      createEngine({
+        adapter: fake.adapter,
+        configSource: CONFIG,
+        observationStore: observations.store,
+        clock: CLOCK,
+      }),
+    );
 
     await Effect.runPromise(engine.start());
     await Effect.runPromise(engine.reconcile());
@@ -203,23 +232,28 @@ describe("engine observation-store integration", () => {
       sleep: (millis) => Effect.sleep(`${millis >= 15_000 ? 1_000 : Math.min(millis, 2)} millis`),
     };
     const fake = createFakePlatform({ clock, displays: [display] });
-    const settings = fake.addWindow(makeWindow({
-      id: "window:settings-stale-fallback",
-      bundleId: "com.apple.systempreferences",
-      personality: { kind: "minMaxClamp", constraints: { maxWidth: 723 } },
-    }));
-    fake.addWindow(makeWindow({
-      id: "window:terminal-stale-fallback",
-      bundleId: "com.example.terminal",
-    }));
-    const configSource: ConfigSource = {
-      load: () => Effect.succeed({
-        defaults: { gap: 0, margins: { top: 0, right: 0, bottom: 0, left: 0 } },
-        workspaces: [
-          { name: "C", assign: [{ bundleId: "com.apple.systempreferences" }] },
-          { name: "T", assign: [{ bundleId: "com.example.terminal" }] },
-        ],
+    const settings = fake.addWindow(
+      makeWindow({
+        id: "window:settings-stale-fallback",
+        bundleId: "com.apple.systempreferences",
+        personality: { kind: "minMaxClamp", constraints: { maxWidth: 723 } },
       }),
+    );
+    fake.addWindow(
+      makeWindow({
+        id: "window:terminal-stale-fallback",
+        bundleId: "com.example.terminal",
+      }),
+    );
+    const configSource: ConfigSource = {
+      load: () =>
+        Effect.succeed({
+          defaults: { gap: 0, margins: { top: 0, right: 0, bottom: 0, left: 0 } },
+          workspaces: [
+            { name: "C", assign: [{ bundleId: "com.apple.systempreferences" }] },
+            { name: "T", assign: [{ bundleId: "com.example.terminal" }] },
+          ],
+        }),
       changes: () => Stream.empty,
     };
     const { executeBatch: _executeBatch, ...primitiveAdapter } = fake.adapter;
@@ -233,19 +267,23 @@ describe("engine observation-store integration", () => {
           return { ...write, stableReads: 3, errorKind: "stale" as const };
         }),
     };
-    const engine = await Effect.runPromise(createEngine({
-      adapter,
-      configSource,
-      clock,
-      initiallyPaused: true,
-    }));
+    const engine = await Effect.runPromise(
+      createEngine({
+        adapter,
+        configSource,
+        clock,
+        initiallyPaused: true,
+      }),
+    );
     await Effect.runPromise(engine.start());
     await Effect.runPromise(engine.reconcile());
     await Effect.runPromise(engine.execute({ type: "resume" }));
     await Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "T" }));
 
     rejectSettings = true;
-    await expect(Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "C" }))).rejects.toThrow();
+    await expect(
+      Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "C" })),
+    ).rejects.toThrow();
     expect((await Effect.runPromise(engine.state())).focusedWorkspace).toBe("T");
     await Effect.runPromise(engine.stop());
   });
@@ -253,23 +291,29 @@ describe("engine observation-store integration", () => {
   test("applies an external durable correction while running", async () => {
     const display = makeDisplay();
     const fake = createFakePlatform({ clock: CLOCK, displays: [display] });
-    const settings = fake.addWindow(makeWindow({
-      id: "window:settings-external",
-      bundleId: "com.apple.systempreferences",
-      width: 900,
-    }));
-    const chat = fake.addWindow(makeWindow({
-      id: "window:chat-external",
-      bundleId: "com.openai.codex",
-      width: 900,
-    }));
+    const settings = fake.addWindow(
+      makeWindow({
+        id: "window:settings-external",
+        bundleId: "com.apple.systempreferences",
+        width: 900,
+      }),
+    );
+    const chat = fake.addWindow(
+      makeWindow({
+        id: "window:chat-external",
+        bundleId: "com.openai.codex",
+        width: 900,
+      }),
+    );
     const observations = createTestStore(emptyObservationDocument());
-    const engine = await Effect.runPromise(createEngine({
-      adapter: fake.adapter,
-      configSource: CONFIG,
-      observationStore: observations.store,
-      clock: CLOCK,
-    }));
+    const engine = await Effect.runPromise(
+      createEngine({
+        adapter: fake.adapter,
+        configSource: CONFIG,
+        observationStore: observations.store,
+        clock: CLOCK,
+      }),
+    );
     await Effect.runPromise(engine.start());
     await Effect.runPromise(engine.reconcile());
 
@@ -284,25 +328,33 @@ describe("engine observation-store integration", () => {
   test("persists an exact frame that corrects a learned maximum", async () => {
     const display = makeDisplay();
     const fake = createFakePlatform({ clock: CLOCK, displays: [display] });
-    const settings = fake.addWindow(makeWindow({
-      id: "window:settings-correction",
-      bundleId: "com.apple.systempreferences",
-      width: 900,
-    }));
-    const observations = createTestStore(profileDocument(contextFingerprint({ displays: [display] }), 723));
-    const engine = await Effect.runPromise(createEngine({
-      adapter: fake.adapter,
-      configSource: CONFIG,
-      observationStore: observations.store,
-      clock: CLOCK,
-    }));
+    const settings = fake.addWindow(
+      makeWindow({
+        id: "window:settings-correction",
+        bundleId: "com.apple.systempreferences",
+        width: 900,
+      }),
+    );
+    const observations = createTestStore(
+      profileDocument(contextFingerprint({ displays: [display] }), 723),
+    );
+    const engine = await Effect.runPromise(
+      createEngine({
+        adapter: fake.adapter,
+        configSource: CONFIG,
+        observationStore: observations.store,
+        clock: CLOCK,
+      }),
+    );
     await Effect.runPromise(engine.start());
 
-    await Effect.runPromise(engine.execute({
-      type: "setWindowFrame",
-      windowId: settings,
-      frame: { x: 0, y: 38, width: 800, height: 944 },
-    }));
+    await Effect.runPromise(
+      engine.execute({
+        type: "setWindowFrame",
+        windowId: settings,
+        frame: { x: 0, y: 38, width: 800, height: 944 },
+      }),
+    );
 
     expect(observations.saved.at(-1)?.profiles[0]?.constraints.maxWidth).toBe(800);
     await Effect.runPromise(engine.stop());
@@ -311,28 +363,34 @@ describe("engine observation-store integration", () => {
   test("keeps the durable catalog authoritative when a passive save fails", async () => {
     const display = makeDisplay();
     const fake = createFakePlatform({ clock: CLOCK, displays: [display] });
-    const settings = fake.addWindow(makeWindow({
-      id: "window:settings-save-failure",
-      bundleId: "com.apple.systempreferences",
-      width: 900,
-    }));
+    const settings = fake.addWindow(
+      makeWindow({
+        id: "window:settings-save-failure",
+        bundleId: "com.apple.systempreferences",
+        width: 900,
+      }),
+    );
     const observations = createTestStore(
       profileDocument(contextFingerprint({ displays: [display] }), 723),
       { failSaves: true },
     );
-    const engine = await Effect.runPromise(createEngine({
-      adapter: fake.adapter,
-      configSource: CONFIG,
-      observationStore: observations.store,
-      clock: CLOCK,
-    }));
+    const engine = await Effect.runPromise(
+      createEngine({
+        adapter: fake.adapter,
+        configSource: CONFIG,
+        observationStore: observations.store,
+        clock: CLOCK,
+      }),
+    );
     await Effect.runPromise(engine.start());
 
-    await Effect.runPromise(engine.execute({
-      type: "setWindowFrame",
-      windowId: settings,
-      frame: { x: 0, y: 38, width: 800, height: 944 },
-    }));
+    await Effect.runPromise(
+      engine.execute({
+        type: "setWindowFrame",
+        windowId: settings,
+        frame: { x: 0, y: 38, width: 800, height: 944 },
+      }),
+    );
 
     expect((await Effect.runPromise(engine.state())).health).toBe("degraded");
     expect(observations.saved).toHaveLength(0);
@@ -362,31 +420,42 @@ describe("engine observation-store integration", () => {
       ],
     };
     const fake = createFakePlatform({ clock: CLOCK, displays: [display] });
-    const settings = fake.addWindow(makeWindow({
-      id: "window:settings-conflict",
-      bundleId: "com.apple.systempreferences",
-      width: 900,
-    }));
+    const settings = fake.addWindow(
+      makeWindow({
+        id: "window:settings-conflict",
+        bundleId: "com.apple.systempreferences",
+        width: 900,
+      }),
+    );
     const observations = createTestStore(initial, { conflictOnceWith: external });
-    const engine = await Effect.runPromise(createEngine({
-      adapter: fake.adapter,
-      configSource: CONFIG,
-      observationStore: observations.store,
-      clock: CLOCK,
-    }));
+    const engine = await Effect.runPromise(
+      createEngine({
+        adapter: fake.adapter,
+        configSource: CONFIG,
+        observationStore: observations.store,
+        clock: CLOCK,
+      }),
+    );
     await Effect.runPromise(engine.start());
 
-    await Effect.runPromise(engine.execute({
-      type: "setWindowFrame",
-      windowId: settings,
-      frame: { x: 0, y: 38, width: 800, height: 944 },
-    }));
+    await Effect.runPromise(
+      engine.execute({
+        type: "setWindowFrame",
+        windowId: settings,
+        frame: { x: 0, y: 38, width: 800, height: 944 },
+      }),
+    );
 
     const committed = observations.saved.at(-1)!;
-    expect(committed.profiles.find((profile) =>
-      profile.key.application === "com.apple.systempreferences")?.constraints.maxWidth).toBe(800);
-    expect(committed.profiles.find((profile) =>
-      profile.key.application === "com.openai.codex")?.constraints.minWidth).toBe(500);
+    expect(
+      committed.profiles.find(
+        (profile) => profile.key.application === "com.apple.systempreferences",
+      )?.constraints.maxWidth,
+    ).toBe(800);
+    expect(
+      committed.profiles.find((profile) => profile.key.application === "com.openai.codex")
+        ?.constraints.minWidth,
+    ).toBe(500);
     await Effect.runPromise(engine.stop());
   });
 });

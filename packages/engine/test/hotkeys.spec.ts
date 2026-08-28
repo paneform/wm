@@ -55,18 +55,24 @@ interface Harness {
 
 const bootstrap = async (
   displays?: ReadonlyArray<Partial<FakeDisplaySpec>>,
-  wrap?: (inner: PlatformAdapter, refs: { engine: { setRecovery(a: boolean): void } | null }) => PlatformAdapter,
+  wrap?: (
+    inner: PlatformAdapter,
+    refs: { engine: { setRecovery(a: boolean): void } | null },
+  ) => PlatformAdapter,
 ): Promise<Harness> => {
   const fake = createFakePlatform({
     clock: CLOCK,
     displays:
       displays === undefined
-        ? [makeDisplay(), makeDisplay({
-            id: "display:sim-left",
-            frame: { x: -1512, y: 0, width: 1512, height: 982 },
-            workArea: { x: -1512, y: 38, width: 1512, height: 944 },
-            primary: false,
-          })]
+        ? [
+            makeDisplay(),
+            makeDisplay({
+              id: "display:sim-left",
+              frame: { x: -1512, y: 0, width: 1512, height: 982 },
+              workArea: { x: -1512, y: 38, width: 1512, height: 944 },
+              primary: false,
+            }),
+          ]
         : displays.map((spec) => makeDisplay(spec)),
   });
   const refs: { engine: { setRecovery(a: boolean): void } | null } = { engine: null };
@@ -89,12 +95,13 @@ const bootstrap = async (
       setRecovery: (a: boolean) =>
         (engine as unknown as { setRecovery(a: boolean): void }).setRecovery(a),
       gateState: () =>
-        (engine as unknown as {
-          gateState(): { busy: boolean; rerunQueued: boolean };
-        }).gateState(),
+        (
+          engine as unknown as {
+            gateState(): { busy: boolean; rerunQueued: boolean };
+          }
+        ).gateState(),
     },
-    run: (command) =>
-      Effect.runPromise(engine.execute(command) as Effect.Effect<CommandResult>),
+    run: (command) => Effect.runPromise(engine.execute(command) as Effect.Effect<CommandResult>),
     snapshot: () => Effect.runPromise(engine.state()),
     failure: async (command) => {
       const exit = await Effect.runPromiseExit(engine.execute(command));
@@ -528,16 +535,12 @@ describe("pause gating for hotkey commands", () => {
     await seedWorkspace(h, [w1, w2]);
     await h.run({ type: "pause" });
 
-    expect(
-      (await h.failure({ type: "focusDirection", direction: "left" })).code,
-    ).toBe("paused");
+    expect((await h.failure({ type: "focusDirection", direction: "left" })).code).toBe("paused");
     expect((await h.failure({ type: "moveDirection", direction: "left" })).code).toBe("paused");
-    expect(
-      (await h.failure({ type: "moveFocusedWindowToWorkspace", workspace: "s" })).code,
-    ).toBe("paused");
-    expect(
-      (await h.failure({ type: "moveFocusedWorkspaceToNextDisplay" })).code,
-    ).toBe("paused");
+    expect((await h.failure({ type: "moveFocusedWindowToWorkspace", workspace: "s" })).code).toBe(
+      "paused",
+    );
+    expect((await h.failure({ type: "moveFocusedWorkspaceToNextDisplay" })).code).toBe("paused");
 
     await h.run({ type: "togglePause" });
     expect((await h.snapshot()).paused).toBe(false);
@@ -837,7 +840,9 @@ describe("committed/draft isolation (round 2 issue 1)", () => {
     // Queries during tentative work see ONLY the old committed world.
     const mid = await h.snapshot();
     expect(workspaceOf(mid, "1")!.tree).toEqual(treeBefore);
-    expect(mid.windows.find((x) => x.id === w2)?.frame).toEqual(before.windows.find((x) => x.id === w2)?.frame);
+    expect(mid.windows.find((x) => x.id === w2)?.frame).toEqual(
+      before.windows.find((x) => x.id === w2)?.frame,
+    );
 
     // An adapter event during tentative work must NOT reconcile draft state.
     h.fake.emitSleep();
@@ -986,7 +991,9 @@ describe("strict reconciliation early exits (round 2 issue 3)", () => {
       ...inner,
       getTopology: () =>
         poisonTopology
-          ? Effect.succeed({ displays: "garbage" } as unknown as import("../src/schema.ts").TopologyObservation)
+          ? Effect.succeed({
+              displays: "garbage",
+            } as unknown as import("../src/schema.ts").TopologyObservation)
           : inner.getTopology(),
     }));
     const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
@@ -1075,9 +1082,7 @@ describe("interruption-safe rollback (round 2 issue 5)", () => {
     expect(error.code).toBe("timeout");
 
     // Committed world remains the OLD one.
-    expect(workspaceOf(await h.snapshot(), "1")!.tree).toEqual(
-      workspaceOf(before, "1")!.tree,
-    );
+    expect(workspaceOf(await h.snapshot(), "1")!.tree).toEqual(workspaceOf(before, "1")!.tree);
     // Compensation restores the window an earlier step had already moved…
     await waitFor(() => {
       const f = h.fake.frameOf(w2);
@@ -1259,7 +1264,9 @@ describe("multi-display focus isolation", () => {
     await h.run({ type: "focusWorkspace", name: "M" });
 
     const before = await h.snapshot();
-    const pins = new Map(before.workspaces.map((workspace) => [workspace.name, workspace.pinnedDisplayOverride]));
+    const pins = new Map(
+      before.workspaces.map((workspace) => [workspace.name, workspace.pinnedDisplayOverride]),
+    );
     const writesBefore = h.fake.writes().length;
 
     for (const name of ["T", "M", "T", "1", "T"]) {
@@ -1270,7 +1277,12 @@ describe("multi-display focus isolation", () => {
     for (const name of ["T", "M", "1"]) {
       expect(workspaceOf(after, name)?.pinnedDisplayOverride).toBe(pins.get(name));
     }
-    expect(h.fake.writes().slice(writesBefore).map((write) => write.windowId)).not.toContain(t);
+    expect(
+      h.fake
+        .writes()
+        .slice(writesBefore)
+        .map((write) => write.windowId),
+    ).not.toContain(t);
     expect(after.windows.find((window) => window.id === one)?.workspace).toBe("1");
   });
 });
@@ -1282,7 +1294,11 @@ describe("displaced workspace rollback on multi-display moves (round 3 issue 2)"
     await seedWorkspace(h, [w1]);
 
     // Populate `away` on the LEFT display.
-    await h.run({ type: "moveWorkspaceToDisplay", workspace: "away", displayId: "display:sim-left" });
+    await h.run({
+      type: "moveWorkspaceToDisplay",
+      workspace: "away",
+      displayId: "display:sim-left",
+    });
     const wU = h.fake.addWindow(makeWindow({ x: -1400, y: 100 }));
     await h.run({ type: "reconcile" });
     await h.run({ type: "moveWindowToWorkspace", windowId: wU, workspace: "away" });
@@ -1312,8 +1328,7 @@ describe("capture-phase strictness (round 3 issue 3)", () => {
     let hideWindow: WId | null = null;
     const h = await bootstrap(undefined, (inner) => ({
       ...inner,
-      getWindow: (id) =>
-        id === hideWindow ? Effect.succeed(null) : inner.getWindow(id),
+      getWindow: (id) => (id === hideWindow ? Effect.succeed(null) : inner.getWindow(id)),
     }));
     const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     const w2 = h.fake.addWindow(makeWindow({ x: 900, y: 300 }));
@@ -1388,10 +1403,10 @@ describe("compensation identity race (round 3 issue 4)", () => {
     // it WHILE its write is in flight — the native identity guard must abort.
     gate.arm((id, op) => id === w2 && op === "frame");
     const pending = Effect.runPromiseExit(
-      (h.engine.execute({
+      h.engine.execute({
         type: "moveDirection",
         direction: "right",
-      }) as unknown as Effect.Effect<CommandResult, import("../src/commands.ts").CommandError>),
+      }) as unknown as Effect.Effect<CommandResult, import("../src/commands.ts").CommandError>,
     );
     await waitFor(() => gate.isSuspended());
     h.fake.swapBackingElement(w2);
@@ -1403,9 +1418,7 @@ describe("compensation identity race (round 3 issue 4)", () => {
     if (Exit.isSuccess(exit)) throw new Error("expected moveDirection to fail");
     const typedFailure = Cause.failureOption(exit.cause);
     const errCode =
-      typedFailure._tag === "Some"
-        ? (typedFailure.value as { code: string }).code
-        : "unknown";
+      typedFailure._tag === "Some" ? (typedFailure.value as { code: string }).code : "unknown";
     expect(["inventory_stale", "timeout"]).toContain(errCode);
 
     // Replacement untouched at its nudged position; peer restored.
@@ -1426,11 +1439,12 @@ describe("command waits behind blocked reconciliation (round 3 issue 6)", () => 
       ...inner,
       getWindows: () =>
         suspendGetWindows
-          ? Effect.async<ReadonlyArray<import("../src/schema.ts").WindowObservation>, PlatformError>(
-              (res) => {
-                resumers.push(() => res(inner.getWindows()));
-              },
-            )
+          ? Effect.async<
+              ReadonlyArray<import("../src/schema.ts").WindowObservation>,
+              PlatformError
+            >((res) => {
+              resumers.push(() => res(inner.getWindows()));
+            })
           : inner.getWindows(),
     }));
     const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
@@ -1662,11 +1676,13 @@ describe("atomic identity guard end-to-end (final issue 3)", () => {
     expect((await h.snapshot()).health).toBe("degraded");
     // No SUCCESSFUL adapter write ever landed on the stray after arming.
     expect(
-      h.fake.writes().slice(writeMark).some((x) => x.windowId === stray),
+      h.fake
+        .writes()
+        .slice(writeMark)
+        .some((x) => x.windowId === stray),
     ).toBe(false);
   });
 });
-
 
 describe("pending focus signal observed by waiting command (final issue 4)", () => {
   test("queued directional command resolves from the pre-idle applied signal", async () => {
@@ -1770,9 +1786,7 @@ describe("required-nullable subrole in identity fingerprint (final fix 2)", () =
     // The guarded compensation write was refused atomically: replacement
     // remains EXACTLY as materialized (same frame; subrole now set).
     expect(await frameOf(h, w1)).toEqual(w1Before);
-    const obsAfter = h.fake
-      .windowIds()
-      .length; // sanity liveness
+    const obsAfter = h.fake.windowIds().length; // sanity liveness
     void obsAfter;
     expect((await h.snapshot()).health).toBe("degraded");
     // Peer restored completely.

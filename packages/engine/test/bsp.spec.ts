@@ -19,12 +19,13 @@ import { makeDisplay } from "./helpers/fake-platform.ts";
 
 const leaf = (windowId: WindowId): BspNode => ({ kind: "leaf", windowId });
 
-const split = (
-  axis: SplitAxis,
-  ratio: number,
-  first: BspNode,
-  second: BspNode,
-): BspNode => ({ kind: "split", axis, ratio, first, second });
+const split = (axis: SplitAxis, ratio: number, first: BspNode, second: BspNode): BspNode => ({
+  kind: "split",
+  axis,
+  ratio,
+  first,
+  second,
+});
 
 const frame = (x: number, y: number, width: number, height: number): Frame => ({
   x,
@@ -33,8 +34,10 @@ const frame = (x: number, y: number, width: number, height: number): Frame => ({
   height,
 });
 
-const constraintMap = (entries: Record<WindowId, Constraints>): (id: WindowId) => Constraints | undefined =>
-  (id) => entries[id];
+const constraintMap =
+  (entries: Record<WindowId, Constraints>): ((id: WindowId) => Constraints | undefined) =>
+  (id) =>
+    entries[id];
 
 describe("BSP tree shape", () => {
   describe("insertLeaf", () => {
@@ -68,10 +71,20 @@ describe("BSP tree shape", () => {
     });
 
     test("insertion into a nested tree targets the given leaf and preserves the rest", () => {
-      const tree = split("vertical", 0.5, leaf("a"), split("horizontal", 0.6, leaf("b"), leaf("c")));
+      const tree = split(
+        "vertical",
+        0.5,
+        leaf("a"),
+        split("horizontal", 0.6, leaf("b"), leaf("c")),
+      );
       const next = insertLeaf(tree, "b", "d", frame(0, 0, 400, 800));
       expect(next).toEqual(
-        split("vertical", 0.5, leaf("a"), split("horizontal", 0.6, split("horizontal", 0.5, leaf("b"), leaf("d")), leaf("c"))),
+        split(
+          "vertical",
+          0.5,
+          leaf("a"),
+          split("horizontal", 0.6, split("horizontal", 0.5, leaf("b"), leaf("d")), leaf("c")),
+        ),
       );
       expect(memberIds(next!)).toEqual(["a", "b", "d", "c"]);
     });
@@ -89,7 +102,12 @@ describe("BSP tree shape", () => {
     });
 
     test("removing an inner leaf keeps the outer ratio and promotes only its sibling", () => {
-      const tree = split("vertical", 0.35, split("horizontal", 0.72, leaf("a"), leaf("b")), leaf("c"));
+      const tree = split(
+        "vertical",
+        0.35,
+        split("horizontal", 0.72, leaf("a"), leaf("b")),
+        leaf("c"),
+      );
       expect(removeLeaf(tree, "a")).toEqual(split("vertical", 0.35, leaf("b"), leaf("c")));
     });
 
@@ -137,20 +155,10 @@ describe("BSP tree shape", () => {
       );
       const moved = moveLeaf(tree, "b", "a", "left", frame(0, 0, 600, 900));
       expect(moved).toEqual(
-        split(
-          "vertical",
-          0.5,
-          split("horizontal", 0.5, leaf("b"), leaf("a")),
-          leaf("c"),
-        ),
+        split("vertical", 0.5, split("horizontal", 0.5, leaf("b"), leaf("a")), leaf("c")),
       );
       expect(moveLeaf(moved, "b", "a", "down")).toEqual(
-        split(
-          "vertical",
-          0.5,
-          split("horizontal", 0.5, leaf("a"), leaf("b")),
-          leaf("c"),
-        ),
+        split("vertical", 0.5, split("horizontal", 0.5, leaf("a"), leaf("b")), leaf("c")),
       );
     });
 
@@ -162,12 +170,7 @@ describe("BSP tree shape", () => {
         split("horizontal", 0.7, leaf("b"), leaf("c")),
       );
       expect(moveLeaf(tree, "b", "c", "down", frame(600, 500, 600, 400))).toEqual(
-        split(
-          "vertical",
-          0.4,
-          leaf("a"),
-          split("horizontal", 0.5, leaf("c"), leaf("b")),
-        ),
+        split("vertical", 0.4, leaf("a"), split("horizontal", 0.5, leaf("c"), leaf("b"))),
       );
     });
   });
@@ -294,9 +297,7 @@ describe("BSP two-pane solve", () => {
       planLayout(
         {
           ...input,
-          resolve: constraintsResolver(
-            constraintMap({ wide: { minWidth: 900, maxWidth: 800 } }),
-          ),
+          resolve: constraintsResolver(constraintMap({ wide: { minWidth: 900, maxWidth: 800 } })),
         },
         ["overlap"],
       ),
@@ -315,7 +316,12 @@ describe("subtree aggregate bounds", () => {
   );
 
   test("minimums sum along the split axis (+gap); maximum sums only when BOTH sides bounded", () => {
-    const both = aggregateBounds(split("vertical", 0.5, leaf("w1"), leaf("w2")), "vertical", 8, resolve);
+    const both = aggregateBounds(
+      split("vertical", 0.5, leaf("w1"), leaf("w2")),
+      "vertical",
+      8,
+      resolve,
+    );
     expect(both).toEqual({ min: 708, max: 1108 });
 
     const oneUnbounded = aggregateBounds(

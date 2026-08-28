@@ -63,8 +63,7 @@ export function clampFrameToBounds(frame: Frame, bounds: Frame): Frame {
 
 export type FrameComponent = "x" | "y" | "width" | "height";
 
-const componentDelta = (a: Frame, b: Frame, c: FrameComponent): number =>
-  Math.abs(a[c] - b[c]);
+const componentDelta = (a: Frame, b: Frame, c: FrameComponent): number => Math.abs(a[c] - b[c]);
 
 export function withinTolerance(a: Frame, b: Frame, tolerance: number): boolean {
   return (

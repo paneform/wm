@@ -127,8 +127,11 @@ class ScriptedOs {
   frameOf(id: WindowId): Frame | undefined {
     return this.frames.get(id);
   }
-  private readonly rules: Array<{ windowId: WindowId; at: { x: number; y: number }; remaining: number }> =
-    [];
+  private readonly rules: Array<{
+    windowId: WindowId;
+    at: { x: number; y: number };
+    remaining: number;
+  }> = [];
   private driftCount = 0;
 
   constructor(
@@ -155,18 +158,14 @@ class ScriptedOs {
 
   /** Raw monotone predicate of the emulated OS: granted iff both axes' visibilities clear their limits. */
   grantedAtVisibility(horizontal: number, vertical: number): boolean {
-    return (
-      horizontal >= this.limits.horizontal - EPS && vertical >= this.limits.vertical - EPS
-    );
+    return horizontal >= this.limits.horizontal - EPS && vertical >= this.limits.vertical - EPS;
   }
 
   private visibilityOf(id: WindowId, point: { x: number; y: number }): { h: number; v: number } {
     const current = this.frames.get(id);
     if (current === undefined) throw new Error(`unknown scripted window ${id}`);
     const d = this.osDisplay.frame;
-    const h = isLeftCorner(this.corner)
-      ? point.x + current.width - d.x
-      : d.x + d.width - point.x;
+    const h = isLeftCorner(this.corner) ? point.x + current.width - d.x : d.x + d.width - point.x;
     const v = isBottomCorner(this.corner)
       ? d.y + d.height - point.y
       : point.y + current.height - d.y;
@@ -183,13 +182,16 @@ class ScriptedOs {
     }
     const rule = this.rules.find(
       (r) =>
-        r.remaining > 0 &&
-        r.windowId === id &&
-        (Number.isNaN(r.at.x) || samePoint(r.at, point)),
+        r.remaining > 0 && r.windowId === id && (Number.isNaN(r.at.x) || samePoint(r.at, point)),
     );
     if (rule !== undefined) {
       rule.remaining -= 1;
-      this.writes.push({ windowId: id, point: { ...point }, observed: { ...current }, failed: true });
+      this.writes.push({
+        windowId: id,
+        point: { ...point },
+        observed: { ...current },
+        failed: true,
+      });
       return Effect.fail(
         new PlatformError({ code: "rejected", detail: "scripted position refusal" }),
       );
@@ -246,10 +248,8 @@ class ScriptedOs {
     return {
       events: Stream.empty,
       getTopology: () => Effect.succeed({ displays: [self.osDisplay] }),
-      getWindows: () =>
-        Effect.succeed([...self.frames.keys()].map((id) => self.observationOf(id))),
-      getWindow: (id) =>
-        Effect.succeed(self.frames.has(id) ? self.observationOf(id) : null),
+      getWindows: () => Effect.succeed([...self.frames.keys()].map((id) => self.observationOf(id))),
+      getWindow: (id) => Effect.succeed(self.frames.has(id) ? self.observationOf(id) : null),
       setWindowFrame: (id, f) => self.setPosition(id, { x: f.x, y: f.y }),
       setWindowPosition: (id, point) => self.setPosition(id, point),
       setWindowSize: (id, size) => {
@@ -306,7 +306,11 @@ describe("corner target math", () => {
   });
 
   test("negative-coordinate display (left of/above primary): same formulas hold", () => {
-    const d = display("display:neg", frame(-1920, -500, 1920, 1080), frame(-1920, -462, 1920, 1042));
+    const d = display(
+      "display:neg",
+      frame(-1920, -500, 1920, 1080),
+      frame(-1920, -462, 1920, 1042),
+    );
     const small: Size = { width: 640, height: 480 };
     const vis: ParkingVisibility = { horizontal: 2, vertical: 40 };
     // maxX = 0, maxY = 580
@@ -345,7 +349,11 @@ describe("corner feasibility (zero-area intersection rule)", () => {
   });
 
   test(`≥${1} pt overlap in both axes is rejected`, () => {
-    const neighbor = display("display:right", frame(1000, 0, 1000, 700), frame(1000, 38, 1000, 662));
+    const neighbor = display(
+      "display:right",
+      frame(1000, 0, 1000, 700),
+      frame(1000, 38, 1000, 662),
+    );
     // 1 pt into neighbor horizontally, overlapping vertically ⇒ positive area
     expect(cornerFeasible(frame(999, 0, 300, 200), self.id, [self, neighbor])).toBe(false);
     // 1 pt into neighbor vertically, overlapping horizontally
@@ -365,7 +373,12 @@ describe("corner feasibility (zero-area intersection rule)", () => {
       frame(-1920, 0, 1920, 982),
       frame(-1920, 38, 1920, 944),
     );
-    const primary = display("display:primary", frame(0, 0, 1512, 982), frame(0, 38, 1512, 944), true);
+    const primary = display(
+      "display:primary",
+      frame(0, 0, 1512, 982),
+      frame(0, 38, 1512, 944),
+      true,
+    );
     const both = [secondaryLeft, primary];
 
     // The left display can only park further LEFT (away from the neighbor).
@@ -374,10 +387,7 @@ describe("corner feasibility (zero-area intersection rule)", () => {
       "topLeft",
     ]);
     // The primary can only park further RIGHT.
-    expect(feasibleCorners(primary, both, size, visibility)).toEqual([
-      "bottomRight",
-      "topRight",
-    ]);
+    expect(feasibleCorners(primary, both, size, visibility)).toEqual(["bottomRight", "topRight"]);
   });
 
   test("a fully surrounded display has no feasible corners", () => {
@@ -492,7 +502,9 @@ describe("clamp discovery (scripted OS)", () => {
     const drifty = new ScriptedOs(d, corner, limits, [{ id: "window:seed", original: parked }], {
       driftOnRefusedHorizontal: true,
     });
-    const driftyResult = runDiscovery(drifty, d, [d], corner, [makeCandidate(parked, "window:seed")]);
+    const driftyResult = runDiscovery(drifty, d, [d], corner, [
+      makeCandidate(parked, "window:seed"),
+    ]);
     // NOT inconclusive: discovery still succeeds…
     expect(isDiscoverySuccess(driftyResult)).toBe(true);
     expect(drifty.orthogonalDrifts).toBeGreaterThanOrEqual(2);
@@ -586,10 +598,15 @@ describe("clamp discovery (scripted OS)", () => {
     expect(isDiscoverySuccess(result)).toBe(true);
     if (!isDiscoverySuccess(result)) return;
     expect(os.writes.some((w) => w.windowId === "window:dead" && w.failed)).toBe(true);
-    const jointPoint = cornerTarget(NEG_DISPLAY, corner, { width: 320, height: 240 }, result.visibility);
-    expect(os.writes.some((w) => w.windowId === "window:live" && samePoint(w.point, jointPoint))).toBe(
-      true,
+    const jointPoint = cornerTarget(
+      NEG_DISPLAY,
+      corner,
+      { width: 320, height: 240 },
+      result.visibility,
     );
+    expect(
+      os.writes.some((w) => w.windowId === "window:live" && samePoint(w.point, jointPoint)),
+    ).toBe(true);
     expect(os.writes.every((w) => w.windowId !== "window:live" || !w.failed)).toBe(true);
   });
 });
@@ -656,9 +673,7 @@ describe("clamp discovery (reference fake platform)", () => {
 // ---------------------------------------------------------------------------
 
 describe("probe candidate ordering (stale-probe starvation guards)", () => {
-  const displays = [
-    display("display:a", frame(0, 0, 1000, 700), frame(0, 38, 1000, 662), true),
-  ];
+  const displays = [display("display:a", frame(0, 0, 1000, 700), frame(0, 38, 1000, 662), true)];
   const onscreenA = makeCandidate(frame(50, 60, 300, 200), "window:on-a");
   const onscreenB = makeCandidate(frame(500, 100, 300, 200), "window:on-b");
   const offscreen = makeCandidate(frame(-5000, -5000, 300, 200), "window:off");
@@ -691,9 +706,7 @@ describe("probe candidate ordering (stale-probe starvation guards)", () => {
     expect(ids).toContain("window:parked-1");
     expect(new Set(ids).size).toBe(ids.length);
     // Every surviving input appears exactly once.
-    expect([...ids].sort()).toEqual(
-      ["window:off", "window:on-a", "window:parked-1"].sort(),
-    );
+    expect([...ids].sort()).toEqual(["window:off", "window:on-a", "window:parked-1"].sort());
   });
 
   // DISCREPANCY: docs/rewrite/testing-guide.md says an already-parked
@@ -706,11 +719,7 @@ describe("probe candidate ordering (stale-probe starvation guards)", () => {
       new Set(["window:parked-1"]),
       displays,
     );
-    expect(ordered.map((w) => w.id)).toEqual([
-      "window:off",
-      "window:on-a",
-      "window:parked-1",
-    ]);
+    expect(ordered.map((w) => w.id)).toEqual(["window:off", "window:on-a", "window:parked-1"]);
   });
 
   test("multiple parked seeds rotate the first to the end (actual behavior)", () => {
@@ -719,11 +728,7 @@ describe("probe candidate ordering (stale-probe starvation guards)", () => {
       new Set(["window:parked-1", "window:parked-2"]),
       displays,
     );
-    expect(ordered.map((w) => w.id)).toEqual([
-      "window:parked-2",
-      "window:on-a",
-      "window:parked-1",
-    ]);
+    expect(ordered.map((w) => w.id)).toEqual(["window:parked-2", "window:on-a", "window:parked-1"]);
   });
 
   test("intersectsAnyDisplay uses strict positive area (edge touch is off-display)", () => {
@@ -803,7 +808,10 @@ describe("parking facts fingerprinting", () => {
   });
 
   test("withParkingFact replaces per display+corner and preserves other entries", () => {
-    const keepOtherDisplay = factFor(display("display:z", frame(0, 0, 100, 100), frame(0, 0, 100, 100)), "topLeft");
+    const keepOtherDisplay = factFor(
+      display("display:z", frame(0, 0, 100, 100), frame(0, 0, 100, 100)),
+      "topLeft",
+    );
     const oldSameKey = factFor(BASE, "bottomLeft");
     const otherCorner = factFor(BASE, "topLeft");
     const updated = { ...oldSameKey, visibility: { horizontal: 2, vertical: 40 } };
@@ -818,7 +826,9 @@ describe("parking facts fingerprinting", () => {
 
   test("OS version participates in the fingerprint", () => {
     expect(displayParkingFingerprint(BASE, "14.5")).toBe(displayParkingFingerprint(BASE, "14.5"));
-    expect(displayParkingFingerprint(BASE, "14.5")).not.toBe(displayParkingFingerprint(BASE, "15.0"));
+    expect(displayParkingFingerprint(BASE, "14.5")).not.toBe(
+      displayParkingFingerprint(BASE, "15.0"),
+    );
     expect(displayParkingFingerprint(BASE)).not.toBe(displayParkingFingerprint(BASE, "14.5"));
   });
 });
@@ -894,7 +904,9 @@ describe("property: discovery vs exhaustive oracle (seeded fast-check)", () => {
           makeCandidate(originalFrame, "window:seed"),
         ]);
         if (!isDiscoverySuccess(result)) {
-          throw new Error(`discovery failed for limits ${JSON.stringify(limits)}: ${JSON.stringify(result)}`);
+          throw new Error(
+            `discovery failed for limits ${JSON.stringify(limits)}: ${JSON.stringify(result)}`,
+          );
         }
 
         // Exhaustive oracle: smallest integer visibility each axis grants,
@@ -910,7 +922,9 @@ describe("property: discovery vs exhaustive oracle (seeded fast-check)", () => {
         // Acceptance band: probes within ±PARKING_ACCEPTANCE_PT of the true
         // boundary are honored by the OS, so the measured limit may land one
         // point below it — never above, never further below.
-        expect(result.visibility.horizontal).toBeGreaterThanOrEqual(oracleH - PARKING_ACCEPTANCE_PT);
+        expect(result.visibility.horizontal).toBeGreaterThanOrEqual(
+          oracleH - PARKING_ACCEPTANCE_PT,
+        );
         expect(result.visibility.horizontal).toBeLessThanOrEqual(oracleH);
         expect(result.visibility.vertical).toBeGreaterThanOrEqual(oracleV - PARKING_ACCEPTANCE_PT);
         expect(result.visibility.vertical).toBeLessThanOrEqual(oracleV);
@@ -918,9 +932,9 @@ describe("property: discovery vs exhaustive oracle (seeded fast-check)", () => {
         expect(Number.isInteger(result.visibility.vertical)).toBe(true);
 
         // Safety: the finally-verified combined point is honored by the OS.
-        expect(os.grantedAtVisibility(result.visibility.horizontal, result.visibility.vertical)).toBe(
-          true,
-        );
+        expect(
+          os.grantedAtVisibility(result.visibility.horizontal, result.visibility.vertical),
+        ).toBe(true);
         // Budget respected across both axes.
         expect(result.probesUsed).toBeLessThanOrEqual(budget);
       },

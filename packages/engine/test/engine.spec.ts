@@ -4,7 +4,12 @@ import { createEngine } from "../src/engine.ts";
 import type { CommandResult, StateSnapshot } from "../src/commands.ts";
 import type { Clock, ConfigSource, PlatformAdapter } from "../src/platform.ts";
 import { PlatformError, type Frame } from "../src/schema.ts";
-import { createFakePlatform, makeDisplay, makeWindow, type FakeWindowSpec } from "./helpers/fake-platform.ts";
+import {
+  createFakePlatform,
+  makeDisplay,
+  makeWindow,
+  type FakeWindowSpec,
+} from "./helpers/fake-platform.ts";
 
 // Engine pipeline integration — docs/rewrite/testing-guide.md §Engine pipeline.
 // Deterministic: fake platform + virtual-ish clock (engine never waits on real
@@ -15,8 +20,7 @@ import { createFakePlatform, makeDisplay, makeWindow, type FakeWindowSpec } from
 // timeouts measure real seconds.
 const CLOCK: Clock = {
   now: () => Date.now(),
-  sleep: (millis: number) =>
-    Effect.sleep(`${millis >= 500 ? millis : Math.min(millis, 2)} millis`),
+  sleep: (millis: number) => Effect.sleep(`${millis >= 500 ? millis : Math.min(millis, 2)} millis`),
 };
 
 const CONFIG_SOURCE: ConfigSource = {
@@ -76,7 +80,10 @@ const waitFor = async (check: () => boolean, timeoutMs = 500): Promise<void> => 
 
 const parkedProbeHarness = async (
   spec: FakeWindowSpec,
-  wrapAdapter?: (adapter: PlatformAdapter, fake: ReturnType<typeof createFakePlatform>) => PlatformAdapter,
+  wrapAdapter?: (
+    adapter: PlatformAdapter,
+    fake: ReturnType<typeof createFakePlatform>,
+  ) => PlatformAdapter,
 ) => {
   const display = makeDisplay();
   const fake = createFakePlatform({ clock: CLOCK, displays: [display] });
@@ -84,22 +91,28 @@ const parkedProbeHarness = async (
   const id = fake.addWindow(makeWindow({ ...spec, bundleId }));
   fake.addWindow(makeWindow({ bundleId: "com.example.visible-probe-peer" }));
   const configSource: ConfigSource = {
-    load: () => Effect.succeed({
-      workspaces: [{ name: "parked", preferredDisplay: display.id, assign: [{ bundleId }] }],
-    }),
+    load: () =>
+      Effect.succeed({
+        workspaces: [{ name: "parked", preferredDisplay: display.id, assign: [{ bundleId }] }],
+      }),
     changes: () => Stream.empty,
   };
   const wrapped = wrapAdapter?.(fake.adapter, fake);
-  const adapter = wrapped === undefined ? fake.adapter : (() => {
-    const { executeBatch: _batch, ...legacy } = wrapped;
-    void _batch;
-    return legacy;
-  })();
-  const engine = await Effect.runPromise(createEngine({
-    adapter,
-    configSource,
-    clock: CLOCK,
-  }));
+  const adapter =
+    wrapped === undefined
+      ? fake.adapter
+      : (() => {
+          const { executeBatch: _batch, ...legacy } = wrapped;
+          void _batch;
+          return legacy;
+        })();
+  const engine = await Effect.runPromise(
+    createEngine({
+      adapter,
+      configSource,
+      clock: CLOCK,
+    }),
+  );
   await Effect.runPromise(engine.start());
   await Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "1" }));
   return { fake, engine, id };
@@ -144,22 +157,24 @@ describe("engine pipeline (fake platform)", () => {
     const fake = createFakePlatform({ clock: CLOCK, displays: [makeDisplay()] });
     const windowId = fake.addWindow(makeWindow({ id: "window:startup-race" }));
     const [window] = await Effect.runPromise(fake.adapter.getWindows());
-    const engine = await Effect.runPromise(createEngine({
-      adapter: {
-        ...fake.adapter,
-        events: Stream.concat(
-          Stream.make({ kind: "window_added" as const, window: window! }),
-          Stream.never,
-        ),
-      },
-      configSource: CONFIG_SOURCE,
-      clock: CLOCK,
-    }));
+    const engine = await Effect.runPromise(
+      createEngine({
+        adapter: {
+          ...fake.adapter,
+          events: Stream.concat(
+            Stream.make({ kind: "window_added" as const, window: window! }),
+            Stream.never,
+          ),
+        },
+        configSource: CONFIG_SOURCE,
+        clock: CLOCK,
+      }),
+    );
 
     await Effect.runPromise(engine.start());
 
     const workspace = (await Effect.runPromise(engine.state())).workspaces.find((candidate) =>
-      candidate.members.includes(windowId)
+      candidate.members.includes(windowId),
     );
     const countLeaves = (tree: NonNullable<typeof workspace>["tree"]): number =>
       tree.kind === "leaf"
@@ -177,11 +192,14 @@ describe("engine pipeline (fake platform)", () => {
     const configSource: ConfigSource = {
       load: () => Effect.succeed(raw),
       changes: () => Stream.empty,
-      prepare: (config, mode) => Effect.sync(() => {
-        prepared.push({ keybinds: config.keybinds ?? {}, mode });
-      }),
+      prepare: (config, mode) =>
+        Effect.sync(() => {
+          prepared.push({ keybinds: config.keybinds ?? {}, mode });
+        }),
     };
-    const engine = await Effect.runPromise(createEngine({ adapter: fake.adapter, configSource, clock: CLOCK }));
+    const engine = await Effect.runPromise(
+      createEngine({ adapter: fake.adapter, configSource, clock: CLOCK }),
+    );
     await Effect.runPromise(engine.start());
     raw = {};
     await Effect.runPromise(engine.execute({ type: "reloadConfig", mode: "full" }));
@@ -194,25 +212,32 @@ describe("engine pipeline (fake platform)", () => {
   test("parked limit probe preserves bottom-left intent, slivers, and focus", async () => {
     const display = makeDisplay();
     const fake = createFakePlatform({ clock: CLOCK, displays: [display] });
-    const id = fake.addWindow(makeWindow({
-      bundleId: "com.example.parked-probe",
-      personality: {
-        kind: "minMaxClamp",
-        constraints: { minWidth: 320, minHeight: 240, maxWidth: 1200, maxHeight: 800 },
-      },
-    }));
+    const id = fake.addWindow(
+      makeWindow({
+        bundleId: "com.example.parked-probe",
+        personality: {
+          kind: "minMaxClamp",
+          constraints: { minWidth: 320, minHeight: 240, maxWidth: 1200, maxHeight: 800 },
+        },
+      }),
+    );
     const peer = fake.addWindow(makeWindow({ bundleId: "com.example.visible" }));
     const configSource: ConfigSource = {
-      load: () => Effect.succeed({
-        workspaces: [{
-          name: "parked",
-          preferredDisplay: display.id,
-          assign: [{ bundleId: "com.example.parked-probe" }],
-        }],
-      }),
+      load: () =>
+        Effect.succeed({
+          workspaces: [
+            {
+              name: "parked",
+              preferredDisplay: display.id,
+              assign: [{ bundleId: "com.example.parked-probe" }],
+            },
+          ],
+        }),
       changes: () => Stream.empty,
     };
-    const engine = await Effect.runPromise(createEngine({ adapter: fake.adapter, configSource, clock: CLOCK }));
+    const engine = await Effect.runPromise(
+      createEngine({ adapter: fake.adapter, configSource, clock: CLOCK }),
+    );
     await Effect.runPromise(engine.start());
     await Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "1" }));
     fake.focusWindowExternal(peer);
@@ -220,7 +245,9 @@ describe("engine pipeline (fake platform)", () => {
     const durable = fake.frameOf(id)!;
     const writesBefore = fake.writes().length;
 
-    const result = await Effect.runPromise(engine.execute({ type: "probeWindowLimits", windowId: id }));
+    const result = await Effect.runPromise(
+      engine.execute({ type: "probeWindowLimits", windowId: id }),
+    );
 
     expect(result).toMatchObject({
       type: "windowLimitsProbe",
@@ -258,12 +285,20 @@ describe("engine pipeline (fake platform)", () => {
     expect(after.focusedWorkspace).toBe(before.focusedWorkspace);
     expect(after.workspaces).toEqual(before.workspaces);
 
-    const trialWrites = fake.writes().slice(writesBefore).filter((write) => write.windowId === id);
+    const trialWrites = fake
+      .writes()
+      .slice(writesBefore)
+      .filter((write) => write.windowId === id);
     for (const write of trialWrites) {
       if (write.requested.x === durable.x && write.requested.y === durable.y) continue;
-      if (write.requested.width === durable.width && write.requested.height === durable.height) continue;
-      expect(write.requested.x + write.requested.width - display.frame.x).toBe(Math.min(1, write.requested.width));
-      expect(display.frame.y + display.frame.height - write.requested.y).toBe(Math.min(52, write.requested.height));
+      if (write.requested.width === durable.width && write.requested.height === durable.height)
+        continue;
+      expect(write.requested.x + write.requested.width - display.frame.x).toBe(
+        Math.min(1, write.requested.width),
+      );
+      expect(display.frame.y + display.frame.height - write.requested.y).toBe(
+        Math.min(52, write.requested.height),
+      );
       if (write.op === "position") {
         expect(write.observed.x + write.observed.width - display.frame.x).toBe(1);
         expect(display.frame.y + display.frame.height - write.observed.y).toBe(52);
@@ -275,14 +310,16 @@ describe("engine pipeline (fake platform)", () => {
   test("parked position clamp is reported separately from maximum size evidence", async () => {
     const display = makeDisplay();
     const fake = createFakePlatform({ clock: CLOCK, displays: [display] });
-    const id = fake.addWindow(makeWindow({
-      bundleId: "com.example.clamped-parked-probe",
-      width: 700,
-      personality: {
-        kind: "minMaxClamp",
-        constraints: { minWidth: 320, minHeight: 240, maxWidth: 800, maxHeight: 800 },
-      },
-    }));
+    const id = fake.addWindow(
+      makeWindow({
+        bundleId: "com.example.clamped-parked-probe",
+        width: 700,
+        personality: {
+          kind: "minMaxClamp",
+          constraints: { minWidth: 320, minHeight: 240, maxWidth: 800, maxHeight: 800 },
+        },
+      }),
+    );
     fake.addWindow(makeWindow({ bundleId: "com.example.visible-clamp-peer" }));
     let clampPositions = false;
     const adapter: PlatformAdapter = {
@@ -299,13 +336,16 @@ describe("engine pipeline (fake platform)", () => {
         ),
     };
     const configSource: ConfigSource = {
-      load: () => Effect.succeed({
-        workspaces: [{
-          name: "parked",
-          preferredDisplay: display.id,
-          assign: [{ bundleId: "com.example.clamped-parked-probe" }],
-        }],
-      }),
+      load: () =>
+        Effect.succeed({
+          workspaces: [
+            {
+              name: "parked",
+              preferredDisplay: display.id,
+              assign: [{ bundleId: "com.example.clamped-parked-probe" }],
+            },
+          ],
+        }),
       changes: () => Stream.empty,
     };
     const engine = await Effect.runPromise(createEngine({ adapter, configSource, clock: CLOCK }));
@@ -316,26 +356,32 @@ describe("engine pipeline (fake platform)", () => {
     const durable = fake.frameOf(id)!;
     const focusedBefore = fake.focusedWindowId();
     const stateBefore = await Effect.runPromise(engine.state());
-    const result = await Effect.runPromise(engine.execute({ type: "probeWindowLimits", windowId: id }));
+    const result = await Effect.runPromise(
+      engine.execute({ type: "probeWindowLimits", windowId: id }),
+    );
     expect(result).toMatchObject({
       target: { positionCorrection: "clamped" },
       findings: { maxWidth: { kind: "exact", value: 800 } },
     });
     if (result.type === "windowLimitsProbe") {
-      expect(result.positionDiagnostics).toContainEqual(expect.objectContaining({
-        sample: "minWidth",
-        correction: "clamped",
-        requestedIdealPoint: { x: -319, y: expect.any(Number) },
-        observedPoint: { x: -300, y: expect.any(Number) },
-        actualRetainedVisibility: { horizontal: 20, vertical: 52 },
-      }));
-      expect(result.positionDiagnostics).toContainEqual(expect.objectContaining({
-        sample: "maxWidth",
-        correction: "clamped",
-        requestedIdealPoint: { x: -799, y: expect.any(Number) },
-        observedPoint: { x: -760, y: expect.any(Number) },
-        actualRetainedVisibility: { horizontal: 40, vertical: 52 },
-      }));
+      expect(result.positionDiagnostics).toContainEqual(
+        expect.objectContaining({
+          sample: "minWidth",
+          correction: "clamped",
+          requestedIdealPoint: { x: -319, y: expect.any(Number) },
+          observedPoint: { x: -300, y: expect.any(Number) },
+          actualRetainedVisibility: { horizontal: 20, vertical: 52 },
+        }),
+      );
+      expect(result.positionDiagnostics).toContainEqual(
+        expect.objectContaining({
+          sample: "maxWidth",
+          correction: "clamped",
+          requestedIdealPoint: { x: -799, y: expect.any(Number) },
+          observedPoint: { x: -760, y: expect.any(Number) },
+          actualRetainedVisibility: { horizontal: 40, vertical: 52 },
+        }),
+      );
     }
     expect(fake.frameOf(id)).toEqual(durable);
     expect(fake.focusedWindowId()).toBe(focusedBefore);
@@ -353,7 +399,9 @@ describe("engine pipeline (fake platform)", () => {
     });
     const captured = h.fake.frameOf(h.id);
 
-    const result = await Effect.runPromise(h.engine.execute({ type: "probeWindowLimits", windowId: h.id }));
+    const result = await Effect.runPromise(
+      h.engine.execute({ type: "probeWindowLimits", windowId: h.id }),
+    );
     expect(result).toMatchObject({
       type: "windowLimitsProbe",
       originalFrame: captured,
@@ -373,11 +421,18 @@ describe("engine pipeline (fake platform)", () => {
     const h = await parkedProbeHarness({ personality: { kind: "fixedSize" } });
     const writesBefore = h.fake.writes().length;
 
-    const exit = await Effect.runPromiseExit(h.engine.execute({ type: "probeWindowLimits", windowId: h.id }));
+    const exit = await Effect.runPromiseExit(
+      h.engine.execute({ type: "probeWindowLimits", windowId: h.id }),
+    );
 
     expect(exit._tag).toBe("Failure");
-    const probeWrites = h.fake.writes().slice(writesBefore).filter((write) => write.windowId === h.id);
-    expect(probeWrites.some((write) => write.requested.width === 1 || write.requested.height === 1)).toBe(false);
+    const probeWrites = h.fake
+      .writes()
+      .slice(writesBefore)
+      .filter((write) => write.windowId === h.id);
+    expect(
+      probeWrites.some((write) => write.requested.width === 1 || write.requested.height === 1),
+    ).toBe(false);
   });
 
   test("explicit limit probe reports tested lower bounds instead of unbounded maxima", async () => {
@@ -390,7 +445,9 @@ describe("engine pipeline (fake platform)", () => {
     });
     const captured = h.fake.frameOf(h.id);
 
-    const result = await Effect.runPromise(h.engine.execute({ type: "probeWindowLimits", windowId: h.id }));
+    const result = await Effect.runPromise(
+      h.engine.execute({ type: "probeWindowLimits", windowId: h.id }),
+    );
     expect(result).toMatchObject({
       type: "windowLimitsProbe",
       findings: {
@@ -408,7 +465,9 @@ describe("engine pipeline (fake platform)", () => {
       personality: { kind: "minMaxClamp", constraints: {} },
     });
 
-    const result = await Effect.runPromise(h.engine.execute({ type: "probeWindowLimits", windowId: h.id }));
+    const result = await Effect.runPromise(
+      h.engine.execute({ type: "probeWindowLimits", windowId: h.id }),
+    );
 
     expect(result).toMatchObject({
       findings: {
@@ -429,7 +488,9 @@ describe("engine pipeline (fake platform)", () => {
       },
     });
 
-    const result = await Effect.runPromise(h.engine.execute({ type: "probeWindowLimits", windowId: h.id }));
+    const result = await Effect.runPromise(
+      h.engine.execute({ type: "probeWindowLimits", windowId: h.id }),
+    );
 
     expect(result).toMatchObject({
       findings: {
@@ -444,7 +505,9 @@ describe("engine pipeline (fake platform)", () => {
     await Effect.runPromise(h.engine.execute({ type: "pause" }));
     const writesBefore = h.fake.writes().length;
 
-    const exit = await Effect.runPromiseExit(h.engine.execute({ type: "probeWindowLimits", windowId: h.id }));
+    const exit = await Effect.runPromiseExit(
+      h.engine.execute({ type: "probeWindowLimits", windowId: h.id }),
+    );
 
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") expect(String(exit.cause)).toContain("paused");
@@ -460,7 +523,9 @@ describe("engine pipeline (fake platform)", () => {
     await h.run({ type: "reconcile" });
     const before = h.fake.writes().length;
 
-    const exit = await Effect.runPromiseExit(engineOf(h).execute({ type: "probeWindowLimits", windowId: id }));
+    const exit = await Effect.runPromiseExit(
+      engineOf(h).execute({ type: "probeWindowLimits", windowId: id }),
+    );
     expect(exit._tag).toBe("Failure");
     expect(h.fake.writes()).toHaveLength(before);
   });
@@ -471,7 +536,9 @@ describe("engine pipeline (fake platform)", () => {
     await h.run({ type: "reconcile" });
     h.fake.swapBackingElement(id);
 
-    const exit = await Effect.runPromiseExit(engineOf(h).execute({ type: "probeWindowLimits", windowId: id }));
+    const exit = await Effect.runPromiseExit(
+      engineOf(h).execute({ type: "probeWindowLimits", windowId: id }),
+    );
     expect(exit._tag).toBe("Failure");
   });
 
@@ -479,14 +546,16 @@ describe("engine pipeline (fake platform)", () => {
     const display = makeDisplay();
     const fake = createFakePlatform({ clock: CLOCK, displays: [display] });
     const bundleId = "com.example.restore-failure";
-    const id = fake.addWindow(makeWindow({
-      bundleId,
-      x: 100,
-      y: 100,
-      width: 700,
-      height: 500,
-      personality: { kind: "minMaxClamp", constraints: { minWidth: 100, minHeight: 100 } },
-    }));
+    const id = fake.addWindow(
+      makeWindow({
+        bundleId,
+        x: 100,
+        y: 100,
+        width: 700,
+        height: 500,
+        personality: { kind: "minMaxClamp", constraints: { minWidth: 100, minHeight: 100 } },
+      }),
+    );
     fake.addWindow(makeWindow({ bundleId: "com.example.restore-peer" }));
     let original = fake.frameOf(id)!;
     let rejectRestore = false;
@@ -500,20 +569,29 @@ describe("engine pipeline (fake platform)", () => {
           : fake.adapter.setWindowFrame(windowId, frame, expected);
       },
     };
-    const engine = await Effect.runPromise(createEngine({
-      adapter,
-      configSource: {
-        load: () => Effect.succeed({ workspaces: [{ name: "parked", preferredDisplay: display.id, assign: [{ bundleId }] }] }),
-        changes: () => Stream.empty,
-      },
-      clock: CLOCK,
-    }));
+    const engine = await Effect.runPromise(
+      createEngine({
+        adapter,
+        configSource: {
+          load: () =>
+            Effect.succeed({
+              workspaces: [
+                { name: "parked", preferredDisplay: display.id, assign: [{ bundleId }] },
+              ],
+            }),
+          changes: () => Stream.empty,
+        },
+        clock: CLOCK,
+      }),
+    );
     await Effect.runPromise(engine.start());
     await Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "1" }));
     original = fake.frameOf(id)!;
     rejectRestore = true;
 
-    const exit = await Effect.runPromiseExit(engine.execute({ type: "probeWindowLimits", windowId: id }));
+    const exit = await Effect.runPromiseExit(
+      engine.execute({ type: "probeWindowLimits", windowId: id }),
+    );
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") expect(String(exit.cause)).toContain("restoration failed");
   });
@@ -529,7 +607,9 @@ describe("engine pipeline (fake platform)", () => {
         getWindow: (id) => {
           if (armed && !failed && fake.writes().length > writesAtArm) {
             failed = true;
-            return Effect.fail(new PlatformError({ code: "rejected", detail: "injected post-write read failure" }));
+            return Effect.fail(
+              new PlatformError({ code: "rejected", detail: "injected post-write read failure" }),
+            );
           }
           return adapter.getWindow(id);
         },
@@ -539,7 +619,9 @@ describe("engine pipeline (fake platform)", () => {
     writesAtArm = h.fake.writes().length;
     armed = true;
 
-    const exit = await Effect.runPromiseExit(h.engine.execute({ type: "probeWindowLimits", windowId: h.id }));
+    const exit = await Effect.runPromiseExit(
+      h.engine.execute({ type: "probeWindowLimits", windowId: h.id }),
+    );
 
     expect(exit._tag).toBe("Failure");
     expect(failed).toBe(true);
@@ -551,7 +633,9 @@ describe("engine pipeline (fake platform)", () => {
     h.fake.nudgeSilent(h.id, { x: h.fake.frameOf(h.id)!.x + 40 });
     const writesBefore = h.fake.writes().length;
 
-    const exit = await Effect.runPromiseExit(h.engine.execute({ type: "probeWindowLimits", windowId: h.id }));
+    const exit = await Effect.runPromiseExit(
+      h.engine.execute({ type: "probeWindowLimits", windowId: h.id }),
+    );
 
     expect(exit._tag).toBe("Failure");
     expect(h.fake.writes()).toHaveLength(writesBefore);
@@ -564,17 +648,21 @@ describe("engine pipeline (fake platform)", () => {
       { personality: { kind: "minMaxClamp", constraints: { minWidth: 100, minHeight: 100 } } },
       (adapter, fake) => ({
         ...adapter,
-        getWindow: (id) => Effect.map(adapter.getWindow(id), (observation) =>
-          armed && fake.writes().length > writesAtArm && observation !== null
-            ? { ...observation, fullscreen: true }
-            : observation),
+        getWindow: (id) =>
+          Effect.map(adapter.getWindow(id), (observation) =>
+            armed && fake.writes().length > writesAtArm && observation !== null
+              ? { ...observation, fullscreen: true }
+              : observation,
+          ),
       }),
     );
     const original = h.fake.frameOf(h.id)!;
     writesAtArm = h.fake.writes().length;
     armed = true;
 
-    const exit = await Effect.runPromiseExit(h.engine.execute({ type: "probeWindowLimits", windowId: h.id }));
+    const exit = await Effect.runPromiseExit(
+      h.engine.execute({ type: "probeWindowLimits", windowId: h.id }),
+    );
 
     expect(exit._tag).toBe("Failure");
     expect(h.fake.frameOf(h.id)).toEqual(original);
@@ -612,13 +700,18 @@ describe("engine pipeline (fake platform)", () => {
       width: 900,
       personality: { kind: "minMaxClamp", constraints: { minWidth: 900, minHeight: 200 } },
     });
-    const result = await Effect.runPromise(h.engine.execute({ type: "probeWindowLimits", windowId: h.id }));
+    const result = await Effect.runPromise(
+      h.engine.execute({ type: "probeWindowLimits", windowId: h.id }),
+    );
     expect(result).toMatchObject({ profileUpdated: true });
     const writesAfterProbe = h.fake.writes().length;
     const peerId = h.fake.addWindow(makeWindow({ bundleId: application, width: 700 }));
 
     await Effect.runPromise(h.engine.execute({ type: "reconcile" }));
-    const peerWrites = h.fake.writes().slice(writesAfterProbe).filter((write) => write.windowId === peerId);
+    const peerWrites = h.fake
+      .writes()
+      .slice(writesAfterProbe)
+      .filter((write) => write.windowId === peerId);
     expect(peerWrites.length).toBeGreaterThan(0);
     expect(peerWrites.every((write) => write.requested.width >= 900)).toBe(true);
   });
@@ -641,15 +734,16 @@ describe("engine pipeline (fake platform)", () => {
     const windowId = fake.addWindow(makeWindow({ bundleId: "com.example.app" }));
     const unmatchedId = fake.addWindow(makeWindow({ bundleId: "com.example.other" }));
     const configSource: ConfigSource = {
-      load: () => Effect.succeed({
-        workspaces: [
-          {
-            name: "apps",
-            preferredDisplay: "display:sim-primary",
-            assign: [{ bundleId: "com.example.app" }],
-          },
-        ],
-      }),
+      load: () =>
+        Effect.succeed({
+          workspaces: [
+            {
+              name: "apps",
+              preferredDisplay: "display:sim-primary",
+              assign: [{ bundleId: "com.example.app" }],
+            },
+          ],
+        }),
       changes: () => Stream.empty,
     };
     const engine = await Effect.runPromise(
@@ -714,9 +808,7 @@ describe("engine pipeline (fake platform)", () => {
     const snapNormal = snap.windows.find((w) => w.id === normal);
     // The fixed-size window is never tiled into a BSP layout.
     if (snapFixed !== undefined && snapNormal !== undefined) {
-      const wsOfFixed = snap.workspaces.find((ws) =>
-        ws.members.includes(fixed),
-      );
+      const wsOfFixed = snap.workspaces.find((ws) => ws.members.includes(fixed));
       if (wsOfFixed !== undefined) {
         expect(wsOfFixed.floating.includes(fixed) || !wsOfFixed.members.includes(fixed)).toBe(true);
       }
@@ -784,9 +876,11 @@ describe("engine pipeline (fake platform)", () => {
     const parked = (await h.snapshot()).windows.find((window) => window.id === windowId);
 
     expect(parkingWrite?.windowId).toBe(windowId);
-    expect(parkingWrites.some((write) => JSON.stringify(write.observed) !== JSON.stringify(write.requested))).toBe(
-      true,
-    );
+    expect(
+      parkingWrites.some(
+        (write) => JSON.stringify(write.observed) !== JSON.stringify(write.requested),
+      ),
+    ).toBe(true);
     expect(parked).toMatchObject({ parked: true, frame: parkingWrite?.observed });
 
     const writesBeforeReconcile = h.fake.writes().length;
@@ -829,23 +923,29 @@ describe("engine pipeline (fake platform)", () => {
     await h.run({ type: "reconcile" });
     expect(h.fake.writes()).toHaveLength(writesAfterFirstReconcile);
 
-    await expect(h.run({ type: "focusWorkspace", name: "constrained-away" })).resolves.toMatchObject({
+    await expect(
+      h.run({ type: "focusWorkspace", name: "constrained-away" }),
+    ).resolves.toMatchObject({
       type: "ok",
     });
     const snapshot = await h.snapshot();
     expect(snapshot.focusedWorkspace).toBe("constrained-away");
-    expect(snapshot.windows.find((window) => window.id === constrained)).toMatchObject({ parked: true });
+    expect(snapshot.windows.find((window) => window.id === constrained)).toMatchObject({
+      parked: true,
+    });
   });
 
   test("confirmed stable clamp from the native batch does not replay geometry", async () => {
     const h = await bootstrap();
-    const constrained = h.fake.addWindow(makeWindow({
-      bundleId: "com.example.confirmed-batch-clamp",
-      x: 100,
-      y: 100,
-      width: 1000,
-      personality: { kind: "minMaxClamp", constraints: { minWidth: 900 } },
-    }));
+    const constrained = h.fake.addWindow(
+      makeWindow({
+        bundleId: "com.example.confirmed-batch-clamp",
+        x: 100,
+        y: 100,
+        width: 1000,
+        personality: { kind: "minMaxClamp", constraints: { minWidth: 900 } },
+      }),
+    );
     const peer = h.fake.addWindow(makeWindow({ x: 500, y: 100, width: 800 }));
     await h.run({ type: "reconcile" });
     await h.run({ type: "moveWindowToWorkspace", windowId: constrained, workspace: "clamp" });
@@ -860,10 +960,18 @@ describe("engine pipeline (fake platform)", () => {
     await h.run({ type: "retile", workspace: "clamp" });
 
     const batch = h.fake.batchHistory().at(-1)!;
-    const writes = h.fake.writes().slice(writesBefore).filter((write) => write.windowId === constrained);
-    const followUpWrites = h.fake.writes().slice(batch.writeEnd).filter((write) => write.windowId === constrained);
+    const writes = h.fake
+      .writes()
+      .slice(writesBefore)
+      .filter((write) => write.windowId === constrained);
+    const followUpWrites = h.fake
+      .writes()
+      .slice(batch.writeEnd)
+      .filter((write) => write.windowId === constrained);
     expect(h.fake.batchCalls() - batchesBefore).toBe(1);
-    expect(batch.operationIds.some((operationId) => operationId.endsWith(`:${constrained}`))).toBe(true);
+    expect(batch.operationIds.some((operationId) => operationId.endsWith(`:${constrained}`))).toBe(
+      true,
+    );
     expect(followUpWrites).toHaveLength(0);
     expect(writes.at(-1)?.observed.width).toBe(900);
   });

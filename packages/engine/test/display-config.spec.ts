@@ -49,14 +49,20 @@ describe("display-scoped layout settings", () => {
     const fake = createFakePlatform({ clock: CLOCK, displays: [BUILTIN, DELL] });
     const id = fake.addWindow(makeWindow({ bundleId: "com.example.dell", x: 100, y: 100 }));
     const engine = await Effect.runPromise(
-      createEngine({ adapter: fake.adapter, configSource: sourceFor(() => displayConfig()), clock: CLOCK }),
+      createEngine({
+        adapter: fake.adapter,
+        configSource: sourceFor(() => displayConfig()),
+        clock: CLOCK,
+      }),
     );
 
     await Effect.runPromise(engine.start());
 
     expect(fake.frameOf(id)).toMatchObject({ x: DELL.workArea.x, y: 32 });
-    expect((await Effect.runPromise(engine.state())).workspaces.find((ws) => ws.name === "dell")?.members)
-      .toContain(id);
+    expect(
+      (await Effect.runPromise(engine.state())).workspaces.find((ws) => ws.name === "dell")
+        ?.members,
+    ).toContain(id);
     await Effect.runPromise(engine.stop());
   });
 
@@ -64,7 +70,11 @@ describe("display-scoped layout settings", () => {
     const fake = createFakePlatform({ clock: CLOCK, displays: [BUILTIN, DELL] });
     const id = fake.addWindow(makeWindow({ bundleId: "com.example.dell" }));
     const engine = await Effect.runPromise(
-      createEngine({ adapter: fake.adapter, configSource: sourceFor(() => displayConfig({ top: 12 })), clock: CLOCK }),
+      createEngine({
+        adapter: fake.adapter,
+        configSource: sourceFor(() => displayConfig({ top: 12 })),
+        clock: CLOCK,
+      }),
     );
 
     await Effect.runPromise(engine.start());
@@ -77,7 +87,11 @@ describe("display-scoped layout settings", () => {
     const fake = createFakePlatform({ clock: CLOCK, displays: [BUILTIN, DELL] });
     const id = fake.addWindow(makeWindow({ bundleId: "com.example.main", x: 100, y: 100 }));
     const engine = await Effect.runPromise(
-      createEngine({ adapter: fake.adapter, configSource: sourceFor(() => displayConfig()), clock: CLOCK }),
+      createEngine({
+        adapter: fake.adapter,
+        configSource: sourceFor(() => displayConfig()),
+        clock: CLOCK,
+      }),
     );
     await Effect.runPromise(engine.start());
 
@@ -102,7 +116,11 @@ describe("display-scoped layout settings", () => {
     const fake = createFakePlatform({ clock: CLOCK, displays: [DELL] });
     const id = fake.addWindow(makeWindow({ bundleId: "com.example.main", x: 100, y: 100 }));
     const engine = await Effect.runPromise(
-      createEngine({ adapter: fake.adapter, configSource: sourceFor(() => candidate), clock: CLOCK }),
+      createEngine({
+        adapter: fake.adapter,
+        configSource: sourceFor(() => candidate),
+        clock: CLOCK,
+      }),
     );
     await Effect.runPromise(engine.start());
     expect(fake.frameOf(id)?.y).toBe(0);

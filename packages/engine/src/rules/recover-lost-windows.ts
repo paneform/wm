@@ -84,7 +84,6 @@ function centerInsideAnyWorkArea(world: World, frame: Frame): boolean {
 
 function framesMatch(a: Frame, b: Frame): boolean {
   return (
-    Math.abs(a.x - b.x) <= PARKING_ACCEPTANCE_PT &&
-    Math.abs(a.y - b.y) <= PARKING_ACCEPTANCE_PT
+    Math.abs(a.x - b.x) <= PARKING_ACCEPTANCE_PT && Math.abs(a.y - b.y) <= PARKING_ACCEPTANCE_PT
   );
 }

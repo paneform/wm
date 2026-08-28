@@ -99,16 +99,15 @@ export function parseConfig(raw: unknown): Config {
 }
 
 /** Non-throwing variant for hotload paths that must keep prior config. */
-export function parseConfigSafe(raw: unknown): { ok: true; config: Config } | { ok: false; error: ConfigInvalidError } {
+export function parseConfigSafe(
+  raw: unknown,
+): { ok: true; config: Config } | { ok: false; error: ConfigInvalidError } {
   try {
     return { ok: true, config: parseConfig(raw) };
   } catch (error) {
     return {
       ok: false,
-      error:
-        error instanceof ConfigInvalidError
-          ? error
-          : new ConfigInvalidError([String(error)]),
+      error: error instanceof ConfigInvalidError ? error : new ConfigInvalidError([String(error)]),
     };
   }
 }
@@ -137,10 +136,7 @@ export const GLOBAL_DEFAULT_SETTINGS: EffectiveWorkspaceSettings = {
   assign: [],
 };
 
-function mergeMargins(
-  base: Required<Margins>,
-  override: Margins | undefined,
-): Required<Margins> {
+function mergeMargins(base: Required<Margins>, override: Margins | undefined): Required<Margins> {
   if (override === undefined) return base;
   return {
     top: override.top ?? base.top,
@@ -175,8 +171,7 @@ export function effectiveSettings(
     ...GLOBAL_DEFAULT_SETTINGS,
     mode: defaults?.mode ?? GLOBAL_DEFAULT_SETTINGS.mode,
     gap: defaults?.gap ?? GLOBAL_DEFAULT_SETTINGS.gap,
-    resizeIncrement:
-      defaults?.resizeIncrement ?? GLOBAL_DEFAULT_SETTINGS.resizeIncrement,
+    resizeIncrement: defaults?.resizeIncrement ?? GLOBAL_DEFAULT_SETTINGS.resizeIncrement,
     margins: mergeMargins(GLOBAL_DEFAULT_SETTINGS.margins, defaults?.margins),
   };
 
@@ -233,13 +228,9 @@ export function applyConfigDelta(current: Config, rawCandidate: unknown): Config
         ? candidate.defaults
         : {
             mode: candidate.defaults.mode ?? current.defaults.mode,
-            margins: mergeOptionalMargins(
-              current.defaults.margins,
-              candidate.defaults.margins,
-            ),
+            margins: mergeOptionalMargins(current.defaults.margins, candidate.defaults.margins),
             gap: candidate.defaults.gap ?? current.defaults.gap,
-            resizeIncrement:
-              candidate.defaults.resizeIncrement ?? current.defaults.resizeIncrement,
+            resizeIncrement: candidate.defaults.resizeIncrement ?? current.defaults.resizeIncrement,
           };
 
   const displaysById = new Map<string, DisplayConfig>();
@@ -284,7 +275,9 @@ export function applyConfigDelta(current: Config, rawCandidate: unknown): Config
     ...(displays === undefined ? {} : { displays }),
     ...(workspaces === undefined ? {} : { workspaces }),
     ...(candidate.keybinds === undefined
-      ? current.keybinds === undefined ? {} : { keybinds: current.keybinds }
+      ? current.keybinds === undefined
+        ? {}
+        : { keybinds: current.keybinds }
       : { keybinds: candidate.keybinds }),
   };
 }

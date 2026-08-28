@@ -57,10 +57,18 @@ describe("compound destination topology refresh", () => {
     const focusedMember = fake.addWindow(makeWindow({ x: 1600, y: 100 }));
     await Effect.runPromise(engine.execute({ type: "reconcile" }));
     await Effect.runPromise(
-      engine.execute({ type: "moveWindowToWorkspace", windowId: targetMember, workspace: "target" }),
+      engine.execute({
+        type: "moveWindowToWorkspace",
+        windowId: targetMember,
+        workspace: "target",
+      }),
     );
     await Effect.runPromise(
-      engine.execute({ type: "moveWindowToWorkspace", windowId: focusedMember, workspace: "focused" }),
+      engine.execute({
+        type: "moveWindowToWorkspace",
+        windowId: focusedMember,
+        workspace: "focused",
+      }),
     );
     await Effect.runPromise(
       engine.execute({ type: "moveWorkspaceToDisplay", workspace: "target", displayId: left.id }),

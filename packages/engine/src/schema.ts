@@ -125,22 +125,15 @@ export type WriteErrorKind = typeof WriteErrorKind.Type;
 export const ExpectedWindowIdentity = Schema.Struct({
   fingerprint: Schema.String,
 });
-export interface ExpectedWindowIdentity
-  extends Schema.Schema.Type<typeof ExpectedWindowIdentity> {}
+export interface ExpectedWindowIdentity extends Schema.Schema.Type<typeof ExpectedWindowIdentity> {}
 
 /** Canonical cross-adapter identity token used by guarded window writes. */
-export const windowIdentityFingerprint = (
-  observation: {
-    pid: number;
-    role?: string | null | undefined;
-    subrole?: string | null | undefined;
-  },
-): string =>
-  JSON.stringify([
-    observation.pid,
-    observation.role ?? null,
-    observation.subrole ?? null,
-  ]);
+export const windowIdentityFingerprint = (observation: {
+  pid: number;
+  role?: string | null | undefined;
+  subrole?: string | null | undefined;
+}): string =>
+  JSON.stringify([observation.pid, observation.role ?? null, observation.subrole ?? null]);
 
 export const WriteObservation = Schema.Struct({
   requested: Frame,

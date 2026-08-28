@@ -79,9 +79,9 @@ describe("directionalNeighbor — edge wrap", () => {
       neighborOf("up", { x: 500, y: 100 }, [at("highFar", 500, 850), at("lowFar", 500, 900)]),
     ).toBe("lowFar");
     // Equal primary gap on both sides of the ortho axis → stable order decides.
-    expect(
-      neighborOf("down", { x: 500, y: 900 }, [at("a", 500, 100), at("b", 500, 100)]),
-    ).toBe("a");
+    expect(neighborOf("down", { x: 500, y: 900 }, [at("a", 500, 100), at("b", 500, 100)])).toBe(
+      "a",
+    );
   });
 
   test("strict half-plane: an exactly-aligned candidate is not 'forward' and wraps instead", () => {

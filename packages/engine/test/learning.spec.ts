@@ -37,7 +37,11 @@ const FP_A = "aaaa0000";
 const FP_B = "bbbb1111";
 
 const keyFor = (fingerprint: string): ProfileKey =>
-  makeProfileKey({ application: "com.example.editor", role: "AXWindow", contextFingerprint: fingerprint });
+  makeProfileKey({
+    application: "com.example.editor",
+    role: "AXWindow",
+    contextFingerprint: fingerprint,
+  });
 
 const KEY_A = keyFor(FP_A);
 const KEY_B = keyFor(FP_B);
@@ -175,9 +179,7 @@ describe("monotone tightening of learned bounds", () => {
       candidate("width", "min", 700),
     ]);
     expect(loosening.promoted).toEqual([candidate("width", "min", 700)]);
-    expect(
-      loosening.store.profiles.get(profileKeyString(KEY_A))!.constraints.minWidth,
-    ).toBe(750);
+    expect(loosening.store.profiles.get(profileKeyString(KEY_A))!.constraints.minWidth).toBe(750);
   });
 });
 

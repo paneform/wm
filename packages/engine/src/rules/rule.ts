@@ -1,14 +1,17 @@
 import type { Config, EffectiveWorkspaceSettings } from "../config.ts";
 import type { Action } from "../actions.ts";
 import type { Constraints, DisplayId, Frame, WindowId, WindowObservation } from "../schema.ts";
-import { classify, type BspNode, type Profile, type ProfileKey, type World, type WorkspaceState } from "../world.ts";
+import {
+  classify,
+  type BspNode,
+  type Profile,
+  type ProfileKey,
+  type World,
+  type WorkspaceState,
+} from "../world.ts";
 import { DEFAULT_TOLERANCE, REPLAN_BONUS } from "../constants.ts";
 import { contentRect, constraintsResolver, planLayout, tiledMembers } from "../layout/bsp.ts";
-import {
-  effectiveConstraints,
-  makeProfileKey,
-  type ConstraintAxis,
-} from "../learn.ts";
+import { effectiveConstraints, makeProfileKey, type ConstraintAxis } from "../learn.ts";
 import { withinTolerance } from "../geometry.ts";
 import { effectiveSettings } from "../config.ts";
 
@@ -104,9 +107,7 @@ export function displayById(world: World, displayId: DisplayId | null) {
 }
 
 export function primaryDisplay(world: World) {
-  return (
-    world.topology.displays.find((d) => d.primary) ?? world.topology.displays[0]
-  );
+  return world.topology.displays.find((d) => d.primary) ?? world.topology.displays[0];
 }
 
 // ---------------------------------------------------------------------------
@@ -134,12 +135,9 @@ export function profileOf(
 ): Profile | null {
   const key = profileKeyOf(observation, ctx.contextFingerprint);
   if (key === null) return null;
-  const keyStr = [
-    key.application,
-    key.role,
-    key.subrole ?? "",
-    key.contextFingerprint,
-  ].join("\u0000");
+  const keyStr = [key.application, key.role, key.subrole ?? "", key.contextFingerprint].join(
+    "\u0000",
+  );
   return world.profiles.get(keyStr) ?? null;
 }
 
@@ -230,8 +228,7 @@ export function matchAffinity(
           matchesValue(observation.executablePath, entry.executablePath, "exact")) ||
         (entry.title !== undefined && matchesValue(observation.title, entry.title, "regex")) ||
         (entry.role !== undefined && matchesValue(observation.role, entry.role, "exact")) ||
-        (entry.subrole !== undefined &&
-          matchesValue(observation.subrole, entry.subrole, "exact"));
+        (entry.subrole !== undefined && matchesValue(observation.subrole, entry.subrole, "exact"));
       if (matched) return workspace.name;
     }
   }

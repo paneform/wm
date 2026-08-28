@@ -74,19 +74,16 @@ const readWindow = (
   adapter: PlatformAdapter,
   id: WindowId,
 ): Effect.Effect<WindowObservation, GeometryFailure> =>
-  Effect.mapError(
-    adapter.getWindow(id),
-    (error): GeometryFailure => ({
-      code:
-        error.code === "permission" || error.code === "unavailable"
-          ? "unavailable"
-          : error.code === "stale"
-            ? "stale"
-            : "rejected",
-      outcome: "error",
-      detail: error.detail ?? error.code,
-    }),
-  ).pipe(
+  Effect.mapError(adapter.getWindow(id), (error): GeometryFailure => ({
+    code:
+      error.code === "permission" || error.code === "unavailable"
+        ? "unavailable"
+        : error.code === "stale"
+          ? "stale"
+          : "rejected",
+    outcome: "error",
+    detail: error.detail ?? error.code,
+  })).pipe(
     Effect.flatMap((observed) =>
       observed === null
         ? Effect.fail<GeometryFailure>({
@@ -218,9 +215,7 @@ export function applyGeometryRequest(
         });
       }
 
-      const strategy = strategyAt(
-        ladderStartIndex(context.correctiveAttemptCount) + attemptIndex,
-      );
+      const strategy = strategyAt(ladderStartIndex(context.correctiveAttemptCount) + attemptIndex);
       const baseline = yield* readWindow(deps.adapter, request.windowId);
       const identity = windowIdentityFingerprint(baseline);
       const expected = { fingerprint: identity };
@@ -248,7 +243,13 @@ export function applyGeometryRequest(
         );
       }
 
-      const readback = yield* settlePoll(deps.adapter, deps.clock, request.windowId, target, tolerance);
+      const readback = yield* settlePoll(
+        deps.adapter,
+        deps.clock,
+        request.windowId,
+        target,
+        tolerance,
+      );
 
       const repeatedStableSizeClamp =
         previousGuardedReadback !== undefined &&

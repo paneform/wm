@@ -15,12 +15,31 @@ describe("PlatformAdapter native batches", () => {
     const expected = (id: string) => ({
       fingerprint: windowIdentityFingerprint(observations.find((window) => window.id === id)!),
     });
-    const result = await Effect.runPromise(fake.adapter.executeBatch!({ operations: [
-      { operationId: "second", kind: "setFrame", windowId: second, frame: { x: 20, y: 20, width: 500, height: 400 }, expectedIdentity: expected(second) },
-      { operationId: "first", kind: "setFrame", windowId: first, frame: { x: 10, y: 10, width: 500, height: 400 }, expectedIdentity: expected(first) },
-    ] }));
+    const result = await Effect.runPromise(
+      fake.adapter.executeBatch!({
+        operations: [
+          {
+            operationId: "second",
+            kind: "setFrame",
+            windowId: second,
+            frame: { x: 20, y: 20, width: 500, height: 400 },
+            expectedIdentity: expected(second),
+          },
+          {
+            operationId: "first",
+            kind: "setFrame",
+            windowId: first,
+            frame: { x: 10, y: 10, width: 500, height: 400 },
+            expectedIdentity: expected(first),
+          },
+        ],
+      }),
+    );
 
-    expect(result.operations.map((operation) => operation.operationId)).toEqual(["second", "first"]);
+    expect(result.operations.map((operation) => operation.operationId)).toEqual([
+      "second",
+      "first",
+    ]);
     expect(Math.max(...fake.batchTrace().map((event) => event.active))).toBe(2);
   });
 
@@ -31,12 +50,31 @@ describe("PlatformAdapter native batches", () => {
     const observation = await Effect.runPromise(fake.adapter.getWindow(id));
     const expected = { fingerprint: windowIdentityFingerprint(observation!) };
     fake.swapBackingElement(id);
-    const result = await Effect.runPromise(fake.adapter.executeBatch!({ operations: [
-      { operationId: "reveal", kind: "setFrame", windowId: id, frame: { x: 0, y: 0, width: 600, height: 500 }, expectedIdentity: expected },
-      { operationId: "focus", kind: "focus", windowId: id, expectedIdentity: expected, dependsOn: ["reveal"] },
-    ] }));
+    const result = await Effect.runPromise(
+      fake.adapter.executeBatch!({
+        operations: [
+          {
+            operationId: "reveal",
+            kind: "setFrame",
+            windowId: id,
+            frame: { x: 0, y: 0, width: 600, height: 500 },
+            expectedIdentity: expected,
+          },
+          {
+            operationId: "focus",
+            kind: "focus",
+            windowId: id,
+            expectedIdentity: expected,
+            dependsOn: ["reveal"],
+          },
+        ],
+      }),
+    );
 
-    expect(result.operations.map((operation) => operation.operationId)).toEqual(["reveal", "focus"]);
+    expect(result.operations.map((operation) => operation.operationId)).toEqual([
+      "reveal",
+      "focus",
+    ]);
     expect(result.operations[0]?.error?.code).toBe("stale");
     expect(result.operations[1]?.error).toBeDefined();
     expect(fake.frameOf(id)).toEqual(before);

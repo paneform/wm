@@ -20,8 +20,7 @@ import {
 } from "../src/transport.ts";
 import type { WireRequest } from "../src/transport.ts";
 
-const decoderOf = <A, I>(schema: Schema.Schema<A, I, never>) =>
-  Schema.decodeUnknownSync(schema);
+const decoderOf = <A, I>(schema: Schema.Schema<A, I, never>) => Schema.decodeUnknownSync(schema);
 
 const FRAME = { x: 0, y: 0, width: 800, height: 600 };
 
@@ -65,13 +64,13 @@ describe("primitive frame schemas", () => {
 
 describe("WindowObservation boundaries", () => {
   test("identity fingerprint canonicalizes missing metadata as JSON null", () => {
-    expect(windowIdentityFingerprint({ pid: 4242 })).toBe('[4242,null,null]');
+    expect(windowIdentityFingerprint({ pid: 4242 })).toBe("[4242,null,null]");
     expect(windowIdentityFingerprint({ pid: 4242, role: "AXWindow" })).toBe(
       '[4242,"AXWindow",null]',
     );
-    expect(
-      windowIdentityFingerprint({ pid: 4242, role: null, subrole: null }),
-    ).toBe('[4242,null,null]');
+    expect(windowIdentityFingerprint({ pid: 4242, role: null, subrole: null })).toBe(
+      "[4242,null,null]",
+    );
     expect(
       windowIdentityFingerprint({
         pid: 4242,
@@ -121,9 +120,7 @@ describe("WindowObservation boundaries", () => {
         frame: { x: 0, y: 0, width: 800 },
       }),
     ).toThrow();
-    expect(() =>
-      decoderOf(WindowObservation)({ ...windowObservation(), pid: "4242" }),
-    ).toThrow();
+    expect(() => decoderOf(WindowObservation)({ ...windowObservation(), pid: "4242" })).toThrow();
     expect(() =>
       decoderOf(WindowObservation)({ ...windowObservation(), focused: "yes" }),
     ).toThrow();
@@ -142,9 +139,7 @@ describe("WindowObservation boundaries", () => {
         constraints: { minWidth: "400" },
       }),
     ).toThrow();
-    expect(() =>
-      decoderOf(WindowObservation)({ ...windowObservation(), subrole: 7 }),
-    ).toThrow();
+    expect(() => decoderOf(WindowObservation)({ ...windowObservation(), subrole: 7 })).toThrow();
   });
 });
 
@@ -178,29 +173,25 @@ describe("PlatformEvent union discriminators", () => {
       decoderOf(PlatformEvent)({ kind: "window_added", window: { id: "win:x" } }),
     ).toThrow();
     expect(() => decoderOf(PlatformEvent)({ kind: "focus_changed" })).toThrow();
-    expect(() =>
-      decoderOf(PlatformEvent)({ kind: "focus_changed", windowId: 42 }),
-    ).toThrow();
+    expect(() => decoderOf(PlatformEvent)({ kind: "focus_changed", windowId: 42 })).toThrow();
     expect(() => decoderOf(PlatformEvent)({ kind: "window_removed" })).toThrow();
-    expect(() =>
-      decoderOf(PlatformEvent)({ kind: "window_removed", windowId: 42 }),
-    ).toThrow();
+    expect(() => decoderOf(PlatformEvent)({ kind: "window_removed", windowId: 42 })).toThrow();
   });
 });
 
 describe("GeometryRequest boundaries", () => {
   test("attempts accepts the inclusive 1..5 integer range", () => {
     for (const attempts of [1, 2, 3, 4, 5]) {
-      expect(decoderOf(GeometryRequest)({ windowId: "w", frame: FRAME, attempts }))
-        .toHaveProperty("attempts", attempts);
+      expect(decoderOf(GeometryRequest)({ windowId: "w", frame: FRAME, attempts })).toHaveProperty(
+        "attempts",
+        attempts,
+      );
     }
   });
 
   test("attempts rejects out-of-range and non-integer values", () => {
     for (const attempts of [0, -1, 6, 2.5, Number.NaN, Number.POSITIVE_INFINITY]) {
-      expect(() =>
-        decoderOf(GeometryRequest)({ windowId: "w", frame: FRAME, attempts }),
-      ).toThrow();
+      expect(() => decoderOf(GeometryRequest)({ windowId: "w", frame: FRAME, attempts })).toThrow();
     }
   });
 
@@ -289,9 +280,7 @@ describe("wire message round-trips", () => {
           pinnedDisplayOverride: null,
         },
       ],
-      pendingTransactions: [
-        { id: "tx-1", coalesceKey: "focus:win:abc123", submittedAt: 17 },
-      ],
+      pendingTransactions: [{ id: "tx-1", coalesceKey: "focus:win:abc123", submittedAt: 17 }],
     };
     const envelope = wireSnapshot(snapshot);
     expect(decodeWireMessage(encodeWireMessage(envelope))).toEqual(envelope);
@@ -334,9 +323,7 @@ describe("hotkey parity commands — wire round-trips (bean wm-pmys)", () => {
   test("direction literals outside the closed union are rejected", () => {
     for (const direction of ["diagonal", "LEFT", "", "north"]) {
       expect(() =>
-        decodeWireMessage(
-          requestEnvelope({ type: "focusDirection", direction }),
-        ),
+        decodeWireMessage(requestEnvelope({ type: "focusDirection", direction })),
       ).toThrow();
       expect(() =>
         decodeWireMessage(requestEnvelope({ type: "moveDirection", direction })),
@@ -368,30 +355,24 @@ describe("wire decode rejections", () => {
 
   test("wrong protocol version is rejected", () => {
     expect(() =>
-      decodeWireMessage(
-        '{"v":2,"type":"event","seq":0,"topic":"t","payload":null}',
-      ),
+      decodeWireMessage('{"v":2,"type":"event","seq":0,"topic":"t","payload":null}'),
     ).toThrow();
   });
 
   test("missing envelope fields are rejected", () => {
     expect(() => decodeWireMessage('{"v":1,"type":"request","id":"r1"}')).toThrow();
-    expect(() =>
-      decodeWireMessage('{"v":1,"type":"response","id":"r1","ok":false}'),
-    ).toThrow();
+    expect(() => decodeWireMessage('{"v":1,"type":"response","id":"r1","ok":false}')).toThrow();
     expect(() => decodeWireMessage('{"v":1,"type":"snapshot"}')).toThrow();
   });
 
   test("Schema.Unknown envelope fields are currently optional (transport gap)", () => {
-    const okMissingData = decodeWireMessage(
-      '{"v":1,"type":"response","id":"r1","ok":true}',
-    );
+    const okMissingData = decodeWireMessage('{"v":1,"type":"response","id":"r1","ok":true}');
     expect("data" in okMissingData).toBe(true);
     expect((okMissingData as { data?: unknown }).data).toBeUndefined();
 
-    const eventMissingPayload = decodeWireMessage(
-      '{"v":1,"type":"event","seq":0,"topic":"t"}',
-    ) as { payload?: unknown };
+    const eventMissingPayload = decodeWireMessage('{"v":1,"type":"event","seq":0,"topic":"t"}') as {
+      payload?: unknown;
+    };
     expect(eventMissingPayload.payload).toBeUndefined();
 
     expect(() =>
@@ -401,17 +382,13 @@ describe("wire decode rejections", () => {
 
   test("invalid command discriminators inside requests are rejected", () => {
     expect(() =>
-      decodeWireMessage(
-        '{"v":1,"type":"request","id":"r1","command":{"type":"explode"}}',
-      ),
+      decodeWireMessage('{"v":1,"type":"request","id":"r1","command":{"type":"explode"}}'),
     ).toThrow();
   });
 
   test("excess envelope properties are rejected", () => {
     expect(() =>
-      decodeWireMessage(
-        '{"v":1,"type":"event","seq":0,"topic":"t","payload":null,"extra":1}',
-      ),
+      decodeWireMessage('{"v":1,"type":"event","seq":0,"topic":"t","payload":null,"extra":1}'),
     ).toThrow();
   });
 

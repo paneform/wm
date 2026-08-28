@@ -48,9 +48,7 @@ export interface Receipt {
   finishedAt: number;
 }
 
-export type SubmitError =
-  | { code: "queue_full" }
-  | { code: "invalid_request"; detail: string };
+export type SubmitError = { code: "queue_full" } | { code: "invalid_request"; detail: string };
 
 export interface PendingTransactionInfo {
   id: string;
@@ -154,12 +152,10 @@ export const createTransactionQueue = (deps: {
       Effect.either(
         Effect.race(
           runSteps(unit.id, unit.steps, start).pipe(
-            Effect.map(
-              (receipt): { kind: "receipt"; receipt: Receipt } => ({
-                kind: "receipt",
-                receipt,
-              }),
-            ),
+            Effect.map((receipt): { kind: "receipt"; receipt: Receipt } => ({
+              kind: "receipt",
+              receipt,
+            })),
           ),
           Effect.flatMap(deps.clock.sleep(TRANSACTION_TIMEOUT_MS), () =>
             Effect.succeed(timeoutSignal),
@@ -177,7 +173,7 @@ export const createTransactionQueue = (deps: {
               finishedAt: deps.clock.now(),
             }
           : outcome.right.receipt,
-      );
+    );
   };
 
   const runInline = (unit: WorkUnit): Effect.Effect<Receipt> =>
@@ -238,10 +234,7 @@ export const createTransactionQueue = (deps: {
         keyCounts.set(unit.coalesceKey, (keyCounts.get(unit.coalesceKey) ?? 0) + 1);
       }
       const deferred = yield* Deferred.make<Receipt, SubmitError>();
-      pendingEntries = [
-        ...pendingEntries,
-        { unit, deferred, submittedAt: deps.clock.now() },
-      ];
+      pendingEntries = [...pendingEntries, { unit, deferred, submittedAt: deps.clock.now() }];
       yield* drain();
       return deferred;
     });

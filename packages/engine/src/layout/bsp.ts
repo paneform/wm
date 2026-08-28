@@ -7,11 +7,7 @@ import {
   EMPTY_TREE_LEAF,
   type LayoutPolicy,
 } from "../constants.ts";
-import {
-  insetFrame,
-  isFiniteFrame,
-  type FrameComponent,
-} from "../geometry.ts";
+import { insetFrame, isFiniteFrame, type FrameComponent } from "../geometry.ts";
 
 // ---------------------------------------------------------------------------
 // Tree shape helpers
@@ -25,7 +21,8 @@ export function axisForFrame(frame: Frame): SplitAxis {
   return frame.width >= frame.height ? "vertical" : "horizontal";
 }
 
-const axisComponent = (axis: SplitAxis): FrameComponent => (axis === "vertical" ? "width" : "height");
+const axisComponent = (axis: SplitAxis): FrameComponent =>
+  axis === "vertical" ? "width" : "height";
 
 const shrinkRect = (rect: Frame, axis: SplitAxis, length: number): Frame =>
   axis === "vertical" ? { ...rect, width: length } : { ...rect, height: length };
@@ -56,7 +53,9 @@ export function memberIds(tree: BspNode): WindowId[] {
 }
 
 function leavesRaw(tree: BspNode): WindowId[] {
-  return tree.kind === "leaf" ? [tree.windowId] : [...leavesRaw(tree.first), ...leavesRaw(tree.second)];
+  return tree.kind === "leaf"
+    ? [tree.windowId]
+    : [...leavesRaw(tree.first), ...leavesRaw(tree.second)];
 }
 
 /**
@@ -247,14 +246,8 @@ export const boundsFromConstraints = (
   component: "width" | "height",
 ): AxisBounds | undefined => {
   if (constraints === undefined) return undefined;
-  const min =
-    component === "width"
-      ? constraints.minWidth
-      : constraints.minHeight;
-  const max =
-    component === "width"
-      ? constraints.maxWidth
-      : constraints.maxHeight;
+  const min = component === "width" ? constraints.minWidth : constraints.minHeight;
+  const max = component === "width" ? constraints.maxWidth : constraints.maxHeight;
   if (min === undefined && max === undefined) return undefined;
   const bounds: AxisBounds = {};
   if (min !== undefined) bounds.min = min;
@@ -293,16 +286,17 @@ export function aggregateBounds(
   const b = aggregateBounds(node.second, axis, gap, resolve);
   if (node.axis === axis) {
     const summedMin =
-      a.min === undefined && b.min === undefined
-        ? undefined
-        : (a.min ?? 0) + gap + (b.min ?? 0);
+      a.min === undefined && b.min === undefined ? undefined : (a.min ?? 0) + gap + (b.min ?? 0);
     const summedMax = a.max !== undefined && b.max !== undefined ? a.max + gap + b.max : undefined;
     const out: AxisBounds = {};
     if (summedMin !== undefined) out.min = summedMin;
     if (summedMax !== undefined) out.max = summedMax;
     return out;
   }
-  const crossMin = a.min !== undefined || b.min !== undefined ? Math.max(a.min ?? -Infinity, b.min ?? -Infinity) : undefined;
+  const crossMin =
+    a.min !== undefined || b.min !== undefined
+      ? Math.max(a.min ?? -Infinity, b.min ?? -Infinity)
+      : undefined;
   const crossMax = a.max !== undefined && b.max !== undefined ? Math.min(a.max, b.max) : undefined;
   const out: AxisBounds = {};
   if (crossMin !== undefined) out.min = crossMin;
@@ -446,8 +440,10 @@ function stackPlan(input: LayoutInput): Map<WindowId, Frame> | null {
     const c = input.resolve(id);
     const minW = c?.width?.min;
     const minH = c?.height?.min;
-    if ((minW !== undefined && input.content.width < minW) ||
-        (minH !== undefined && input.content.height < minH)) {
+    if (
+      (minW !== undefined && input.content.width < minW) ||
+      (minH !== undefined && input.content.height < minH)
+    ) {
       return null;
     }
     frames.set(id, input.content);

@@ -1,11 +1,7 @@
 import type { Action } from "../actions.ts";
 import { contentRect, constraintsResolver, planLayout, tiledMembers } from "../layout/bsp.ts";
 import type { World } from "../world.ts";
-import {
-  constraintsForWindow,
-  displayById,
-  isIgnoredSurface,
-} from "./rule.ts";
+import { constraintsForWindow, displayById, isIgnoredSurface } from "./rule.ts";
 import type { Rule, RuleContext } from "./rule.ts";
 
 // Rules catalog #8 — before SetFrame executes: intersect the request with
@@ -25,8 +21,7 @@ export const clampToCapabilities: Rule = {
     const actions: Action[] = [];
     for (const workspace of world.workspaces.values()) {
       if (workspace.visibleOnDisplay === null || workspace.mode !== "bsp") continue;
-      const display =
-        displayById(world, workspace.visibleOnDisplay);
+      const display = displayById(world, workspace.visibleOnDisplay);
       if (display === undefined) continue;
       const settings = ctx.settings(workspace.name, display.id);
 

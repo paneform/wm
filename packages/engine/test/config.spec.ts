@@ -151,10 +151,7 @@ describe("effective settings inheritance", () => {
           resizeIncrement: 0.1,
           margins: { top: 5, left: 3 },
         },
-        workspaces: [
-          { name: "code", gap: 32, margins: { top: 9 } },
-          { name: "other" },
-        ],
+        workspaces: [{ name: "code", gap: 32, margins: { top: 9 } }, { name: "other" }],
       },
       "code",
     );
@@ -173,9 +170,7 @@ describe("effective settings inheritance", () => {
   test("display settings sit between global and workspace overrides field by field", () => {
     const config: Config = {
       defaults: { margins: { top: 4, right: 5, bottom: 6, left: 7 }, gap: 8 },
-      displays: [
-        { display: "display:dell", margins: { top: 32, left: 0 }, gap: 0 },
-      ],
+      displays: [{ display: "display:dell", margins: { top: 32, left: 0 }, gap: 0 }],
       workspaces: [{ name: "code", margins: { top: 12, right: 9 }, gap: 3 }],
     };
 
@@ -234,9 +229,9 @@ describe("delta reload atomicity", () => {
   test("a fully invalid candidate throws and leaves the prior config untouched", () => {
     const prior = baseConfig();
     const before = structuredClone(prior);
-    expect(() =>
-      applyConfigDelta(prior, { workspaces: [{ name: "", gap: 10_000 }] }),
-    ).toThrow(ConfigInvalidError);
+    expect(() => applyConfigDelta(prior, { workspaces: [{ name: "", gap: 10_000 }] })).toThrow(
+      ConfigInvalidError,
+    );
     expect(prior).toEqual(before);
   });
 

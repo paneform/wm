@@ -22,7 +22,9 @@ export type BspNode =
 
 /** In-order leaf ids of a tree. */
 export function bspLeaves(node: BspNode): WindowId[] {
-  return node.kind === "leaf" ? [node.windowId] : [...bspLeaves(node.first), ...bspLeaves(node.second)];
+  return node.kind === "leaf"
+    ? [node.windowId]
+    : [...bspLeaves(node.first), ...bspLeaves(node.second)];
 }
 
 // ---------------------------------------------------------------------------

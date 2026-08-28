@@ -183,8 +183,9 @@ export function clampFrameIntoWorkArea(frame: Frame, workAreas: readonly Frame[]
   const cx = frame.x + frame.width / 2;
   const cy = frame.y + frame.height / 2;
   const host =
-    workAreas.find((wa) => cx >= wa.x && cx < wa.x + wa.width && cy >= wa.y && cy < wa.y + wa.height) ??
-    workAreas[0];
+    workAreas.find(
+      (wa) => cx >= wa.x && cx < wa.x + wa.width && cy >= wa.y && cy < wa.y + wa.height,
+    ) ?? workAreas[0];
   if (host === undefined) return frame;
   const maxX = Math.max(host.x, host.x + host.width - frame.width);
   const maxY = Math.max(host.y, host.y + host.height - frame.height);
@@ -329,8 +330,10 @@ const animationFractionOf = (p: FakePersonality): number => {
 const platformError = (code: PlatformError["code"], detail: string): PlatformError =>
   new PlatformError({ code, detail });
 
-const failWith = (code: PlatformError["code"], detail: string): Effect.Effect<never, PlatformError> =>
-  Effect.fail(platformError(code, detail));
+const failWith = (
+  code: PlatformError["code"],
+  detail: string,
+): Effect.Effect<never, PlatformError> => Effect.fail(platformError(code, detail));
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -377,10 +380,7 @@ export interface FakePlatform {
   connectDisplay(spec: FakeDisplaySpec): void;
   disconnectDisplay(displayId: DisplayId): void;
   updateWorkArea(displayId: DisplayId, workArea: Frame): void;
-  setVisibilityLimits(
-    displayId: DisplayId,
-    limits: { horizontal: number; vertical: number },
-  ): void;
+  setVisibilityLimits(displayId: DisplayId, limits: { horizontal: number; vertical: number }): void;
   focusWindowExternal(id: WindowId | null): void;
   driftWindow(id: WindowId, dx: number, dy: number): void;
   nudgeWindow(id: WindowId, patch: Partial<Frame>): void;
@@ -407,7 +407,11 @@ export interface FakePlatform {
   frameOf(id: WindowId): Frame | null;
   writes(): readonly FakeWriteRecord[];
   batchCalls(): number;
-  batchTrace(): readonly { operationId: string; phase: "start" | "settle" | "finish"; active: number }[];
+  batchTrace(): readonly {
+    operationId: string;
+    phase: "start" | "settle" | "finish";
+    active: number;
+  }[];
   batchHistory(): readonly { writeEnd: number; operationIds: readonly string[] }[];
   rejectNextBatchWrite(id: WindowId, code?: PlatformError["code"]): void;
   rejectNextBatchFocus(id: WindowId, code?: PlatformError["code"]): void;
@@ -468,7 +472,11 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
   let withheldFocusEvent: PlatformEvent | null = null;
   const writeLog: FakeWriteRecord[] = [];
   let batchCallCount = 0;
-  const batchEvents: { operationId: string; phase: "start" | "settle" | "finish"; active: number }[] = [];
+  const batchEvents: {
+    operationId: string;
+    phase: "start" | "settle" | "finish";
+    active: number;
+  }[] = [];
   let activeBatchOperations = 0;
   const batchHistory: { writeEnd: number; operationIds: readonly string[] }[] = [];
   const rejectedBatchWrites = new Map<WindowId, PlatformError["code"]>();
@@ -763,8 +771,7 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
   /** Atomic identity precondition: compared against live state BEFORE any
    * mutation; mismatch aborts `stale` leaving the window untouched. */
   const matchesExpected = (w: SimWindow, expected?: ExpectedWindowIdentity): boolean =>
-    expected === undefined ||
-    fingerprintOf(w.pid, w.role, w.subrole) === expected.fingerprint;
+    expected === undefined || fingerprintOf(w.pid, w.role, w.subrole) === expected.fingerprint;
 
   const setWindowFrame = (
     id: WindowId,
@@ -862,7 +869,12 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
     executeBatch: (request) =>
       Effect.gen(function* () {
         batchCallCount += 1;
-        const pending = new Map(request.operations.map((operation, index) => [operation.operationId, { operation, index }]));
+        const pending = new Map(
+          request.operations.map((operation, index) => [
+            operation.operationId,
+            { operation, index },
+          ]),
+        );
         const results = new Map<string, PlatformBatchOperationResult>();
         let waveCount = 0;
         while (pending.size > 0) {
@@ -896,23 +908,34 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
           }
           const wave: PlatformBatchOperationResult[] = [];
           for (const { operation } of ready) {
-            batchEvents.push({ operationId: operation.operationId, phase: "settle", active: activeBatchOperations });
-            const effect = operation.kind === "setFrame"
-              ? setWindowFrame(operation.windowId, operation.frame, operation.expectedIdentity)
-              : Effect.gen(function* () {
-                  const window = resolveWindow(operation.windowId);
-                  if (window === undefined) return yield* failWith("not_found", `unknown window ${operation.windowId}`);
-                  if (!matchesExpected(window, operation.expectedIdentity)) {
-                    return yield* failWith("stale", "window identity changed before focus");
-                  }
-                  return yield* focusWindow(operation.windowId);
-                });
+            batchEvents.push({
+              operationId: operation.operationId,
+              phase: "settle",
+              active: activeBatchOperations,
+            });
+            const effect =
+              operation.kind === "setFrame"
+                ? setWindowFrame(operation.windowId, operation.frame, operation.expectedIdentity)
+                : Effect.gen(function* () {
+                    const window = resolveWindow(operation.windowId);
+                    if (window === undefined)
+                      return yield* failWith("not_found", `unknown window ${operation.windowId}`);
+                    if (!matchesExpected(window, operation.expectedIdentity)) {
+                      return yield* failWith("stale", "window identity changed before focus");
+                    }
+                    return yield* focusWindow(operation.windowId);
+                  });
             const outcome = yield* Effect.either(
               effect as Effect.Effect<WriteObservation | PlatformFocusResult, PlatformError>,
             );
             activeBatchOperations -= 1;
-            batchEvents.push({ operationId: operation.operationId, phase: "finish", active: activeBatchOperations });
-            if (outcome._tag === "Left") wave.push({ operationId: operation.operationId, error: outcome.left });
+            batchEvents.push({
+              operationId: operation.operationId,
+              phase: "finish",
+              active: activeBatchOperations,
+            });
+            if (outcome._tag === "Left")
+              wave.push({ operationId: operation.operationId, error: outcome.left });
             else if (operation.kind === "focus") {
               const focus = outcome.right as unknown as PlatformFocusResult;
               const rejected = rejectedBatchFocus.get(operation.windowId);
@@ -924,8 +947,7 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
                   ? { error: platformError(rejected, `simulated ${rejected} after AX focus`) }
                   : {}),
               });
-            }
-            else {
+            } else {
               const write = outcome.right as unknown as WriteObservation;
               const rejected = rejectedBatchWrites.get(operation.windowId);
               rejectedBatchWrites.delete(operation.windowId);
@@ -947,7 +969,9 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
             pending.delete(id);
           }
         }
-        const operations = request.operations.map((operation) => results.get(operation.operationId)!);
+        const operations = request.operations.map((operation) =>
+          results.get(operation.operationId)!,
+        );
         batchHistory.push({
           writeEnd: writeLog.length,
           operationIds: request.operations.map((operation) => operation.operationId),
@@ -988,7 +1012,8 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
       pid: spec.pid ?? nextPid,
       ...(bundleId !== undefined ? { bundleId } : {}),
       executablePath:
-        spec.executablePath ?? `/Applications/${(bundleId ?? "sim.app").split(".").pop()}/MacOS/sim`,
+        spec.executablePath ??
+        `/Applications/${(bundleId ?? "sim.app").split(".").pop()}/MacOS/sim`,
       title: spec.title ?? `Sim Window ${numberForTitle}`,
       role: spec.role ?? "AXWindow",
       ...(spec.subrole !== undefined ? { subrole: spec.subrole } : {}),
