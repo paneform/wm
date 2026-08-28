@@ -12,6 +12,7 @@ import type {
   ExpectedWindowIdentity,
   Frame,
   GeometryRequest,
+  PlatformError,
   WindowId,
   WriteObservation,
   WorkspaceName,
@@ -33,7 +34,11 @@ import {
   PROMOTION_SAMPLES,
 } from "./constants.ts";
 import { center, classifyWrite, containsPoint, withinTolerance } from "./geometry.ts";
-import type { PlatformBatchOperation, PlatformBatchOperationResult } from "./platform.ts";
+import type {
+  PlatformBatchOperation,
+  PlatformBatchOperationResult,
+  PlatformFocusResult,
+} from "./platform.ts";
 import { applyGeometryRequest, type GeometryFailure } from "./geometry-service.ts";
 import {
   candidatesFrom,
@@ -322,6 +327,46 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         key === null ? undefined : world.profiles.get(profileKeyString(key));
       return effectiveConstraints(observation.constraints, learnedProfile?.constraints, observation.frame);
     };
+
+    const focusSatisfied = (
+      result: PlatformFocusResult,
+      observation: WindowObservation,
+    ): boolean => {
+      if (
+        result.error !== undefined &&
+        result.error.code !== "rejected" &&
+        result.error.code !== "not_controllable"
+      ) {
+        return false;
+      }
+      return result.focused === true ||
+        (result.frontmostPid === observation.pid && result.main === true);
+    };
+
+    const refreshWindowAfterStale = (id: WindowId): Effect.Effect<void> =>
+      Effect.matchEffect(adapter.getWindow(id), {
+        onFailure: () => Effect.void,
+        onSuccess: (current) => Effect.sync(() => {
+          const windows = new Map(world.windows);
+          if (current === null) windows.delete(id);
+          else windows.set(id, current);
+          world = { ...world, windows };
+        }),
+      });
+
+    const hasStableSizeClampEvidence = (
+      result: PlatformBatchOperationResult,
+      observation: WindowObservation,
+      requested: Frame,
+      observed: Frame,
+      tolerance: number,
+    ): boolean =>
+      (result.stableReads ?? 0) >= 3 &&
+      observation.capabilities.resizable === "supported" &&
+      Math.abs(observed.x - requested.x) <= tolerance &&
+      Math.abs(observed.y - requested.y) <= tolerance &&
+      (Math.abs(observed.width - requested.width) > tolerance ||
+        Math.abs(observed.height - requested.height) > tolerance);
 
     const syncProfiles = (): void => {
       world = { ...world, profiles: new Map(learning.profiles) };
@@ -879,13 +924,36 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             });
           }
           case "focusWindow":
-            return yield* Effect.mapError(
-              adapter.focusWindow(action.windowId),
-              (e): StepFailure => ({
-                code: "window_not_controllable",
-                message: e.detail ?? "focus refused",
-              }),
-            );
+            {
+              const observation = world.windows.get(action.windowId);
+              if (observation === undefined) {
+                return yield* Effect.fail({
+                  code: "window_not_found",
+                  message: `unknown window ${action.windowId}`,
+                } satisfies StepFailure);
+              }
+              const attempted = yield* Effect.either(
+                adapter.focusWindow(action.windowId, {
+                  fingerprint: windowIdentityFingerprint(observation),
+                }),
+              );
+              if (attempted._tag === "Left") {
+                if (attempted.left.code === "stale") yield* refreshWindowAfterStale(action.windowId);
+                return yield* Effect.fail({
+                  code: attempted.left.code === "stale" ? "inventory_stale" : "window_not_controllable",
+                  message: attempted.left.detail ?? "focus refused",
+                } satisfies StepFailure);
+              }
+              const result = attempted.right;
+              if (!focusSatisfied(result, observation)) {
+                if (result.error?.code === "stale") yield* refreshWindowAfterStale(action.windowId);
+                return yield* Effect.fail({
+                  code: result.error?.code === "stale" ? "inventory_stale" : "window_not_controllable",
+                  message: result.error?.detail ?? "focus refused",
+                } satisfies StepFailure);
+              }
+              return result;
+            }
           case "insertWindow":
             // A startup inventory and its matching window_added event can plan
             // concurrently. Preserve the first committed membership.
@@ -1767,15 +1835,16 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 Effect.gen(function* () {
                   const results: PlatformBatchOperationResult[] = [];
                   for (const operation of operations) {
-                    const outcome = yield* Effect.either(
-                      operation.kind === "setFrame"
+                    const effect = operation.kind === "setFrame"
                         ? adapter.setWindowFrame(operation.windowId, operation.frame, operation.expectedIdentity)
-                        : Effect.as(adapter.focusWindow(operation.windowId), undefined),
+                        : adapter.focusWindow(operation.windowId, operation.expectedIdentity);
+                    const outcome = yield* Effect.either(
+                      effect as Effect.Effect<WriteObservation | PlatformFocusResult, PlatformError>,
                     );
                     if (outcome._tag === "Left") {
                       results.push({ operationId: operation.operationId, error: outcome.left });
                     } else if (operation.kind === "focus") {
-                      results.push({ operationId: operation.operationId });
+                      results.push({ operationId: operation.operationId, ...outcome.right });
                     } else {
                       const write = outcome.right as WriteObservation;
                       results.push({
@@ -1783,6 +1852,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                         requested: write.requested,
                         observed: write.observed,
                         stable: write.stable,
+                        stableReads: write.stableReads,
+                        ...(write.errorKind === undefined
+                          ? {}
+                          : { error: { code: write.errorKind } }),
                       });
                     }
                   }
@@ -1801,15 +1874,25 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               for (let index = 0; index < built.writes.length; index += 1) {
                 const wr = built.writes[index]!;
                 const batchResult = batch.operations[index]!;
-                if (batchResult.error !== undefined) {
+                const observation = finalDraft.windows.get(wr.windowId)!;
+                const observed = batchResult.observed ?? observation.frame;
+                const tolerance = wr.tolerance ?? DEFAULT_TOLERANCE;
+                const stableSizeClamp = hasStableSizeClampEvidence(
+                  batchResult,
+                  observation,
+                  wr.frame,
+                  observed,
+                  tolerance,
+                );
+                const rejectedClamp = stableSizeClamp &&
+                  (batchResult.error?.code === "rejected" ||
+                    batchResult.error?.code === "not_controllable");
+                if (batchResult.error !== undefined && !rejectedClamp) {
                   return yield* Effect.fail(new CommandError({
                     code: mapStepCode(batchResult.error.code),
                     message: `window ${wr.windowId}: ${batchResult.error.detail ?? "native batch operation failed"}`,
                   }));
                 }
-                const observation = finalDraft.windows.get(wr.windowId)!;
-                const observed = batchResult.observed ?? observation.frame;
-                const tolerance = wr.tolerance ?? DEFAULT_TOLERANCE;
                 const classifiedOutcome = classifyWrite({
                   requested: wr.frame,
                   observed,
@@ -1820,13 +1903,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   previousObserved: observation.frame,
                   acceptStablePositionClamp: wr.parkingDisplayId !== undefined,
                 });
-                const nativeConfirmedSizeClamp =
-                  (batchResult.stableReads ?? 0) >= 3 &&
-                  observation.capabilities.resizable === "supported" &&
-                  Math.abs(observed.x - wr.frame.x) <= tolerance &&
-                  Math.abs(observed.y - wr.frame.y) <= tolerance &&
-                  (Math.abs(observed.width - wr.frame.width) > tolerance ||
-                    Math.abs(observed.height - wr.frame.height) > tolerance);
+                const nativeConfirmedSizeClamp = stableSizeClamp;
                 const outcome = nativeConfirmedSizeClamp ? "stableClamp" : classifiedOutcome;
                 const confirmedStableClamp =
                   outcome === "stableClamp" && nativeConfirmedSizeClamp;
@@ -1891,10 +1968,15 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 applied += 1;
               }
               const focusResult = batch.operations[built.writes.length];
-              if (focusResult?.error !== undefined) {
+              const focusObservation = focusId === null ? undefined : finalDraft.windows.get(focusId);
+              if (
+                focusResult !== undefined &&
+                focusObservation !== undefined &&
+                !focusSatisfied(focusResult, focusObservation)
+              ) {
                 return yield* Effect.fail(new CommandError({
-                  code: mapStepCode(focusResult.error.code),
-                  message: focusResult.error.detail ?? `focus ${focusId} failed`,
+                  code: mapStepCode(focusResult.error?.code),
+                  message: focusResult.error?.detail ?? `focus ${focusId} failed`,
                 }));
               }
               if (focusId !== null && focusResult !== undefined) {
@@ -3124,6 +3206,11 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                     ...world,
                     focusIntent: { id: command.windowId, generation: focusGeneration },
                   };
+                } else if (applied.left.code !== "window_not_controllable") {
+                  return yield* Effect.fail(new CommandError({
+                    code: mapStepCode(applied.left.code),
+                    message: applied.left.message,
+                  }));
                 }
               }),
             );

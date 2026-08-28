@@ -9,7 +9,7 @@ import {
   type ObservationSnapshot,
   type ObservationStore,
 } from "../src/observation-store.ts";
-import type { Clock, ConfigSource } from "../src/platform.ts";
+import type { Clock, ConfigSource, PlatformAdapter } from "../src/platform.ts";
 import type { Profile } from "../src/world.ts";
 import { createFakePlatform, makeDisplay, makeWindow } from "./helpers/fake-platform.ts";
 
@@ -96,7 +96,7 @@ const createTestStore = (
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 30));
 
 describe("engine observation-store integration", () => {
-  test("workspace focus persists a leading-edge maximum clamp", async () => {
+  test("first focus of a parked workspace persists and reuses a leading-edge maximum clamp", async () => {
     const display = makeDisplay({
       frame: { x: 0, y: 0, width: 1512, height: 982 },
       workArea: { x: 0, y: 32, width: 1512, height: 950 },
@@ -145,12 +145,29 @@ describe("engine observation-store integration", () => {
     expect(fake.writes()).toEqual([]);
 
     await Effect.runPromise(engine.execute({ type: "resume" }));
+    await Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "T" }));
+    expect((await Effect.runPromise(engine.state())).windows.find((window) =>
+      window.id === settings)?.parked).toBe(true);
+
+    fake.rejectNextBatchWrite(settings);
+    fake.rejectNextBatchFocus(settings);
     await Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "C" }));
 
     expect(fake.frameOf(settings)).toMatchObject({ x: 0, width: 723 });
-    expect((await Effect.runPromise(engine.state())).focusedWorkspace).toBe("C");
+    const focused = await Effect.runPromise(engine.state());
+    expect(focused.focusedWorkspace).toBe("C");
+    expect(focused.windows.find((window) => window.id === settings)?.parked).toBe(false);
     expect(observations.saved.at(-1)?.profiles.find((profile) =>
       profile.key.application === "com.apple.systempreferences")?.constraints.maxWidth).toBe(723);
+
+    fake.nudgeSilent(settings, { width: 900 });
+    await Effect.runPromise(engine.execute({ type: "retile", workspace: "C" }));
+    expect(fake.frameOf(settings)).toMatchObject({ x: 0, width: 723 });
+
+    await Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "T" }));
+    fake.rejectNextBatchFocus(settings, "stale");
+    await expect(Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "C" }))).rejects.toThrow();
+    expect((await Effect.runPromise(engine.state())).focusedWorkspace).toBe("T");
     await Effect.runPromise(engine.stop());
   });
 
@@ -176,6 +193,60 @@ describe("engine observation-store integration", () => {
 
     expect(fake.frameOf(settings)).toMatchObject({ x: 0, width: 723 });
     expect(fake.frameOf(chat)).toMatchObject({ x: 723, width: 789 });
+    await Effect.runPromise(engine.stop());
+  });
+
+  test("primitive fallback preserves stale write errors", async () => {
+    const display = makeDisplay();
+    const clock: Clock = {
+      now: CLOCK.now,
+      sleep: (millis) => Effect.sleep(`${millis >= 15_000 ? 1_000 : Math.min(millis, 2)} millis`),
+    };
+    const fake = createFakePlatform({ clock, displays: [display] });
+    const settings = fake.addWindow(makeWindow({
+      id: "window:settings-stale-fallback",
+      bundleId: "com.apple.systempreferences",
+      personality: { kind: "minMaxClamp", constraints: { maxWidth: 723 } },
+    }));
+    fake.addWindow(makeWindow({
+      id: "window:terminal-stale-fallback",
+      bundleId: "com.example.terminal",
+    }));
+    const configSource: ConfigSource = {
+      load: () => Effect.succeed({
+        defaults: { gap: 0, margins: { top: 0, right: 0, bottom: 0, left: 0 } },
+        workspaces: [
+          { name: "C", assign: [{ bundleId: "com.apple.systempreferences" }] },
+          { name: "T", assign: [{ bundleId: "com.example.terminal" }] },
+        ],
+      }),
+      changes: () => Stream.empty,
+    };
+    const { executeBatch: _executeBatch, ...primitiveAdapter } = fake.adapter;
+    let rejectSettings = false;
+    const adapter: PlatformAdapter = {
+      ...primitiveAdapter,
+      setWindowFrame: (id, frame, expected) =>
+        Effect.map(fake.adapter.setWindowFrame(id, frame, expected), (write) => {
+          if (id !== settings || !rejectSettings) return write;
+          rejectSettings = false;
+          return { ...write, stableReads: 3, errorKind: "stale" as const };
+        }),
+    };
+    const engine = await Effect.runPromise(createEngine({
+      adapter,
+      configSource,
+      clock,
+      initiallyPaused: true,
+    }));
+    await Effect.runPromise(engine.start());
+    await Effect.runPromise(engine.reconcile());
+    await Effect.runPromise(engine.execute({ type: "resume" }));
+    await Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "T" }));
+
+    rejectSettings = true;
+    await expect(Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "C" }))).rejects.toThrow();
+    expect((await Effect.runPromise(engine.state())).focusedWorkspace).toBe("T");
     await Effect.runPromise(engine.stop());
   });
 

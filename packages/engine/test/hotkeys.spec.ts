@@ -346,7 +346,7 @@ describe("focusDirection", () => {
     h.fake.swapBackingElement(w1);
     h.fake.swapBackingElement(w2);
     const error = await h.failure({ type: "focusDirection", direction: "up" });
-    expect(error.code).toBe("window_not_controllable");
+    expect(error.code).toBe("inventory_stale");
     snap = await h.snapshot();
     expect(workspaceOf(snap, "1")?.lastFocusedMember).toBe(w3); // unchanged
     expect(h.fake.focusedWindowId()).toBe(w3);
