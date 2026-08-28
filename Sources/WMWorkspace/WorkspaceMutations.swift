@@ -246,6 +246,12 @@ extension WorkspaceState {
             for oldID in replacements.keys.sorted() {
                 guard let newID = replacements[oldID],
                       let workspace = state.workspaces.first(where: { $0.windowIDs.contains(oldID) }) else { continue }
+                if state.workspaces.contains(where: { $0.windowIDs.contains(newID) }) {
+                    state.remove(windowID: oldID, from: workspace.name)
+                    state.parkedWindowFrames.removeValue(forKey: oldID)
+                    modified.insert(workspace.name)
+                    continue
+                }
                 let focused = workspace.focusedWindowID == oldID
                 let parkedFrame = state.parkedWindowFrames[oldID]
                 let index = state.index(of: workspace.name)!

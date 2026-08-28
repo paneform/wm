@@ -66,6 +66,14 @@ const bootstrap = async (): Promise<Harness> => {
 
 const frameOf = async (h: Harness, id: string): Promise<Frame | null> => h.fake.frameOf(id);
 
+const waitFor = async (check: () => boolean, timeoutMs = 500): Promise<void> => {
+  const deadline = Date.now() + timeoutMs;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error("condition not reached in time");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+};
+
 const parkedProbeHarness = async (
   spec: FakeWindowSpec,
   wrapAdapter?: (adapter: PlatformAdapter, fake: ReturnType<typeof createFakePlatform>) => PlatformAdapter,
@@ -98,6 +106,40 @@ const parkedProbeHarness = async (
 };
 
 describe("engine pipeline (fake platform)", () => {
+  test("does not reconcile repeatedly for empty workspace sentinels", async () => {
+    const fake = createFakePlatform({ clock: CLOCK, displays: [makeDisplay()] });
+    const engine = await Effect.runPromise(
+      createEngine({ adapter: fake.adapter, configSource: CONFIG_SOURCE, clock: CLOCK }),
+    );
+    await Effect.runPromise(engine.start());
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const settledEpoch = (await Effect.runPromise(engine.state())).epoch;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect((await Effect.runPromise(engine.state())).epoch).toBe(settledEpoch);
+    expect(engine.gateState()).toEqual({ busy: false, rerunQueued: false });
+    await Effect.runPromise(engine.stop());
+  });
+
+  test("retiles the surviving window immediately after a close event", async () => {
+    const display = makeDisplay();
+    const fake = createFakePlatform({ clock: CLOCK, displays: [display] });
+    const closed = fake.addWindow(makeWindow({ id: "window:closed" }));
+    const surviving = fake.addWindow(makeWindow({ id: "window:surviving" }));
+    const engine = await Effect.runPromise(
+      createEngine({ adapter: fake.adapter, configSource: CONFIG_SOURCE, clock: CLOCK }),
+    );
+    await Effect.runPromise(engine.start());
+    await Effect.runPromise(engine.reconcile());
+    expect(fake.frameOf(surviving)?.width).toBeLessThan(display.workArea.width);
+
+    fake.removeWindow(closed);
+
+    await waitFor(() => fake.frameOf(surviving)?.width === display.workArea.width);
+    expect(fake.frameOf(surviving)).toEqual(display.workArea);
+    await Effect.runPromise(engine.stop());
+  });
+
   test("deduplicates concurrent startup inventory and window-added insertion", async () => {
     const fake = createFakePlatform({ clock: CLOCK, displays: [makeDisplay()] });
     const windowId = fake.addWindow(makeWindow({ id: "window:startup-race" }));

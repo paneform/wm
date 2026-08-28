@@ -553,6 +553,20 @@ import Testing
   #expect(state[workspace: "1"] == nil)
 }
 
+@Test func replacementAlreadyManagedRemovesOnlyStaleSource() throws {
+  var state = WorkspaceState(
+    workspaces: [tiled("B", display: "d", windows: ["old", "existing", "peer"])])
+  let existingTree = state[workspace: "B"]?.bsp.root?.removing(windowID: "old")
+
+  _ = try state.reconcileObservedWindows(
+    ["existing", "peer"], replacements: ["old": "existing"],
+    removedWindowIDs: ["old"], defaultDisplayID: "d")
+
+  #expect(state[workspace: "B"]?.windowIDs == ["existing", "peer"])
+  #expect(state[workspace: "B"]?.bsp.root == existingTree)
+  try state.validate()
+}
+
 @Test func bspLayoutAdaptsToObservedMinimumWidths() {
   let workspace = Workspace(
     name: "tile", origin: .runtime, displayID: "d",

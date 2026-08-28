@@ -13,22 +13,24 @@ let backoff = 250;
 let latestSnapshot: StateSnapshot | undefined;
 let publishing = false;
 
-const trigger = (): void => {
-  const child = spawn("sketchybar", ["--trigger", "wm_workspace_change"], {
-    stdio: "ignore",
+const trigger = (): Promise<void> =>
+  new Promise((resolve) => {
+    const child = spawn("sketchybar", ["--trigger", "wm_workspace_change"], {
+      stdio: "ignore",
+    });
+    child.once("error", (error) => {
+      console.error(`[wm-sketchybar] trigger failed: ${String(error)}`);
+      resolve();
+    });
+    child.once("close", () => resolve());
   });
-  child.on("error", (error) => {
-    console.error(`[wm-sketchybar] trigger failed: ${String(error)}`);
-  });
-  child.unref();
-};
 
 const publish = async (snapshot: StateSnapshot): Promise<void> => {
   await mkdir(path.dirname(snapshotPath), { recursive: true, mode: 0o700 });
   const temporary = `${snapshotPath}.${process.pid}.tmp`;
   await writeFile(temporary, `${JSON.stringify(legacySketchybarSnapshot(snapshot))}\n`, { mode: 0o600 });
   await rename(temporary, snapshotPath);
-  trigger();
+  await trigger();
 };
 
 const queuePublish = (snapshot: StateSnapshot): void => {

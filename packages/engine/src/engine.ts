@@ -1225,6 +1225,13 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
 
         const actions = runRules();
         const outcome = yield* executePlan(actions);
+        const firstRemoval = actions.findIndex((action) => action.kind === "removeWindow");
+        if (firstRemoval >= 0 && outcome.applied > firstRemoval) {
+          // Rules plan from one snapshot. Removing a BSP leaf changes the
+          // layout input, so converge immediately instead of waiting for an
+          // unrelated platform event to request the next pass.
+          reconcileAgain = true;
+        }
 
         if (actions.length > 0 || outcome.applied > 0) {
           world = { ...world, epoch: world.epoch + 1 };

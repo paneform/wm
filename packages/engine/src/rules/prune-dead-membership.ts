@@ -1,4 +1,5 @@
 import { dedupeActions, type Action } from "../actions.ts";
+import { EMPTY_TREE_LEAF } from "../constants.ts";
 import type { BspNode, World } from "../world.ts";
 import type { Rule } from "./rule.ts";
 
@@ -37,7 +38,7 @@ function allMembers(workspace: { tree: BspNode; floating: ReadonlySet<string> })
 
 function collectLeaves(node: BspNode, into: Set<string>): void {
   if (node.kind === "leaf") {
-    into.add(node.windowId);
+    if (node.windowId !== EMPTY_TREE_LEAF) into.add(node.windowId);
     return;
   }
   collectLeaves(node.first, into);

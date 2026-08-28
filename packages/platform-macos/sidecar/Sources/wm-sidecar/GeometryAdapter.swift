@@ -38,7 +38,7 @@ struct WindowMeta {
     var subrole: String?
     var title: String?
     var frame: Rect
-    var cgWindowID: UInt32?
+    var axWindowID: UInt32?
     var bundleID: String?
     var executablePath: String?
     var hidden: Bool
@@ -50,7 +50,7 @@ struct WindowMeta {
         self.subrole = raw.subrole
         self.title = raw.title ?? cgTitle
         self.frame = raw.frame ?? Rect(x: 0, y: 0, width: 0, height: 0)
-        self.cgWindowID = cgWindowID
+        self.axWindowID = raw.cgWindowID ?? cgWindowID
         self.bundleID = raw.bundleID
         self.executablePath = raw.executablePath
         self.hidden = hidden
@@ -435,7 +435,7 @@ final class GeometryAdapter {
         guard let role: String = Self.optionalRead(element, kAXRoleAttribute), role == meta.role, role == kAXWindowRole else {
             return false
         }
-        if let expected = meta.cgWindowID, expected != 0 {
+        if let expected = meta.axWindowID, expected != 0 {
             let number: NSNumber? = Self.optionalRead(element, "AXWindowNumber")
             if let number { return number.uint32Value == expected }
         }
@@ -446,7 +446,7 @@ final class GeometryAdapter {
     /// window-number evidence, falling back to frame/title/subrole.
     private func matches(_ element: AXUIElement, _ meta: WindowMeta) -> Bool {
         guard sameLogicalWindow(element, meta) else { return false }
-        if let expected = meta.cgWindowID, expected != 0 {
+        if let expected = meta.axWindowID, expected != 0 {
             let number: NSNumber? = Self.optionalRead(element, "AXWindowNumber")
             if let number { return number.uint32Value == expected }
         }
