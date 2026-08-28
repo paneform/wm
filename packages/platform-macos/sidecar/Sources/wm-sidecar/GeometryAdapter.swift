@@ -27,6 +27,7 @@ enum AdapterError: Error, Equatable {
         default: .rejected
         }
     }
+
 }
 
 /// Identity + static metadata snapshot of one reportable window.
@@ -108,6 +109,18 @@ final class GeometryAdapter {
         try frame(of: try resolve(meta))
     }
 
+    func settleAfterRejectedWrite(
+        meta: WindowMeta,
+        requested: Rect,
+        expectedIdentity: ExpectedIdentityValue?
+    ) async throws -> Settlement {
+        let element = try resolve(meta)
+        try validateIdentity(element: element, meta: meta, expected: expectedIdentity)
+        let settlement = try await settle(element: element, requested: requested)
+        try validateIdentity(element: element, meta: meta, expected: expectedIdentity)
+        return settlement
+    }
+
     /// Cheap live readback of one window for settle polling.
     func observation(for meta: WindowMeta) -> WindowValue? {
         guard let element = try? resolve(meta) else { return nil }
@@ -158,35 +171,22 @@ final class GeometryAdapter {
         do {
             guard AXIsProcessTrusted() else { throw AdapterError.notControllable }
             let element = try resolve(meta)
+            try validateIdentity(element: element, meta: meta, expected: expectedIdentity)
             try validateControllability(element: element, components: components)
-
-        // Atomic identity precondition (contract §4): compared against the
-        // CURRENT live window metadata immediately before any component
-        // mutation; mismatch aborts `stale` without writing. Exact
-        // fingerprint equality — a same-pid/role replacement differing in
-        // subrole (null vs non-null) is rejected.
-            if let expected = expectedIdentity {
-                guard let live = observation(for: meta),
-                      ExpectedIdentityValue.fingerprint(
-                        pid: live.pid,
-                        role: live.role,
-                        subrole: live.subrole
-                      ) == expected.fingerprint
-                else { throw AdapterError.stale }
-            }
 
             try await withEnhancedUserInterfaceDisabled(pid: meta.pid) {
                 for component in components {
                     // Identity BEFORE the write: never mutate a replacement window.
-                    guard sameLogicalWindow(element, meta) else { throw AdapterError.stale }
+                    try validateIdentity(element: element, meta: meta, expected: expectedIdentity)
                     try writeComponent(component, requested, element: element)
                     try await Task.sleep(for: .milliseconds(interWriteDelayMs))
                     // Identity AFTER the write: abort rather than continue on a swap.
-                    guard sameLogicalWindow(element, meta) else { throw AdapterError.stale }
+                    try validateIdentity(element: element, meta: meta, expected: expectedIdentity)
                 }
             }
 
             let settlement = try await settle(element: element, requested: requested)
+            try validateIdentity(element: element, meta: meta, expected: expectedIdentity)
             return WriteValue(
                 requested: requested.frameValue,
                 observed: settlement.frame.frameValue,
@@ -312,25 +312,40 @@ final class GeometryAdapter {
 
     // MARK: Focus (requirement 7)
 
-    /// activate(activateAllWindows) → AXFrontmost → AXRaise → AXMain →
-    /// AXFocused, verified via frontmost pid, with one delayed retry.
-    func focus(meta: WindowMeta, expectedIdentity: ExpectedIdentityValue? = nil) throws {
-        guard AXIsProcessTrusted() else { throw AdapterError.notControllable }
-        let element = try resolve(meta)
-        if let expected = expectedIdentity {
-            guard let live = observation(for: meta),
-                  ExpectedIdentityValue.fingerprint(pid: live.pid, role: live.role, subrole: live.subrole)
-                    == expected.fingerprint else { throw AdapterError.stale }
+    /// Executes the native focus calls once and reports raw API/readback facts.
+    /// The engine decides whether those facts satisfy focus intent.
+    func focus(meta: WindowMeta, expectedIdentity: ExpectedIdentityValue? = nil) -> FocusValue {
+        var element: AXUIElement?
+        var operationError: AdapterError?
+        do {
+            guard AXIsProcessTrusted() else { throw AdapterError.notControllable }
+            let resolved = try resolve(meta)
+            element = resolved
+            try validateIdentity(element: resolved, meta: meta, expected: expectedIdentity)
+            try raiseToFront(resolved, meta: meta)
+        } catch let error as AdapterError {
+            operationError = error
+        } catch {
+            operationError = .rejected
         }
-        for attempt in 0..<2 {
-            try raiseToFront(element, meta: meta)
-            if frontmostPid() == meta.pid { return }
-            if attempt == 0 {
-                Thread.sleep(forTimeInterval: 0.15)
-                guard sameLogicalWindow(element, meta) else { throw AdapterError.stale }
+        if let element {
+            do {
+                try validateIdentity(element: element, meta: meta, expected: expectedIdentity)
+            } catch let error as AdapterError {
+                operationError = error
+            } catch {
+                operationError = .stale
             }
         }
-        throw AdapterError.rejected
+        let focused: Bool? = element.flatMap { Self.optionalRead($0, kAXFocusedAttribute) }
+        let main: Bool? = element.flatMap { Self.optionalRead($0, kAXMainAttribute) }
+        return FocusValue(
+            frontmostPid: frontmostPid().map(Int.init),
+            focused: focused,
+            main: main,
+            error: operationError.map {
+                BatchErrorValue(code: $0.wireCode, detail: "focus failed (\($0.wireCode))")
+            })
     }
 
     private func raiseToFront(_ element: AXUIElement, meta: WindowMeta) throws {
@@ -344,16 +359,30 @@ final class GeometryAdapter {
         }
         let app = AXUIElementCreateApplication(pid)
         setMessagingTimeout(app, 3.0)
-        guard AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue) == .success,
-              AXUIElementPerformAction(element, kAXRaiseAction as CFString) == .success,
-              AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue) == .success,
-              AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue) == .success else {
-            throw AdapterError.rejected
-        }
+        try checkWrite(AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue))
+        try checkWrite(AXUIElementPerformAction(element, kAXRaiseAction as CFString))
+        try checkWrite(AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue))
+        try checkWrite(AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue))
     }
 
     private func frontmostPid() -> Int32? {
         NSWorkspace.shared.frontmostApplication?.processIdentifier
+    }
+
+    private func validateIdentity(
+        element: AXUIElement,
+        meta: WindowMeta,
+        expected: ExpectedIdentityValue?
+    ) throws {
+        guard sameLogicalWindow(element, meta) else { throw AdapterError.stale }
+        guard let expected else { return }
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(element, &pid) == .success else { throw AdapterError.stale }
+        let role: String? = Self.optionalRead(element, kAXRoleAttribute)
+        let subrole: String? = Self.optionalRead(element, kAXSubroleAttribute)
+        guard ExpectedIdentityValue.fingerprint(
+            pid: Int(pid), role: role, subrole: subrole) == expected.fingerprint
+        else { throw AdapterError.stale }
     }
 
     private static func attributeSettable(_ element: AXUIElement, _ attribute: String) -> Bool? {

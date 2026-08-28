@@ -146,6 +146,7 @@ export const WriteObservation = Schema.Struct({
   requested: Frame,
   observed: Frame,
   stable: Schema.Boolean,
+  stableReads: Schema.optional(Schema.Number),
   errorKind: Schema.optional(WriteErrorKind),
 });
 export interface WriteObservation extends Schema.Schema.Type<typeof WriteObservation> {}

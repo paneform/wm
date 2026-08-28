@@ -265,7 +265,7 @@ class ScriptedOs {
           stable: true,
         });
       },
-      focusWindow: () => Effect.void,
+      focusWindow: () => Effect.succeed({ focused: true }),
     };
   }
 }

@@ -39,7 +39,12 @@ export type SidecarRequest =
   | { readonly op: "getWindow"; readonly reqId: string; readonly id: string }
   | SetWindowFrameRequest
   | { readonly op: "executeBatch"; readonly reqId: string; readonly operations: readonly unknown[] }
-  | { readonly op: "focusWindow"; readonly reqId: string; readonly id: string }
+  | {
+      readonly op: "focusWindow";
+      readonly reqId: string;
+      readonly id: string;
+      readonly expectedIdentity?: ExpectedWindowIdentity;
+    }
   | { readonly op: "ping"; readonly reqId: string }
   | { readonly op: "permissionsStatus"; readonly reqId: string }
   | { readonly op: "requestPermissions"; readonly reqId: string }
@@ -90,6 +95,9 @@ const BatchOperationResult = Schema.Struct({
   observed: Schema.optional(Schema.Struct({ x: Schema.Number, y: Schema.Number, width: Schema.Number, height: Schema.Number })),
   stable: Schema.optional(Schema.Boolean),
   stableReads: Schema.optional(Schema.Number),
+  frontmostPid: Schema.optional(Schema.Number),
+  focused: Schema.optional(Schema.Boolean),
+  main: Schema.optional(Schema.Boolean),
   error: Schema.optional(Schema.Struct({
     code: Schema.Literal("not_found", "not_controllable", "stale", "ambiguous", "rejected", "permission", "unavailable"),
     detail: Schema.optional(Schema.String),
@@ -116,7 +124,15 @@ export const WindowsResult = Schema.Struct({
 export const WindowResult = Schema.Struct({
   window: Schema.NullOr(WindowObservation),
 });
-export const FocusResult = Schema.Struct({ focused: Schema.Literal(true) });
+export const FocusResult = Schema.Struct({
+  frontmostPid: Schema.optional(Schema.Number),
+  focused: Schema.optional(Schema.Boolean),
+  main: Schema.optional(Schema.Boolean),
+  error: Schema.optional(Schema.Struct({
+    code: Schema.Literal("not_found", "not_controllable", "stale", "ambiguous", "rejected", "permission", "unavailable"),
+    detail: Schema.optional(Schema.String),
+  })),
+});
 
 // ---------------------------------------------------------------------------
 // Permissions (TCC). Status/request responses share one shape; the request

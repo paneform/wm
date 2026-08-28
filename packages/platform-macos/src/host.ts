@@ -426,8 +426,11 @@ export const createMacOsSidecarAdapter = (
           mode: "size",
           ...(expectedIdentity ? { expectedIdentity } : {}),
         })),
-      focusWindow: (id: WindowId) =>
-        Effect.asVoid(guarded(request("focusWindow", FocusResult, { id }))),
+      focusWindow: (id: WindowId, expected?: ExpectedWindowIdentity) =>
+        guarded(request("focusWindow", FocusResult, {
+          id,
+          ...(expected === undefined ? {} : { expectedIdentity: expected }),
+        })),
       executeBatch: (batch: PlatformBatchRequest): Effect.Effect<PlatformBatchResult, PlatformError> =>
         guarded(request("executeBatch", BatchResult, { operations: batch.operations })),
       permissionsStatus: () =>

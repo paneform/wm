@@ -18,6 +18,7 @@ import type {
   Clock,
   PlatformAdapter,
   PlatformBatchOperationResult,
+  PlatformFocusResult,
 } from "../../src/platform.ts";
 
 // Headless fake PlatformAdapter — docs/rewrite/testing-guide.md §Fake platform,
@@ -408,6 +409,8 @@ export interface FakePlatform {
   batchCalls(): number;
   batchTrace(): readonly { operationId: string; phase: "start" | "settle" | "finish"; active: number }[];
   batchHistory(): readonly { writeEnd: number; operationIds: readonly string[] }[];
+  rejectNextBatchWrite(id: WindowId, code?: PlatformError["code"]): void;
+  rejectNextBatchFocus(id: WindowId, code?: PlatformError["code"]): void;
 }
 
 interface SimDisplay {
@@ -468,6 +471,8 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
   const batchEvents: { operationId: string; phase: "start" | "settle" | "finish"; active: number }[] = [];
   let activeBatchOperations = 0;
   const batchHistory: { writeEnd: number; operationIds: readonly string[] }[] = [];
+  const rejectedBatchWrites = new Map<WindowId, PlatformError["code"]>();
+  const rejectedBatchFocus = new Map<WindowId, PlatformError["code"]>();
 
   const emitFocusChanged = (id: WindowId | null): void => {
     if (deferFocus) {
@@ -817,16 +822,23 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
     ]);
   };
 
-  const focusWindow = (id: WindowId): Effect.Effect<void, PlatformError> =>
+  const focusWindow = (
+    id: WindowId,
+    expected?: ExpectedWindowIdentity,
+  ): Effect.Effect<PlatformFocusResult, PlatformError> =>
     Effect.gen(function* () {
       const w = resolveWindow(id);
       if (w === undefined) return yield* failWith("not_found", `unknown window ${id}`);
+      if (!matchesExpected(w, expected)) {
+        return yield* failWith("stale", "identity precondition mismatch");
+      }
       if (!beginWrite(w)) {
         return yield* failWith("stale", "window identity replaced behind the same handle");
       }
       const changed = focusedId !== w.id;
       focusedId = w.id;
       if (changed) emitFocusChanged(w.id);
+      return { frontmostPid: w.pid, focused: true, main: true };
     });
 
   const adapter: PlatformAdapter = {
@@ -884,16 +896,6 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
           }
           const wave: PlatformBatchOperationResult[] = [];
           for (const { operation } of ready) {
-            const failedDependency = (operation.dependsOn ?? []).find(
-              (id) => results.get(id)?.error !== undefined,
-            );
-            if (failedDependency !== undefined) {
-              wave.push({
-                operationId: operation.operationId,
-                error: platformError("rejected", `dependency ${failedDependency} failed`),
-              });
-              continue;
-            }
             batchEvents.push({ operationId: operation.operationId, phase: "settle", active: activeBatchOperations });
             const effect = operation.kind === "setFrame"
               ? setWindowFrame(operation.windowId, operation.frame, operation.expectedIdentity)
@@ -905,19 +907,37 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
                   }
                   return yield* focusWindow(operation.windowId);
                 });
-            const outcome = yield* Effect.either(effect);
+            const outcome = yield* Effect.either(
+              effect as Effect.Effect<WriteObservation | PlatformFocusResult, PlatformError>,
+            );
             activeBatchOperations -= 1;
             batchEvents.push({ operationId: operation.operationId, phase: "finish", active: activeBatchOperations });
             if (outcome._tag === "Left") wave.push({ operationId: operation.operationId, error: outcome.left });
-            else if (operation.kind === "focus") wave.push({ operationId: operation.operationId });
+            else if (operation.kind === "focus") {
+              const focus = outcome.right as unknown as PlatformFocusResult;
+              const rejected = rejectedBatchFocus.get(operation.windowId);
+              rejectedBatchFocus.delete(operation.windowId);
+              wave.push({
+                operationId: operation.operationId,
+                ...focus,
+                ...(rejected !== undefined
+                  ? { error: platformError(rejected, `simulated ${rejected} after AX focus`) }
+                  : {}),
+              });
+            }
             else {
               const write = outcome.right as unknown as WriteObservation;
+              const rejected = rejectedBatchWrites.get(operation.windowId);
+              rejectedBatchWrites.delete(operation.windowId);
               wave.push({
                 operationId: operation.operationId,
                 requested: write.requested,
                 observed: write.observed,
                 stable: write.stable,
                 stableReads: write.stable ? STABLE_READS_TO_STOP : 0,
+                ...(rejected === undefined
+                  ? {}
+                  : { error: platformError(rejected, `simulated ${rejected} after write`) }),
               });
             }
           }
@@ -1113,5 +1133,11 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
     batchCalls: () => batchCallCount,
     batchTrace: () => [...batchEvents],
     batchHistory: () => [...batchHistory],
+    rejectNextBatchWrite: (id, code = "not_controllable") => {
+      rejectedBatchWrites.set(id, code);
+    },
+    rejectNextBatchFocus: (id, code = "rejected") => {
+      rejectedBatchFocus.set(id, code);
+    },
   };
 }

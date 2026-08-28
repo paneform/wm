@@ -90,7 +90,17 @@ struct BatchOperationResultValue: Codable, Equatable, Sendable {
   var observed: FrameValue?
   var stable: Bool?
   var stableReads: Int?
+  var frontmostPid: Int? = nil
+  var focused: Bool? = nil
+  var main: Bool? = nil
   var error: BatchErrorValue?
+}
+
+struct FocusValue: Codable, Equatable, Sendable {
+  var frontmostPid: Int? = nil
+  var focused: Bool? = nil
+  var main: Bool? = nil
+  var error: BatchErrorValue? = nil
 }
 
 struct BatchResultValue: Codable, Equatable, Sendable {
@@ -116,7 +126,7 @@ enum ResultPayload: Encodable {
   case window(WindowValue?)
   case write(WriteValue)
   case batch(BatchResultValue)
-  case focused
+  case focus(FocusValue)
   case permissions(PermissionsValue)
   case opened
   case keybindsConfigured(Int)
@@ -138,8 +148,8 @@ enum ResultPayload: Encodable {
       try container.encode(write)
     case .batch(let batch):
       try container.encode(batch)
-    case .focused:
-      try container.encode(FocusedPayload(focused: true))
+    case .focus(let focus):
+      try container.encode(focus)
     case .permissions(let permissions):
       try container.encode(PermissionsPayload(permissions: permissions))
     case .opened:

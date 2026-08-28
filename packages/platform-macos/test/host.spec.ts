@@ -60,6 +60,9 @@ const makeSpawn = (): { spawn: SpawnSidecar; fake: FakeSidecar } => {
         case "configureKeybinds":
           emit({ reqId, result: { configured: Object.keys(message.keybinds as object).length } });
           break;
+        case "focusWindow":
+          emit({ reqId, result: { frontmostPid: 42, focused: true, main: true } });
+          break;
         case "setWindowFrame": {
           const frame = message.frame as { x: number; y: number; width: number; height: number };
           emit({ reqId, result: { requested: frame, observed: frame, stable: true } });
@@ -167,6 +170,64 @@ describe("MacOsSidecarAdapter permission ops", () => {
     expect(fake.requests.filter((request) => request.op === "executeBatch")).toHaveLength(1);
     expect(fake.requests.filter((request) => request.op === "setWindowFrame" || request.op === "focusWindow")).toHaveLength(0);
     expect(result.operations.map((operation) => operation.operationId)).toEqual(["reveal", "focus"]);
+    adapter.stop();
+  });
+  test("batch results preserve native errors and observations for engine policy", async () => {
+    const { spawn, fake } = makeSpawn();
+    const adapter = Effect.runSync(createMacOsSidecarAdapter({ spawn, sidecarPath: "/x" }));
+    fake.emit(READY);
+    fake.overrides.set("executeBatch", (reqId) => ({
+      reqId,
+      result: {
+        operations: [
+          {
+            operationId: "resize",
+            requested: { x: 0, y: 32, width: 1512, height: 950 },
+            observed: { x: 0, y: 32, width: 723, height: 950 },
+            stable: true,
+            stableReads: 3,
+            error: { code: "rejected", detail: "AX size rejected" },
+          },
+          {
+            operationId: "focus",
+            frontmostPid: 99,
+            focused: true,
+            main: true,
+            error: { code: "rejected", detail: "frontmost check rejected" },
+          },
+        ],
+        completed: 0,
+        failed: 2,
+      },
+    }));
+
+    const result = await Effect.runPromise(adapter.executeBatch!({ operations: [
+      {
+        operationId: "resize",
+        kind: "setFrame",
+        windowId: "w1",
+        frame: { x: 0, y: 32, width: 1512, height: 950 },
+        expectedIdentity: { fingerprint: "id1" },
+      },
+      {
+        operationId: "focus",
+        kind: "focus",
+        windowId: "w1",
+        expectedIdentity: { fingerprint: "id1" },
+        dependsOn: ["resize"],
+      },
+    ] }));
+
+    expect(result.operations[0]).toMatchObject({
+      observed: { x: 0, width: 723 },
+      stableReads: 3,
+      error: { code: "rejected" },
+    });
+    expect(result.operations[1]).toMatchObject({
+      focused: true,
+      main: true,
+      error: { code: "rejected" },
+    });
     adapter.stop();
   });
   test("handshake resolves whenReady and triggers subscribe", async () => {

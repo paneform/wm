@@ -84,7 +84,7 @@ function adapterWith(
         }
         return result;
       }),
-    focusWindow: () => Effect.void,
+    focusWindow: () => Effect.succeed({ focused: true }),
   };
 }
 
@@ -217,7 +217,7 @@ describe("geometry-service guarded writes", () => {
           frame = { ...frame, x: INITIAL.x, y: INITIAL.y, ...size };
           return writeResult({ ...frame, ...size }, frame);
         }),
-      focusWindow: () => Effect.void,
+      focusWindow: () => Effect.succeed({ focused: true }),
     };
 
     const exit = await run(adapter);

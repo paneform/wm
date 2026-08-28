@@ -53,6 +53,15 @@ final class InventoryService {
         try? adapter.readFrame(meta: meta)
     }
 
+    func settleAfterRejectedWrite(
+        meta: WindowMeta,
+        requested: Rect,
+        expectedIdentity: ExpectedIdentityValue?
+    ) async throws -> GeometryAdapter.Settlement {
+        try await adapter.settleAfterRejectedWrite(
+            meta: meta, requested: requested, expectedIdentity: expectedIdentity)
+    }
+
     func mergedTarget(meta: WindowMeta, replace: (inout Rect) -> Void) throws -> Rect {
         try adapter.mergedTarget(meta: meta, replace: replace)
     }
@@ -71,8 +80,8 @@ final class InventoryService {
         )
     }
 
-    func focus(meta: WindowMeta, expectedIdentity: ExpectedIdentityValue? = nil) async throws {
-        try adapter.focus(meta: meta, expectedIdentity: expectedIdentity)
+    func focus(meta: WindowMeta, expectedIdentity: ExpectedIdentityValue? = nil) async -> FocusValue {
+        adapter.focus(meta: meta, expectedIdentity: expectedIdentity)
     }
 
     // MARK: Loops

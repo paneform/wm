@@ -208,14 +208,11 @@ final class SidecarServer {
       guard let meta = inventory.metadata(for: id) else {
         return sendError(request, code: "not_found", detail: "unknown window \(id)")
       }
-      do {
-        try await inventory.focus(meta: meta)
-        send(ResultMessage(reqId: requestId(request), result: .focused))
-      } catch let error as AdapterError {
-        sendError(request, code: error.wireCode, detail: "focus failed")
-      } catch {
-        sendError(request, code: "rejected", detail: "focus failed: \(error)")
-      }
+      send(
+        ResultMessage(
+          reqId: requestId(request),
+          result: .focus(
+            await inventory.focus(meta: meta, expectedIdentity: request.expectedIdentity))))
 
     default:
       sendError(request, code: "invalid_request", detail: "unknown op \(request.op)")
@@ -265,8 +262,33 @@ final class SidecarServer {
         expectedIdentity: request.expectedIdentity)
       send(ResultMessage(reqId: requestId(request), result: .write(write)))
     } catch let error as AdapterError {
-      // The platform API itself refused; report honestly with the last
-      // observed frame so the engine can classify.
+      if error != .stale {
+        do {
+          let settlement = try await inventory.settleAfterRejectedWrite(
+            meta: meta, requested: target, expectedIdentity: request.expectedIdentity)
+          return send(
+            ResultMessage(
+              reqId: requestId(request),
+              result: .write(
+                WriteValue(
+                  requested: target.frameValue,
+                  observed: settlement.frame.frameValue,
+                  stable: settlement.stable,
+                  stableReads: settlement.stableReads,
+                  errorKind: error.wireCode))))
+        } catch let settlementError as AdapterError {
+          let observed = inventory.currentObservedFrame(for: meta) ?? target
+          return send(
+            ResultMessage(
+              reqId: requestId(request),
+              result: .write(
+                WriteValue(
+                  requested: target.frameValue,
+                  observed: observed.frameValue,
+                  stable: false,
+                  errorKind: settlementError.wireCode))))
+        } catch {}
+      }
       let observed = inventory.currentObservedFrame(for: meta) ?? target
       send(
         ResultMessage(
@@ -324,12 +346,11 @@ final class SidecarServer {
         break
       }
       await withTaskGroup(of: (Int, BatchOperationResultValue).self) { group in
-        let prior = results
         for index in ready {
           let operation = operations[index]
           let meta = metas[operation.windowId]
           group.addTask {
-            (index, await self.executeBatchOperation(operation, meta: meta, prior: prior))
+            (index, await self.executeBatchOperation(operation, meta: meta))
           }
         }
         for await (index, result) in group { results[index] = result }
@@ -349,22 +370,21 @@ final class SidecarServer {
 
   private func executeBatchOperation(
     _ operation: BatchOperationValue,
-    meta: WindowMeta?,
-    prior: [Int: BatchOperationResultValue]
+    meta: WindowMeta?
   ) async -> BatchOperationResultValue {
-    if let failedDependency = (operation.dependsOn ?? []).first(where: { dependency in
-      prior.values.contains(where: { $0.operationId == dependency && $0.error != nil })
-    }) {
-      return batchFailure(
-        operation, code: "rejected", detail: "dependency \(failedDependency) failed")
-    }
     guard let meta else {
       return batchFailure(operation, code: "not_found", detail: "unknown window")
     }
     do {
       if operation.kind == "focus" {
-        try await inventory.focus(meta: meta, expectedIdentity: operation.expectedIdentity)
-        return BatchOperationResultValue(operationId: operation.operationId)
+        let focus = await inventory.focus(
+          meta: meta, expectedIdentity: operation.expectedIdentity)
+        return BatchOperationResultValue(
+          operationId: operation.operationId,
+          frontmostPid: focus.frontmostPid,
+          focused: focus.focused,
+          main: focus.main,
+          error: focus.error)
       }
       guard operation.kind == "setFrame", let frame = operation.frame else {
         return batchFailure(operation, code: "invalid_request", detail: "invalid batch operation")
@@ -377,7 +397,28 @@ final class SidecarServer {
         observed: write.observed, stable: write.stable,
         stableReads: write.stableReads, error: nil)
     } catch let error as AdapterError {
-      return batchFailure(operation, code: error.wireCode, detail: "batch operation failed (\(error.wireCode))")
+      if operation.kind == "setFrame", let frame = operation.frame, error != .stale {
+        do {
+          let settlement = try await inventory.settleAfterRejectedWrite(
+            meta: meta, requested: Rect(frame), expectedIdentity: operation.expectedIdentity)
+          return BatchOperationResultValue(
+            operationId: operation.operationId, requested: frame,
+            observed: settlement.frame.frameValue, stable: settlement.stable,
+            stableReads: settlement.stableReads,
+            error: BatchErrorValue(
+              code: error.wireCode,
+              detail: "setFrame failed (\(error.wireCode)); observed=\(settlement.frame.frameValue); stable=\(settlement.stable); stableReads=\(settlement.stableReads)"))
+        } catch let settlementError as AdapterError {
+          return batchFailure(
+            operation, code: settlementError.wireCode,
+            detail: "setFrame readback failed (\(settlementError.wireCode))")
+        } catch {
+          return batchFailure(operation, code: "rejected", detail: "setFrame readback failed")
+        }
+      }
+      return batchFailure(
+        operation, code: error.wireCode,
+        detail: "\(operation.kind) failed (\(error.wireCode))")
     } catch {
       return batchFailure(operation, code: "rejected", detail: "batch operation failed")
     }

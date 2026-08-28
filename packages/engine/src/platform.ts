@@ -63,7 +63,10 @@ export interface PlatformAdapter {
     size: Size,
     expected?: ExpectedWindowIdentity,
   ): Effect.Effect<WriteObservation, PlatformError>;
-  focusWindow(id: WindowId): Effect.Effect<void, PlatformError>;
+  focusWindow(
+    id: WindowId,
+    expected?: ExpectedWindowIdentity,
+  ): Effect.Effect<PlatformFocusResult, PlatformError>;
 
   /**
    * One host/native round trip for related mutations. This is not an atomic
@@ -104,10 +107,22 @@ export interface PlatformBatchOperationResult {
   readonly stable?: boolean | undefined;
   /** Consecutive stable native settle reads supporting this observation. */
   readonly stableReads?: number | undefined;
-  readonly error?: {
-    readonly code: PlatformError["code"];
-    readonly detail?: string | undefined;
-  } | undefined;
+  readonly frontmostPid?: number | undefined;
+  readonly focused?: boolean | undefined;
+  readonly main?: boolean | undefined;
+  readonly error?: PlatformOperationError | undefined;
+}
+
+export interface PlatformOperationError {
+  readonly code: PlatformError["code"];
+  readonly detail?: string | undefined;
+}
+
+export interface PlatformFocusResult {
+  readonly frontmostPid?: number | undefined;
+  readonly focused?: boolean | undefined;
+  readonly main?: boolean | undefined;
+  readonly error?: PlatformOperationError | undefined;
 }
 
 export interface PlatformBatchResult {

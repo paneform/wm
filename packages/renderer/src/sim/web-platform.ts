@@ -3,6 +3,7 @@ import {
   PlatformError,
   type DisplayId,
   type DisplayObservation,
+  type ExpectedWindowIdentity,
   type Frame,
   type PlatformAdapter,
   type PlatformEvent,
@@ -12,6 +13,7 @@ import {
   type WindowId,
   type WindowObservation,
   type WriteObservation,
+  windowIdentityFingerprint,
 } from "@wm/engine";
 
 // In-memory simulated PlatformAdapter — docs/rewrite/platform-contract.md.
@@ -607,14 +609,21 @@ export function createWebPlatformSim(options: WebPlatformSimOptions = {}): WebPl
     return runWrite(w, [{ component: "size", requested, apply: () => applySizeWrite(w, size) }]);
   };
 
-  const focusWindow = (id: WindowId): Effect.Effect<void, PlatformError> =>
+  const focusWindow = (
+    id: WindowId,
+    expected?: ExpectedWindowIdentity,
+  ): Effect.Effect<import("@wm/engine").PlatformFocusResult, PlatformError> =>
     Effect.gen(function* () {
       const w = resolveWindow(id);
       if (w === undefined) return yield* failWith("not_found", `unknown window ${id}`);
+      if (expected !== undefined && expected.fingerprint !== windowIdentityFingerprint(observationOf(w))) {
+        return yield* failWith("stale", "window identity changed before focus");
+      }
       const held = beginWrite(w);
       if (!held) return yield* failWith("stale", "window identity replaced behind the same handle");
       focusedId = w.id;
       dispatch({ kind: "focus_changed", windowId: w.id });
+      return { frontmostPid: w.pid, focused: true, main: true };
     });
 
   const adapter: PlatformAdapter = {
