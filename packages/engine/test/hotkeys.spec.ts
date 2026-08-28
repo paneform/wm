@@ -412,7 +412,28 @@ describe("moveDirection", () => {
     expect(h.fake.writes().length).toBeGreaterThan(writesBefore);
   });
 
-  test("nested-tree swap preserves every ratio and retiles all panes exactly", async () => {
+  test("a perpendicular move rotates a two-window split", async () => {
+    const h = await bootstrap();
+    const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const w2 = h.fake.addWindow(makeWindow({ x: 900, y: 300 }));
+    await seedWorkspace(h, [w1, w2]);
+
+    await h.run({ type: "moveDirection", direction: "down" });
+
+    const ws1 = workspaceOf(await h.snapshot(), "1")!;
+    expect(ws1.tree).toEqual({
+      kind: "split",
+      axis: "horizontal",
+      ratio: 0.5,
+      first: { kind: "leaf", windowId: w2 },
+      second: { kind: "leaf", windowId: w1 },
+    });
+    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 1512, 472));
+    expect(await frameOf(h, w1)).toEqual(frame(0, 518, 1512, 464));
+    expect(h.fake.focusedWindowId()).toBe(w1);
+  });
+
+  test("nested-tree move reinserts the focused leaf at the destination pane", async () => {
     const h = await bootstrap();
     const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     const w2 = h.fake.addWindow(makeWindow({ x: 900, y: 200 }));
@@ -438,8 +459,8 @@ describe("moveDirection", () => {
       },
     });
 
-    // From w2 (center ~1138,274): DOWN ranks w1 (236 pt below center) ahead
-    // of w3 (476 pt) — primary-axis gap dominates over same-column distance.
+    // DOWN ranks w1 ahead of w3 by primary-axis gap. Moving w2 there removes
+    // it from above w3 and splits w1's tall destination pane horizontally.
     h.fake.focusWindowExternal(w2);
     await h.run({ type: "reconcile" });
     await h.run({ type: "moveDirection", direction: "down" });
@@ -450,18 +471,18 @@ describe("moveDirection", () => {
       kind: "split",
       axis: "vertical",
       ratio: 0.5,
-      first: { kind: "leaf", windowId: w2 },
-      second: {
+      first: {
         kind: "split",
         axis: "horizontal",
         ratio: 0.5,
         first: { kind: "leaf", windowId: w1 },
-        second: { kind: "leaf", windowId: w3 },
+        second: { kind: "leaf", windowId: w2 },
       },
+      second: { kind: "leaf", windowId: w3 },
     });
-    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 756, 944));
-    expect(await frameOf(h, w1)).toEqual(frame(764, 38, 748, 472));
-    expect(await frameOf(h, w3)).toEqual(frame(764, 518, 748, 464)); // untouched pane
+    expect(await frameOf(h, w1)).toEqual(frame(0, 38, 756, 472));
+    expect(await frameOf(h, w2)).toEqual(frame(0, 518, 756, 464));
+    expect(await frameOf(h, w3)).toEqual(frame(764, 38, 748, 944));
     expect(h.fake.focusedWindowId()).toBe(w2);
     expect(ws1.lastFocusedMember).toBe(w2);
   });

@@ -69,7 +69,7 @@ import {
   isEmptyTree,
   planLayout,
   removeLeaf,
-  swapLeaves,
+  moveLeaf,
   tiledMembers,
 } from "./layout/bsp.ts";
 import { directionalNeighbor, type DirectionalCandidate } from "./direction.ts";
@@ -3011,7 +3011,21 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             // identity-safely.
             yield* executeCompound(memberIdsOf(ctx.workspaceName), ({ intents }) => (w0) => {
               const wsNow = w0.workspaces.get(ctx.workspaceName)!;
-              const tree = swapLeaves(wsNow.tree, ctx.originId, neighborId);
+              const observedTargetFrame = w0.windows.get(neighborId)?.frame;
+              const insertionHost = insertionDisplay(w0, wsNow, observedTargetFrame);
+              const targetFrame = insertionTargetFrame(
+                w0,
+                wsNow,
+                observedTargetFrame,
+                effectiveSettings(config, ctx.workspaceName, insertionHost?.id).margins,
+              );
+              const tree = moveLeaf(
+                wsNow.tree,
+                ctx.originId,
+                neighborId,
+                command.direction,
+                targetFrame,
+              );
               intents.push({ kind: "retile", workspace: ctx.workspaceName });
               return {
                 ...w0,

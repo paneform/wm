@@ -7,6 +7,7 @@ import {
   insertLeaf,
   isValidRatio,
   memberIds,
+  moveLeaf,
   partitionLengths,
   planLayout,
   removeLeaf,
@@ -96,6 +97,78 @@ describe("BSP tree shape", () => {
       expect(removeLeaf(leaf("only"), "only")).toBeNull();
       const tree = split("vertical", 0.5, leaf("a"), leaf("b"));
       expect(memberIds(removeLeaf(tree, "absent")!)).toEqual(["a", "b"]);
+    });
+  });
+
+  describe("moveLeaf", () => {
+    test("moves along an existing two-window split by swapping its leaves", () => {
+      expect(moveLeaf(split("vertical", 0.4, leaf("a"), leaf("b")), "a", "b", "left")).toEqual(
+        split("vertical", 0.4, leaf("b"), leaf("a")),
+      );
+      expect(moveLeaf(split("horizontal", 0.6, leaf("a"), leaf("b")), "a", "b", "down")).toEqual(
+        split("horizontal", 0.6, leaf("b"), leaf("a")),
+      );
+    });
+
+    test("changes a two-window split axis and places the focused leaf in the requested direction", () => {
+      const vertical = split("vertical", 0.5, leaf("a"), leaf("b"));
+      expect(moveLeaf(vertical, "b", "a", "up")).toEqual(
+        split("horizontal", 0.5, leaf("b"), leaf("a")),
+      );
+      expect(moveLeaf(vertical, "a", "b", "down")).toEqual(
+        split("horizontal", 0.5, leaf("b"), leaf("a")),
+      );
+
+      const horizontal = split("horizontal", 0.5, leaf("a"), leaf("b"));
+      expect(moveLeaf(horizontal, "b", "a", "left")).toEqual(
+        split("vertical", 0.5, leaf("b"), leaf("a")),
+      );
+      expect(moveLeaf(horizontal, "a", "b", "right")).toEqual(
+        split("vertical", 0.5, leaf("b"), leaf("a")),
+      );
+    });
+
+    test("removes and reinserts a non-sibling leaf at the destination pane", () => {
+      const tree = split(
+        "vertical",
+        0.5,
+        leaf("a"),
+        split("horizontal", 0.5, leaf("b"), leaf("c")),
+      );
+      const moved = moveLeaf(tree, "b", "a", "left", frame(0, 0, 600, 900));
+      expect(moved).toEqual(
+        split(
+          "vertical",
+          0.5,
+          split("horizontal", 0.5, leaf("b"), leaf("a")),
+          leaf("c"),
+        ),
+      );
+      expect(moveLeaf(moved, "b", "a", "down")).toEqual(
+        split(
+          "vertical",
+          0.5,
+          split("horizontal", 0.5, leaf("a"), leaf("b")),
+          leaf("c"),
+        ),
+      );
+    });
+
+    test("uses remove and reinsert for sibling leaves when the tree has three windows", () => {
+      const tree = split(
+        "vertical",
+        0.4,
+        leaf("a"),
+        split("horizontal", 0.7, leaf("b"), leaf("c")),
+      );
+      expect(moveLeaf(tree, "b", "c", "down", frame(600, 500, 600, 400))).toEqual(
+        split(
+          "vertical",
+          0.4,
+          leaf("a"),
+          split("horizontal", 0.5, leaf("c"), leaf("b")),
+        ),
+      );
     });
   });
 });

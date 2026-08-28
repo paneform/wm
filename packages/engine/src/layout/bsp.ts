@@ -1,5 +1,6 @@
 import type { Constraints, DisplayObservation, Frame, WindowId } from "../schema.ts";
 import type { BspNode, SplitAxis } from "../world.ts";
+import type { Direction } from "../direction.ts";
 import {
   BSP_DEFAULT_GAP,
   DEFAULT_POLICY_CHAIN,
@@ -118,6 +119,103 @@ export function swapLeaves(tree: BspNode, a: WindowId, b: WindowId): BspNode {
     return { ...node, first: map(node.first), second: map(node.second) };
   };
   return map(tree);
+}
+
+const axisForDirection = (direction: Direction): SplitAxis =>
+  direction === "left" || direction === "right" ? "vertical" : "horizontal";
+
+const movedLeafIsFirst = (direction: Direction): boolean =>
+  direction === "left" || direction === "up";
+
+function moveTwoLeafTree(
+  tree: BspNode,
+  movedId: WindowId,
+  targetId: WindowId,
+  direction: Direction,
+): BspNode {
+  if (tree.kind === "leaf" || tree.first.kind !== "leaf" || tree.second.kind !== "leaf") {
+    return tree;
+  }
+  if (tree.axis === axisForDirection(direction)) {
+    return { ...tree, first: tree.second, second: tree.first };
+  }
+  return {
+    ...tree,
+    axis: axisForDirection(direction),
+    first: { kind: "leaf", windowId: movedLeafIsFirst(direction) ? movedId : targetId },
+    second: { kind: "leaf", windowId: movedLeafIsFirst(direction) ? targetId : movedId },
+  };
+}
+
+function siblingAxis(tree: BspNode, a: WindowId, b: WindowId): SplitAxis | undefined {
+  if (tree.kind === "leaf") return undefined;
+  if (tree.first.kind === "leaf" && tree.second.kind === "leaf") {
+    const isPair =
+      (tree.first.windowId === a && tree.second.windowId === b) ||
+      (tree.first.windowId === b && tree.second.windowId === a);
+    if (isPair) return tree.axis;
+  }
+  return siblingAxis(tree.first, a, b) ?? siblingAxis(tree.second, a, b);
+}
+
+function insertMovedLeaf(
+  tree: BspNode,
+  targetId: WindowId,
+  movedId: WindowId,
+  direction: Direction,
+  targetFrame?: Frame | undefined,
+  preferredAxis?: SplitAxis | undefined,
+): BspNode | null {
+  if (tree.kind === "leaf") {
+    if (tree.windowId !== targetId) return null;
+    const moved = { kind: "leaf" as const, windowId: movedId };
+    return {
+      kind: "split",
+      axis:
+        preferredAxis ??
+        (targetFrame === undefined ? axisForDirection(direction) : axisForFrame(targetFrame)),
+      ratio: 0.5,
+      first: movedLeafIsFirst(direction) ? moved : tree,
+      second: movedLeafIsFirst(direction) ? tree : moved,
+    };
+  }
+  const first = insertMovedLeaf(
+    tree.first,
+    targetId,
+    movedId,
+    direction,
+    targetFrame,
+    preferredAxis,
+  );
+  if (first !== null) return { ...tree, first };
+  const second = insertMovedLeaf(
+    tree.second,
+    targetId,
+    movedId,
+    direction,
+    targetFrame,
+    preferredAxis,
+  );
+  return second === null ? null : { ...tree, second };
+}
+
+/** Move a leaf toward another leaf, rotating direct pairs or reinserting it at the destination pane. */
+export function moveLeaf(
+  tree: BspNode,
+  movedId: WindowId,
+  targetId: WindowId,
+  direction: Direction,
+  targetFrame?: Frame | undefined,
+): BspNode {
+  if (movedId === targetId || !findLeaf(tree, movedId) || !findLeaf(tree, targetId)) return tree;
+
+  if (memberIds(tree).length === 2) return moveTwoLeafTree(tree, movedId, targetId, direction);
+
+  const preferredAxis = siblingAxis(tree, movedId, targetId);
+  const removed = removeLeaf(tree, movedId);
+  return removed === null
+    ? tree
+    : (insertMovedLeaf(removed, targetId, movedId, direction, targetFrame, preferredAxis) ?? tree);
 }
 
 /** Members that participate in layout; filters the empty-tree sentinel. */
