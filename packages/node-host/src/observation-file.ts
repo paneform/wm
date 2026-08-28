@@ -114,6 +114,7 @@ const writeAtomically = (
   }
   const temporary = path.join(directory, `.${path.basename(file)}.${process.pid}.${randomUUID()}.tmp`);
   let descriptor: number | undefined;
+  let cleanupError: unknown;
   try {
     descriptor = fs.openSync(temporary, "wx", 0o600);
     fs.writeFileSync(descriptor, data);
@@ -139,9 +140,10 @@ const writeAtomically = (
     try {
       fs.unlinkSync(temporary);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") cleanupError = error;
     }
   }
+  if (cleanupError !== undefined) throw cleanupError;
   return { revision: digest(data), document };
 };
 

@@ -46,7 +46,6 @@ export function attachWebSocketServer(
     const session: WsSession = {
       send: (text) => socket.readyState === socket.OPEN && socket.send(text),
     };
-    let subscribed = false;
     let handling = Promise.resolve();
     socket.on("message", (raw) => {
       handling = handling.then(() => handleRaw(String(raw)));
@@ -71,7 +70,6 @@ export function attachWebSocketServer(
       if (message.type !== "request") return;
       try {
         if (message.command.type === "subscribe") {
-          subscribed = true;
           subscribers.add(session);
           reply(message.id, wireSnapshot(await options.snapshot()));
           reply(message.id, { v: 1, type: "response", id: message.id, ok: true, data: { subscribed: true } });

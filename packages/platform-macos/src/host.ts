@@ -8,7 +8,6 @@ import type {
   Point,
   Size,
   WindowId,
-  WriteObservation,
   PlatformBatchRequest,
   PlatformBatchResult,
 } from "@wm/engine";
@@ -219,7 +218,7 @@ export const createMacOsSidecarAdapter = (
     };
 
     const failPendingAll = (detail: string) => {
-      for (const reqId of [...pending.keys()]) {
+      for (const reqId of pending.keys()) {
         complete(reqId, Effect.fail(makeError("unavailable", detail)));
       }
     };

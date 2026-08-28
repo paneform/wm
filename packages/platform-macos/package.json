@@ -6,7 +6,7 @@
     "build": "tsc --noEmit && swift build --package-path sidecar",
     "typecheck": "tsc --noEmit",
     "test": "swift test --package-path sidecar && vitest run",
-    "lint": "eslint src"
+    "lint": "oxlint src test"
   },
   "dependencies": {
     "@wm/engine": "workspace:*",
@@ -14,6 +14,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "oxlint": "1.80.0",
     "typescript": "^5.9.0",
     "vitest": "^4.1.11"
   },

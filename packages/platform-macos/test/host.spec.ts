@@ -95,7 +95,7 @@ const makeSpawn = (): { spawn: SpawnSidecar; fake: FakeSidecar } => {
     stdout,
     stderr,
     kill() {
-      for (const listener of [...exitListeners]) listener(0);
+      for (const listener of exitListeners) listener(0);
     },
     onExit(listener) {
       exitListeners.push(listener);

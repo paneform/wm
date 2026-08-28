@@ -9,7 +9,7 @@
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "eslint src"
+    "lint": "oxlint src test"
   },
   "dependencies": {
     "@wm/engine": "workspace:*",
@@ -20,6 +20,7 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/ws": "^8.18.1",
+    "oxlint": "1.80.0",
     "typescript": "^5.9.0",
     "vitest": "^4.1.11"
   }
