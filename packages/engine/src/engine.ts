@@ -1531,6 +1531,15 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             message: `layout infeasible for workspace ${wsName}`,
           });
         }
+        if (ws.parkedFrames.size > 0) {
+          draft = {
+            ...draft,
+            workspaces: new Map(draft.workspaces).set(wsName, {
+              ...ws,
+              parkedFrames: new Map(),
+            }),
+          };
+        }
         for (const [id, frame] of plan.frames) {
           const obs = acc.observationOf(id);
           if (obs === undefined || obs.minimized || obs.hidden) continue;

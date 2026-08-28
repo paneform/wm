@@ -5,14 +5,14 @@ status: in-progress
 type: task
 priority: normal
 created_at: 2026-08-28T03:25:26Z
-updated_at: 2026-08-28T03:25:48Z
+updated_at: 2026-08-28T03:26:54Z
 ---
 
 Split the current local changes into coherent, buildable commits.
 
 - [x] Commit richer native operation evidence and identity-safe focus contracts
-- [ ] Commit engine acceptance policy for observed clamps and focus outcomes
-- [ ] Commit parked-frame cleanup
+- [x] Commit engine acceptance policy for observed clamps and focus outcomes
+- [x] Commit parked-frame cleanup
 - [ ] Run repository validation and inspect final history
 
 ## Notes
