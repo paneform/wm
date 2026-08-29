@@ -131,7 +131,7 @@ same port with IndexedDB; tests use in-memory stores.
 
 Write strategies tried in order: `positionSize`, `sizeOnly`, `sizePositionSize`,
 `convergedSizePositionSize` (the double size bookend exists because many apps re-anchor
-their origin when resized — see Swift tests "window reanchors"). Default budget 3
+their origin when resized). Default budget 3
 attempts (config range 1–5). Escalate strategy on failure; skip ahead when profile says
 the app needs corrective fallbacks (`correctiveAttemptCount > 1`). If mid-animation
 (`progressing`) when budget exhausts, report progressing honestly — never clobber a

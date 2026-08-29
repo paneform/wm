@@ -97,8 +97,7 @@ Sidecar → engine:
 { "ready": true, "version": "..." }          // handshake on start
 ```
 
-Sidecar implementation requirements (Swift, reusing knowledge from the current
-implementation on `main`):
+Sidecar implementation requirements:
 
 1. **Canonicalize coordinates once at enumeration.** NSScreen frames are bottom-left
    origin, y-up: convert via `y' = primaryMaxY - rect.maxY`. AX positions/sizes and
@@ -107,7 +106,7 @@ implementation on `main`):
 2. **Display identity:** `display:<uuid lowercase>` from CGDisplayCreateUUID; fallback
    `display:<directDisplayID>`. Order: primary first, then by x, y, id. Keep
    online-but-inactive displays during sleep (prevents topology churn).
-3. **Window identity/normalization** (port from `WindowNormalizer.swift` ground truth):
+3. **Window identity/normalization:**
    - Stable id: `window:cg:<id>` when CG id valid (non-zero); else
      `window:ax:<pid>:<role>:<subrole>:<fnv1a64(title) hex>:<occurrence-index>`.
    - Join AX + CG inventories by evidence score: cg_window_id match +100, frame match +20,

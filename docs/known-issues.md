@@ -305,7 +305,7 @@ Design requirements:
 - Serve user queries from last committed immutable snapshots.
 - Keep per-app AX work outside the command actor.
 - Return pending/recovery metadata without exposing half-applied state.
-- Benchmark single-binary startup and WebSocket handshake before setting latency
+- Benchmark native-host and TypeScript CLI startup plus WebSocket handshake before setting latency
   budgets.
 
 Evidence:

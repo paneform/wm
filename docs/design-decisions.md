@@ -47,8 +47,7 @@ When Node launches the native service, macOS can attribute TCC responsibility
 to the unsigned Node parent rather than to the executable that calls the native
 APIs. This makes permission onboarding ambiguous and can require permissions on
 processes which do not themselves access protected APIs. The product also needs
-one clear executable for launchd ownership, permission prompts, lifecycle
-commands, and normal CLI use.
+one clear executable for launchd ownership, permission prompts, and native API access.
 
 ### Decision
 
@@ -59,17 +58,10 @@ engine as a child. Native events and operations continue to use the existing
 versioned protocol over private inherited transport rather than exposing native
 APIs directly to TypeScript.
 
-The same `wm` executable is multicall:
-
-- `wm daemon` runs the native supervisor and engine child.
-- `wm <command>` is a short-lived CLI client of the running daemon.
-- `wm permissions ...` and `wm service ...` handle native onboarding and
-  lifecycle operations.
-
-CLI arguments are sent to the daemon over an owner-only Unix-domain socket and
-parsed by the existing TypeScript command layer. This keeps one command grammar
-without putting ordinary CLI invocation on the latency-critical hotkey path.
-The loopback WebSocket remains available for authenticated UI integrations.
+The signed `wm` executable runs as the native supervisor and launches the TypeScript
+engine child. Short-lived TypeScript CLI clients send commands over the loopback
+WebSocket. Native hotkeys use the persistent private protocol path and do not create a
+CLI process.
 
 ### Consequences
 

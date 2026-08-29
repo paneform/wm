@@ -1,10 +1,4 @@
 .DS_Store
-/.build
-/Packages/
-xcuserdata/
-DerivedData/
-.swiftpm/configuration/registries.json
-.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .netrc
 .beans.yml
 /.beans/
@@ -12,5 +6,7 @@ DerivedData/
 node_modules/
 dist/
 *.tsbuildinfo
+xcuserdata/
+DerivedData/
 packages/platform-macos/sidecar/.build/
 packages/platform-macos/sidecar/.swiftpm/

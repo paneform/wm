@@ -1,12 +1,11 @@
-# Rewrite Architecture: TypeScript Core + Platform Adapter
+# Architecture: TypeScript Core + Platform Adapter
 
-Status: Canonical design for the `rewrite/typescript-core` branch. Every agent working on
-this rewrite MUST read this document first, plus any doc referenced by its task.
+Status: Current production architecture. Read this document first, plus any document
+referenced by the task.
 
 ## Why a rewrite
 
-The Swift implementation works but couples layout policy to platform mechanics. The
-rewrite separates:
+The architecture separates:
 
 - **Engine (portable TypeScript)**: all policy. Rules as Effect.ts effects, probes,
   constraint learning, BSP layout, transactions with verified postconditions, config,
@@ -47,7 +46,6 @@ packages/
       schema.ts      All Effect Schema domain types (single source of truth)
       world.ts       World snapshot type + immutable update helpers
       platform.ts    PlatformAdapter interface + event/command types
-      observe.ts     Observation normalization/joining pipeline
       probe.ts       Probe runner (capability + constraint probing)
       learn.ts       Constraint/cooperation profile learning (evidence-gated)
       observation-store.ts Browser-safe durable observation port + versioned document
@@ -67,7 +65,6 @@ packages/
     src/config-file.ts   fs config loader/watcher implementing ConfigSource
     src/observation-file.ts atomic fs implementation of ObservationStore
     src/ws-server.ts     ws-based WebSocketPort implementation
-    src/sidecar.ts       spawns + speaks stdio JSON-lines to the Swift sidecar
     src/cli.ts           `wm` bin: thin arg parsing → CommandBus → print JSON
 
   platform-macos/    @wm/platform-macos — macOS adapter
@@ -114,13 +111,11 @@ own storage I/O.
 - `docs/rewrite/engine-guide.md` — pipeline, rule catalog, probe algorithms, learning,
   transactions.
 - `docs/rewrite/testing-guide.md` — headless test strategy and the edge-case matrix
-  ported from the Swift suite.
+  covered by the current TypeScript and native-host suites.
 - `docs/rewrite/web-renderer.md` — renderer spec.
 
-## Ground truth sources
+## Design history
 
-- Swift implementation on `main` (this repo): `Sources/`, `Tests/` — reference for
-  behaviors, NOT for structure. Do not port Swift code shape; port behavior.
 - Bean history (`.beans/`) records hard-won lessons: stale-probe starvation, orthogonal
   clamp misclassification, learning constraints from display-clamped observations,
   topology migration bugs, reentrancy during probes. See beans:

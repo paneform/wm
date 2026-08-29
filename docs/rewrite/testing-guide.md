@@ -1,7 +1,9 @@
 # Testing Guide
 
-Everything runs headlessly: `pnpm -r test` (Vitest). No macOS, no sidecar, no network.
-Platform behavior is emulated by fakes implementing `docs/rewrite/platform-contract.md`.
+Portable package tests run headlessly in Vitest. `pnpm -r test` also builds and tests the
+thin Swift native host; those tests require macOS but do not mutate managed windows.
+Engine platform behavior is emulated by fakes implementing
+`docs/rewrite/platform-contract.md`.
 
 ## Fake platform (`packages/engine/test/helpers/fake-platform.ts`)
 
@@ -35,7 +37,7 @@ The fake is deterministic: seeded RNG only, time via injected Clock, no real tim
 
 ## Test matrix
 
-Port the BEHAVIORS of these Swift suites (structure should be Vitest-idiomatic):
+The current suites cover these behaviors:
 
 ### Geometry (`test/geometry.spec.ts`)
 - Exact write within tolerance succeeds; beyond tolerance fails with observed frame.
@@ -133,7 +135,7 @@ Port the BEHAVIORS of these Swift suites (structure should be Vitest-idiomatic):
 
 - Deterministic: injected Clock/RNG everywhere. No real sleeps in tests (fake settles in
   microtasks or virtual ticks).
-- Property tests where Swift had randomized oracles (parking binary search vs exhaustive
+- Property tests use randomized oracles (parking binary search vs exhaustive
   oracle; clamp discovery vs monotone boundary oracle) using fast-check with seeds.
 - Every regression bug from beans history gets a named test referencing the bean id.
 - Coverage target: every documented constant/threshold exercised by at least one test.

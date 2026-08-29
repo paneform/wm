@@ -40,8 +40,9 @@ The first release uses public Apple APIs only. Calling the implementation
 
 ## Platform And Distribution
 
-- Language: Swift daemon and CLI
-- Executable: one `wm` binary with separate daemon, client, and lifecycle modes
+- Language: portable TypeScript engine and Node host with a thin Swift native host
+- Process model: signed native launchd host supervising the TypeScript engine child;
+  short-lived TypeScript clients communicate over loopback WebSocket
 - Architecture: Apple Silicon only
 - OS support: current major macOS release only
 - Distribution: signed and notarized release archives plus Homebrew
@@ -51,26 +52,22 @@ The first release uses public Apple APIs only. Calling the implementation
 - Unexpected crashes: launchd restart with backoff and crash-loop diagnostics
 - GUI session scope: current active user GUI session only
 
-Project branding is defined in one source module and reused for executable
-metadata, config/state paths, launchd labels, and user-facing names so the
-working name can be changed safely.
+Project branding must remain consistent across executable metadata, config/state
+paths, launchd labels, packaging scripts, and user-facing names.
 
-The single binary must not initialize daemon-only systems for client commands.
+Client commands must not initialize daemon-only systems.
 CLI startup, WebSocket handshake, instant acknowledgement, and completed
 command latency must be benchmarked early. The implementation should remain
 modular enough to split binaries if measurements justify it.
 
 ## Permissions
 
-Accessibility and Screen Recording permissions are both required for daemon
-readiness. `wm doctor` checks functional access rather than trusting only the
-TCC UI, can open the appropriate System Settings panes, and reports concrete
-remediation.
-
-If either required permission is revoked at runtime, the daemon performs a
-clean shutdown: restore parked workspaces, preserve useful frames, then exit.
-Pointer-centering capability may degrade independently without making the
-window manager unavailable.
+Accessibility permission is required for daemon readiness. Screen Recording is
+optional; without it, window titles and off-process application names degrade.
+`wm doctor` checks both permissions, can open the appropriate System Settings
+panes, and reports concrete remediation. Native operations report permission
+errors if access is revoked at runtime. Pointer-centering capability may degrade
+independently without making the window manager unavailable.
 
 ## Core State Model
 
@@ -518,14 +515,13 @@ CLI and WebSocket are thin frontends to one command/query handler. Ordinary CLI
 commands connect through WebSocket. The CLI outputs JSON always, with optional
 table/quiet formats.
 
-Lifecycle commands are CLI-only and operate through a direct lifecycle layer:
+Lifecycle operations are managed by the signed native host and launchd service tooling:
 
-- `wm daemon`
-- `wm start`
-- `wm stop [--force]`
-- `wm restart`
-- `wm install`
-- `wm uninstall`
+- `scripts/wm-service.sh install`
+- `scripts/wm-service.sh start`
+- `scripts/wm-service.sh stop`
+- `scripts/wm-service.sh restart`
+- `scripts/wm-service.sh uninstall`
 
 Command targets default to the focused window and support explicit IDs and
 structured selectors. Selectors apply to all matches.
@@ -650,4 +646,4 @@ These are intentionally unresolved until measured on current macOS:
 7. Geometric versus tree-based directional focus
 8. Swap versus remove/reinsert/drop-zone directional and mouse move behavior
 9. Floating-geometry-to-BSP reconstruction algorithm
-10. Single-binary cold/warm CLI and WebSocket latency
+10. Native-host cold/warm CLI and WebSocket latency
