@@ -1,4 +1,4 @@
-import { Effect, Either, Fiber, Schema, Stream } from "effect";
+import { Deferred, Effect, Either, Exit, Fiber, FiberSet, Schema, Scope, Stream } from "effect";
 import type { ConfigSource, PlatformAdapter, Clock } from "./platform.ts";
 import { TopologyObservation, WindowObservation, windowIdentityFingerprint } from "./schema.ts";
 import type {
@@ -29,7 +29,13 @@ import {
   PARKING_ACCEPTANCE_PT,
   PROMOTION_SAMPLES,
 } from "./constants.ts";
-import { center, classifyWrite, containsPoint, withinTolerance } from "./geometry.ts";
+import {
+  center,
+  clampFrameToBounds,
+  classifyWrite,
+  containsPoint,
+  withinTolerance,
+} from "./geometry.ts";
 import type {
   PlatformBatchOperation,
   PlatformBatchOperationResult,
@@ -123,9 +129,33 @@ export interface EngineOptions {
   initiallyPaused?: boolean;
 }
 
+export interface ShutdownWindowReport {
+  readonly id: string;
+  readonly pid: number;
+  readonly app: string | null;
+  readonly bundle: string | null;
+  readonly title: string | null;
+  readonly workspace: WorkspaceName | null;
+  readonly display: DisplayId | null;
+  readonly frame: Frame;
+  readonly restore: "ok" | "failed" | null;
+}
+
+export interface ShutdownReport {
+  readonly restored: number;
+  readonly failed: number;
+  readonly source: "live" | "committed";
+  readonly displays: ReadonlyArray<{
+    readonly id: DisplayId;
+    readonly frame: Frame;
+    readonly workArea: Frame;
+  }>;
+  readonly windows: ReadonlyArray<ShutdownWindowReport>;
+}
+
 export interface Engine {
   start(): Effect.Effect<void>;
-  stop(): Effect.Effect<void>;
+  stop(): Effect.Effect<ShutdownReport>;
   execute(command: Command): Effect.Effect<CommandResult, CommandError>;
   state(): Effect.Effect<StateSnapshot>;
   events(): Stream.Stream<DomainEvent>;
@@ -189,8 +219,13 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     const tombstones = new Map<WindowId, TombstoneRecord>();
     const overrides = { managed: new Set<WindowId>(), unmanaged: new Set<WindowId>() };
     const firstSeen = new Map<WindowId, Frame>();
+    const shutdownRestoreIntents = new Map<
+      WindowId,
+      { readonly frame: Frame; readonly displayId: DisplayId }
+    >();
     const health: HealthRef = { state: "healthy", issues: [] };
-    const fibers: Array<Fiber.RuntimeFiber<unknown, unknown>> = [];
+    const operationScope = yield* Scope.make();
+    const fibers = yield* FiberSet.make().pipe(Scope.extend(operationScope));
     /**
      * Focus tracking (review round 2, issue 6): the authoritative engine
      * intent lives in `world.focusIntent` (atomic with every swap). This
@@ -237,8 +272,12 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     });
     /** Exclusive command/reconcile mutex (review round 3, issue 6). */
     const reconcileGate = yield* Effect.makeSemaphore(1);
+    const stopDone = yield* Deferred.make<ShutdownReport>();
     let reconciling = false;
     let reconcileAgain = false;
+    let stopping = false;
+    let stopped = false;
+    let shutdownReport: ShutdownReport | null = null;
 
     const setHealth = (next: HealthState, issue?: string): void => {
       if (issue !== undefined && !health.issues.includes(issue)) health.issues.push(issue);
@@ -836,6 +875,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           if (result._tag === "Left") {
             return yield* Effect.fail(result.left);
           }
+          shutdownRestoreIntents.set(id, {
+            frame: { ...observation.frame },
+            displayId: display.id,
+          });
 
           const current = world.workspaces.get(workspaceName);
           if (current !== undefined) {
@@ -1208,7 +1251,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           if (!firstSeen.has(observation.id)) firstSeen.set(observation.id, observation.frame);
         }
         for (const id of [...firstSeen.keys()]) {
-          if (!windowsMap.has(id)) firstSeen.delete(id);
+          if (!windowsMap.has(id)) {
+            firstSeen.delete(id);
+            shutdownRestoreIntents.delete(id);
+          }
         }
 
         // Focus sync by CHANGE-DETECTION (issue 6): only a platform report
@@ -1284,25 +1330,28 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             yield* reconcileGate.release(1);
             if (reconcileAgain) {
               reconcileAgain = false;
-              void Effect.runPromise(gatedReconcile()).catch(() => {});
+              if (!stopping && !stopped) void Effect.runPromise(gatedReconcile()).catch(() => {});
             }
           }),
       );
 
     const gatedReconcile = (): Effect.Effect<void> =>
-      Effect.flatMap(
-        Effect.sync(() => !reconciling),
-        (canRun) => {
-          if (!canRun) {
-            // Busy: coalesce this request — the exclusive-section release
-            // applies pending focus signals, clears the flag, and KICKS the
-            // deferred rerun (post-release convergence guarantee).
-            reconcileAgain = true;
-            return Effect.void;
-          }
-          return runExclusive(Effect.ignore(runReconcile()));
-        },
-      );
+      Effect.suspend(() => {
+        if (stopping || stopped) return Effect.void;
+        return Effect.flatMap(
+          Effect.sync(() => !reconciling),
+          (canRun) => {
+            if (!canRun) {
+              // Busy: coalesce this request — the exclusive-section release
+              // applies pending focus signals, clears the flag, and KICKS the
+              // deferred rerun (post-release convergence guarantee).
+              reconcileAgain = true;
+              return Effect.void;
+            }
+            return runExclusive(Effect.ignore(runReconcile()));
+          },
+        );
+      });
 
     // ------------------------------------------------------------------
     // Compound command transaction core — pure reducer → scoped plan →
@@ -1680,6 +1729,11 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       observationRevision: string;
       observationStoreFailed: boolean;
       learningDirty: boolean;
+      shutdownRestores: Array<{
+        readonly windowId: WindowId;
+        readonly frame: Frame;
+        readonly displayId: DisplayId;
+      }>;
       committed: boolean;
       appliedActions: number;
     }
@@ -1780,6 +1834,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             observationRevision,
             observationStoreFailed,
             learningDirty,
+            shutdownRestores: [],
             committed: false,
             appliedActions: 0,
           };
@@ -2023,6 +2078,14 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                       }),
                     };
                   }
+                  const beforeParking = captured.get(wr.windowId);
+                  if (beforeParking !== undefined && wr.parkingDisplayId !== undefined) {
+                    ctx.shutdownRestores.push({
+                      windowId: wr.windowId,
+                      frame: { ...beforeParking.frame },
+                      displayId: wr.parkingDisplayId,
+                    });
+                  }
                 }
                 applied += 1;
               }
@@ -2087,6 +2150,12 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                     profiles: new Map(learning.profiles),
                     epoch: ctx.finalDraft.epoch + 1,
                   };
+                  for (const restore of ctx.shutdownRestores) {
+                    shutdownRestoreIntents.set(restore.windowId, {
+                      frame: restore.frame,
+                      displayId: restore.displayId,
+                    });
+                  }
                   for (const event of ctx.events) bus.publish(event.topic, event.payload);
                   bus.publish("reconciliation", {
                     epoch: world.epoch,
@@ -2267,8 +2336,14 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     // Command layer wiring
     // ------------------------------------------------------------------
 
+    const failIfStopping = (): Effect.Effect<void, CommandError> =>
+      stopping || stopped
+        ? Effect.fail(new CommandError({ code: "internal_error", message: "engine is stopping" }))
+        : Effect.void;
+
     const reloadConfigNow = (mode: "delta" | "full"): Effect.Effect<CommandResult, CommandError> =>
       Effect.gen(function* () {
+        yield* failIfStopping();
         const raw = yield* configSource.load();
         const parsed = parseConfigSafe(raw);
         if (!parsed.ok) {
@@ -2290,6 +2365,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             return { type: "configChecked", valid: false, issues: [...prepared.left.issues] };
           }
         }
+        yield* failIfStopping();
         config = candidate;
         setHealth("healthy");
         bus.publish("config", { status: "applied", mode });
@@ -2327,6 +2403,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     const probeWindowLimits = (windowId: WindowId): Effect.Effect<CommandResult, CommandError> =>
       runExclusive(
         Effect.gen(function* () {
+          yield* failIfStopping();
           const initial = yield* Effect.mapError(
             adapter.getWindow(windowId),
             (error) =>
@@ -3037,6 +3114,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
 
     const applyMutation = (command: Command): Effect.Effect<CommandResult, CommandError> =>
       Effect.gen(function* () {
+        yield* failIfStopping();
         switch (command.type) {
           case "pause":
             world = { ...world, paused: true };
@@ -3610,6 +3688,257 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       latestEventSeq: () => bus.latestSeq(),
     });
 
+    const shutdownDisplayFor = (
+      workspace: WorkspaceState,
+      windowId: WindowId,
+    ): DisplayObservation | undefined => {
+      const savedDisplay = shutdownRestoreIntents.get(windowId)?.displayId ?? null;
+      return (
+        displayOf(savedDisplay) ??
+        displayOf(workspace.pinnedDisplayOverride) ??
+        displayOf(workspace.preferredDisplay) ??
+        primaryDisplay()
+      );
+    };
+
+    const shutdownTiledFrames = (
+      workspace: WorkspaceState,
+      display: DisplayObservation,
+    ): ReadonlyMap<WindowId, Frame> => {
+      if (workspace.mode !== "bsp") return new Map();
+      const settings = effectiveSettings(config, workspace.name, display.id);
+      const plan = planLayout({
+        tree: workspace.tree,
+        content: contentRect(display, settings.margins),
+        gap: settings.gap,
+        resolve: constraintsResolver((id) => {
+          const observation = world.windows.get(id);
+          return observation === undefined ? {} : constraintsFor(observation);
+        }),
+      });
+      return plan.feasible ? plan.frames : new Map();
+    };
+
+    const shutdownTargetFor = (
+      workspace: WorkspaceState,
+      windowId: WindowId,
+      display: DisplayObservation,
+      tiledFrames: ReadonlyMap<WindowId, Frame>,
+    ): Frame | undefined => {
+      if (!workspace.floating.has(windowId)) {
+        const tiled = tiledFrames.get(windowId);
+        if (tiled !== undefined) return tiled;
+      }
+      const fallback =
+        shutdownRestoreIntents.get(windowId)?.frame ??
+        firstSeen.get(windowId) ??
+        world.windows.get(windowId)?.frame;
+      return fallback === undefined ? undefined : clampFrameToBounds(fallback, display.workArea);
+    };
+
+    interface ShutdownWrite {
+      readonly windowId: WindowId;
+      readonly frame: Frame;
+      readonly display: DisplayObservation;
+      readonly expectedIdentity: ExpectedWindowIdentity;
+    }
+
+    interface ShutdownRestoration {
+      readonly restored: number;
+      readonly failed: number;
+      readonly outcomes: ReadonlyMap<WindowId, "ok" | "failed">;
+      readonly frames: ReadonlyMap<WindowId, Frame>;
+    }
+
+    const planShutdownWrites = (): {
+      readonly writes: ShutdownWrite[];
+      readonly skipped: WindowId[];
+    } => {
+      const layouts = new Map<string, ReadonlyMap<WindowId, Frame>>();
+      const writes: ShutdownWrite[] = [];
+      const skipped: WindowId[] = [];
+      for (const workspace of world.workspaces.values()) {
+        for (const windowId of workspace.parkedFrames.keys()) {
+          const observation = world.windows.get(windowId);
+          const display = shutdownDisplayFor(workspace, windowId);
+          if (observation === undefined || display === undefined) {
+            skipped.push(windowId);
+            continue;
+          }
+          const layoutKey = `${workspace.name}\u0000${display.id}`;
+          const tiledFrames = layouts.get(layoutKey) ?? shutdownTiledFrames(workspace, display);
+          layouts.set(layoutKey, tiledFrames);
+          const frame = shutdownTargetFor(workspace, windowId, display, tiledFrames);
+          if (frame === undefined) {
+            skipped.push(windowId);
+            continue;
+          }
+          writes.push({
+            windowId,
+            frame,
+            display,
+            expectedIdentity: { fingerprint: windowIdentityFingerprint(observation) },
+          });
+        }
+      }
+      return { writes, skipped };
+    };
+
+    const executeShutdownWrites = (
+      writes: readonly ShutdownWrite[],
+    ): Effect.Effect<readonly PlatformBatchOperationResult[]> => {
+      const operations: PlatformBatchOperation[] = writes.map((write, index) => ({
+        operationId: `shutdown:${index}:${write.windowId}`,
+        kind: "setFrame",
+        windowId: write.windowId,
+        frame: write.frame,
+        expectedIdentity: write.expectedIdentity,
+      }));
+      if (operations.length === 0) return Effect.succeed([]);
+      if (adapter.executeBatch !== undefined) {
+        return Effect.match(adapter.executeBatch({ operations }), {
+          onFailure: (error) =>
+            operations.map((operation) => ({ operationId: operation.operationId, error })),
+          onSuccess: (batch) => batch.operations,
+        });
+      }
+      return Effect.all(
+        writes.map((write, index) =>
+          Effect.match(
+            adapter.setWindowFrame(write.windowId, write.frame, write.expectedIdentity),
+            {
+              onFailure: (error): PlatformBatchOperationResult => ({
+                operationId: operations[index]!.operationId,
+                error,
+              }),
+              onSuccess: (result): PlatformBatchOperationResult => ({
+                operationId: operations[index]!.operationId,
+                observed: result.observed,
+                requested: result.requested,
+                stable: result.stable,
+                ...(result.errorKind === undefined ? {} : { error: { code: result.errorKind } }),
+              }),
+            },
+          ),
+        ),
+        { concurrency: "unbounded" },
+      );
+    };
+
+    const restoreParkedWindows = (): Effect.Effect<ShutdownRestoration> =>
+      Effect.gen(function* () {
+        const plan = planShutdownWrites();
+        const results = yield* executeShutdownWrites(plan.writes);
+        const outcomes = new Map<WindowId, "ok" | "failed">(
+          plan.skipped.map((id) => [id, "failed"]),
+        );
+        const frames = new Map<WindowId, Frame>();
+        let restored = 0;
+        let failed = plan.skipped.length;
+        for (let index = 0; index < plan.writes.length; index += 1) {
+          const write = plan.writes[index]!;
+          const result = results[index];
+          if (result?.observed !== undefined) frames.set(write.windowId, result.observed);
+          const visible =
+            result !== undefined &&
+            result.error === undefined &&
+            result.stable === true &&
+            result.observed !== undefined &&
+            containsPoint(write.display.workArea, center(result.observed));
+          if (visible) {
+            restored += 1;
+            outcomes.set(write.windowId, "ok");
+          }
+          else {
+            failed += 1;
+            outcomes.set(write.windowId, "failed");
+            bus.publish("diagnostic", {
+              code: "shutdown_restore_failed",
+              detail: `window ${write.windowId}: stable visible readback not confirmed`,
+            });
+          }
+        }
+        bus.publish("diagnostic", {
+          code: "shutdown_restore_complete",
+          detail: JSON.stringify({ restored, failed }),
+        });
+        return { restored, failed, outcomes, frames };
+      });
+
+    const applicationName = (window: WindowObservation): string | null => {
+      const path = window.executablePath;
+      if (path !== undefined) return path.split("/").filter(Boolean).at(-1) ?? path;
+      return window.bundleId ?? null;
+    };
+
+    const shutdownWorkspaceMap = (): ReadonlyMap<WindowId, WorkspaceName> => {
+      const memberships = new Map<WindowId, WorkspaceName>();
+      for (const workspace of world.workspaces.values()) {
+        for (const id of [...tiledMembers(workspace.tree), ...workspace.floating]) {
+          memberships.set(id, workspace.name);
+        }
+      }
+      return memberships;
+    };
+
+    const shutdownWindowReport = (
+      window: WindowObservation,
+      restoration: ShutdownRestoration,
+      memberships: ReadonlyMap<WindowId, WorkspaceName>,
+    ): ShutdownWindowReport => {
+      const frame = restoration.frames.get(window.id) ?? window.frame;
+      return {
+        id: window.id,
+        pid: window.pid,
+        app: applicationName(window),
+        bundle: window.bundleId ?? null,
+        title: window.title ?? null,
+        workspace: memberships.get(window.id) ?? null,
+        display:
+          world.topology.displays.find((display) => containsPoint(display.frame, center(frame)))?.id ??
+          null,
+        frame,
+        restore: restoration.outcomes.get(window.id) ?? null,
+      };
+    };
+
+    const buildShutdownReport = (
+      windows: ReadonlyArray<WindowObservation>,
+      restoration: ShutdownRestoration,
+      source: ShutdownReport["source"],
+    ): ShutdownReport => {
+      const memberships = shutdownWorkspaceMap();
+      const reportWindows = windows.map((window) =>
+        shutdownWindowReport(window, restoration, memberships));
+      reportWindows.sort((a, b) =>
+        (a.app ?? "").localeCompare(b.app ?? "") ||
+        (a.title ?? "").localeCompare(b.title ?? "") ||
+        a.id.localeCompare(b.id));
+      return {
+        restored: restoration.restored,
+        failed: restoration.failed,
+        source,
+        displays: world.topology.displays.map(({ id, frame, workArea }) => ({ id, frame, workArea })),
+        windows: reportWindows,
+      };
+    };
+
+    const collectShutdownReport = (
+      restoration: ShutdownRestoration,
+    ): Effect.Effect<ShutdownReport> =>
+      Effect.map(Effect.either(adapter.getWindows()), (inventory) =>
+        inventory._tag === "Right"
+          ? buildShutdownReport([...inventory.right], restoration, "live")
+          : buildShutdownReport([...world.windows.values()], restoration, "committed"));
+
+    const runOperation = <A, E>(operation: Effect.Effect<A, E>): Effect.Effect<A, E> =>
+      Effect.flatMap(
+        FiberSet.run(fibers, operation),
+        (fiber) => Fiber.join(fiber).pipe(
+          Effect.onInterrupt(() => Fiber.interrupt(fiber).pipe(Effect.asVoid)),
+        ),
+      );
+
     // ------------------------------------------------------------------
     // Lifecycle
     // ------------------------------------------------------------------
@@ -3641,8 +3970,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           }
 
           if (observationStore !== undefined) {
-            fibers.push(
-              yield* Stream.runForEach(observationStore.changes(observationRevision), (snapshot) =>
+            yield* FiberSet.run(
+              fibers,
+              Stream.runForEach(observationStore.changes(observationRevision), (snapshot) =>
                 Effect.gen(function* () {
                   const installed = yield* Effect.either(
                     runExclusive(installObservationSnapshot(snapshot)),
@@ -3659,14 +3989,14 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                     setHealth("degraded", `observation_store_${error.code}`);
                   }),
                 ),
-                Effect.forkDaemon,
               ),
             );
           }
 
           // Hotload: delta-reload each change; invalid candidate keeps prior.
-          fibers.push(
-            yield* Stream.runForEach(configSource.changes(), () =>
+          yield* FiberSet.run(
+            fibers,
+            Stream.runForEach(configSource.changes(), () =>
               Effect.gen(function* () {
                 const candidate = yield* Effect.either(configSource.load());
                 if (candidate._tag === "Left") return;
@@ -3696,20 +4026,21 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 bus.publish("config", { status: "hotloaded" });
                 yield* gatedReconcile();
               }),
-            ).pipe(Effect.forkDaemon),
+            ),
           );
 
           // SINGLE event subscription (production adapter.events is a
           // single-consumer AsyncIterable): focus signals AND reconcile
           // requests are consumed from one ordered runForEach — never two
           // competing subscribers (review round 3 final, issue 1).
-          fibers.push(
-            yield* Stream.runForEach(adapter.events, (event) =>
+          yield* FiberSet.run(
+            fibers,
+            Stream.runForEach(adapter.events, (event) =>
               Effect.gen(function* () {
                 if (event.kind === "focus_changed") consumeFocusSignal(event.windowId);
                 yield* gatedReconcile();
               }),
-            ).pipe(Effect.forkDaemon),
+            ),
           );
 
           // Initial reconcile + rule pass (lenient at startup; diagnostics only).
@@ -3718,25 +4049,51 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           bus.publish("health", { state: health.state, issues: [...health.issues] });
         }),
       stop: () =>
-        Effect.gen(function* () {
-          for (const fiber of fibers) {
-            yield* Effect.ignore(Fiber.interrupt(fiber));
-          }
-          fibers.length = 0;
-          bus.publish("diagnostic", { code: "engine_stopped", detail: "" });
+        Effect.suspend(() => {
+          if (stopped && shutdownReport !== null) return Effect.succeed(shutdownReport);
+          if (stopping) return Deferred.await(stopDone);
+          stopping = true;
+          return Effect.ensuring(
+            Effect.uninterruptible(
+              Effect.gen(function* () {
+                yield* Scope.close(operationScope, Exit.void);
+                reconcileAgain = false;
+                const restoration = yield* runExclusive(restoreParkedWindows());
+                shutdownReport = yield* collectShutdownReport(restoration);
+              }),
+            ),
+            Effect.gen(function* () {
+              stopped = true;
+              bus.publish("diagnostic", { code: "engine_stopped", detail: "" });
+              const report = shutdownReport ?? buildShutdownReport(
+                [...world.windows.values()],
+                { restored: 0, failed: 0, outcomes: new Map(), frames: new Map() },
+                "committed",
+              );
+              shutdownReport = report;
+              yield* Deferred.succeed(stopDone, report);
+            }),
+          ).pipe(Effect.zipRight(Deferred.await(stopDone)));
         }),
       execute: (command: Command) =>
-        Effect.flatMap(
-          Effect.try({
-            try: () => decodeCommandSync(command),
-            catch: () =>
-              new CommandError({ code: "invalid_request", message: "malformed command" }),
-          }),
-          (validated) => commandBus.execute(validated),
+        Effect.suspend(() =>
+          stopping || stopped
+            ? Effect.fail(
+                new CommandError({ code: "internal_error", message: "engine is stopping" }),
+              )
+            : runOperation(Effect.flatMap(
+                Effect.try({
+                  try: () => decodeCommandSync(command),
+                  catch: () =>
+                    new CommandError({ code: "invalid_request", message: "malformed command" }),
+                }),
+                (validated) => commandBus.execute(validated),
+              )),
         ),
       state: () => Effect.succeed(projectSnapshot(world, health.state, pendingMeta())),
       events: () => bus.events(),
-      reconcile: () => gatedReconcile(),
+      reconcile: () =>
+        Effect.suspend(() => stopping || stopped ? Effect.void : runOperation(gatedReconcile())),
       setRecovery: (active: boolean) => queue.setRecovery(active),
       gateState: () => ({ busy: reconciling, rerunQueued: reconcileAgain }),
     };

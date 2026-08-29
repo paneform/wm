@@ -3,7 +3,7 @@ import Foundation
 /// Ports the ground-truth `WindowNormalizer` behavior:
 /// - stable ids (`window:cg:<n>` / `window:ax:<pid>:…:<fnv1a64>:<occurrence>`)
 /// - evidence-scored AX↔CG join (cg id +100, frame +20, title +5, pid
-///   prerequisite; equal-evidence ties refuse the join)
+///   prerequisite; exact frames may join alone, equal-evidence ties refuse it)
 /// - structural filtering of system surfaces and transient/uncertain windows,
 ///   which never cross the boundary (the engine only sees actionable windows).
 enum Normalizer {
@@ -65,6 +65,7 @@ enum Normalizer {
             guard candidate.pid == ax.pid else { return nil } // pid prerequisite
             var signals = ["pid"]
             var score = 10
+            let exactFrame = ax.frame != nil && ax.frame == candidate.frame
             let validAXID = ax.cgWindowID.flatMap { $0 == 0 ? nil : $0 }
             let validCGID = candidate.cgWindowID.flatMap { $0 == 0 ? nil : $0 }
             if let validAXID, validAXID == validCGID {
@@ -79,11 +80,11 @@ enum Normalizer {
                 signals.append("title")
                 score += 5
             }
-            // Exact id join, frame+title strong pair, or at least one extra
-            // signal beyond pid — otherwise this surface is not a match.
+            // Exact id/frame join or a frame+title strong pair. Approximate
+            // frame evidence alone is insufficient.
             guard signals.contains("cg_window_id")
-                || (signals.contains("frame") && signals.contains("title"))
-                || signals.count > 2 else { return nil }
+                || exactFrame
+                || (signals.contains("frame") && signals.contains("title")) else { return nil }
             return Candidate(score: score, index: index, signals: signals)
         }
         let sortedCandidates = candidates.sorted { lhs, rhs in

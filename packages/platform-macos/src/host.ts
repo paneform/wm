@@ -59,33 +59,44 @@ interface Pushable<T> {
 
 const makePushable = <T>(): Pushable<T> => {
   const buffer: T[] = [];
-  const wake: (() => void)[] = [];
+  const wake: Array<{
+    readonly owner: symbol;
+    readonly resolve: (result: IteratorResult<T>) => void;
+  }> = [];
   let ended = false;
-  const notify = () => {
-    const next = wake.shift();
-    if (next !== undefined) next();
-  };
-  async function* iterator(): AsyncIterableIterator<T> {
-    while (true) {
-      if (buffer.length > 0) {
-        yield buffer.shift()!;
-        continue;
-      }
-      if (ended) return;
-      await new Promise<void>((resolve) => wake.push(resolve));
-    }
-  }
   return {
     push(value) {
       if (ended) return;
-      buffer.push(value);
-      notify();
+      const next = wake.shift();
+      if (next === undefined) buffer.push(value);
+      else next.resolve({ value, done: false });
     },
     end() {
       ended = true;
-      while (wake.length > 0) wake.shift()!();
+      while (wake.length > 0) wake.shift()!.resolve({ value: undefined, done: true });
     },
-    values: iterator,
+    values() {
+      const owner = Symbol();
+      let returned = false;
+      return {
+        [Symbol.asyncIterator]() {
+          return this;
+        },
+        next() {
+          if (returned || ended) return Promise.resolve({ value: undefined, done: true });
+          if (buffer.length > 0) {
+            return Promise.resolve({ value: buffer.shift()!, done: false });
+          }
+          return new Promise<IteratorResult<T>>((resolve) => wake.push({ owner, resolve }));
+        },
+        return() {
+          returned = true;
+          const pending = wake.findIndex((entry) => entry.owner === owner);
+          if (pending !== -1) wake.splice(pending, 1)[0]!.resolve({ value: undefined, done: true });
+          return Promise.resolve({ value: undefined, done: true });
+        },
+      };
+    },
   };
 };
 

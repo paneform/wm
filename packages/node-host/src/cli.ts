@@ -102,7 +102,10 @@ async function main(): Promise<number> {
     const url = String(parsed.flags["url"] ?? `ws://127.0.0.1:${port}`);
     const socket = new WebSocket(url);
     const result = await new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("daemon connection timed out")), 5000);
+      const timer = setTimeout(() => {
+        socket.terminate();
+        reject(new Error("daemon connection timed out"));
+      }, 5_000);
       socket.on("open", () => {
         socket.send(
           JSON.stringify({ v: 1, type: "request", id: crypto.randomUUID(), command: parsed.command }),
@@ -115,6 +118,10 @@ async function main(): Promise<number> {
       socket.on("error", (e) => {
         clearTimeout(timer);
         reject(e);
+      });
+      socket.on("close", () => {
+        clearTimeout(timer);
+        reject(new Error("daemon connection closed before a response"));
       });
     });
     socket.close();
@@ -218,16 +225,26 @@ async function main(): Promise<number> {
       stopping = true;
       for (const client of server.clients) client.terminate();
       server.close();
+      // Gate wait, restoration, and final inventory each have bounded platform waits.
+      const shutdown = Effect.runPromise(engine.stop()).then((report) => {
+        console.error(`[wm] shutdown restored=${report.restored} failed=${report.failed}`);
+      });
       void Promise.race([
-        Effect.runPromise(engine.stop()),
-        new Promise<void>((done) => setTimeout(done, 2_000)),
+        shutdown,
+        new Promise<void>((done) => setTimeout(done, 60_000)),
       ]).finally(() => {
           if (stopAdapter) adapter.stop();
           resolve(exitCode);
       });
     };
-    process.once("SIGINT", () => stop());
-    process.once("SIGTERM", () => stop());
+    process.on("SIGINT", () => {
+      console.error("[wm] received SIGINT");
+      stop();
+    });
+    process.on("SIGTERM", () => {
+      console.error("[wm] received SIGTERM");
+      stop();
+    });
     void adapter.whenExited.then(() => stop(1, false));
   });
 }

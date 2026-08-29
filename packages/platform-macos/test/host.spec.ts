@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { Effect, Exit, Stream } from "effect";
+import { Effect, Exit, Fiber, Stream } from "effect";
 import { PassThrough } from "node:stream";
 import { createMacOsSidecarAdapter } from "../src/host.ts";
 import type { SidecarProcess, SpawnSidecar } from "../src/sidecar-process.ts";
@@ -113,6 +113,19 @@ const READY = {
 };
 
 describe("MacOsSidecarAdapter permission ops", () => {
+  test("idle event consumers can be interrupted during shutdown", async () => {
+    const { spawn, fake } = makeSpawn();
+    const adapter = Effect.runSync(createMacOsSidecarAdapter({ spawn, sidecarPath: "/x" }));
+    fake.emit(READY);
+    const fiber = Effect.runFork(Stream.runDrain(adapter.events));
+
+    await expect(Promise.race([
+      Effect.runPromise(Fiber.interrupt(fiber)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("interrupt timed out")), 250)),
+    ])).resolves.toBeDefined();
+    adapter.stop();
+  });
+
   test("native-parent transport uses inherited protocol streams without spawning", async () => {
     const input = new PassThrough();
     const output = new PassThrough();

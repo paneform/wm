@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
-import { createEngine } from "../src/engine.ts";
+import { createEngine, type ShutdownReport } from "../src/engine.ts";
 import type { CommandResult, StateSnapshot } from "../src/commands.ts";
 import type { Clock, ConfigSource, PlatformAdapter } from "../src/platform.ts";
-import { PlatformError, type Frame } from "../src/schema.ts";
+import { PlatformError, type Frame, type WindowObservation } from "../src/schema.ts";
 import {
   createFakePlatform,
   makeDisplay,
@@ -34,7 +34,7 @@ interface Harness {
   fake: ReturnType<typeof createFakePlatform>;
   engine: {
     start(): Effect.Effect<void>;
-    stop(): Effect.Effect<void>;
+    stop(): Effect.Effect<ShutdownReport>;
     execute(command: Command): Effect.Effect<CommandResult, unknown>;
     state(): Effect.Effect<StateSnapshot>;
     events(): Stream.Stream<unknown>;
@@ -44,17 +44,19 @@ interface Harness {
   snapshot(): Promise<StateSnapshot>;
 }
 
-const bootstrap = async (): Promise<Harness> => {
+const bootstrap = async (
+  displays = [
+    makeDisplay(),
+    makeDisplay({
+      id: "display:sim-left",
+      frame: { x: -1512, y: 0, width: 1512, height: 982 },
+      workArea: { x: -1512, y: 38, width: 1512, height: 944 },
+    }),
+  ],
+): Promise<Harness> => {
   const fake = createFakePlatform({
     clock: CLOCK,
-    displays: [
-      makeDisplay(),
-      makeDisplay({
-        id: "display:sim-left",
-        frame: { x: -1512, y: 0, width: 1512, height: 982 },
-        workArea: { x: -1512, y: 38, width: 1512, height: 944 },
-      }),
-    ],
+    displays,
   });
   const engine = await Effect.runPromise(
     createEngine({ adapter: fake.adapter, configSource: CONFIG_SOURCE, clock: CLOCK }),
@@ -860,6 +862,236 @@ describe("engine pipeline (fake platform)", () => {
     expect(restored).toBeDefined();
     expect(restoredWorkspace?.visibleOnDisplay).toBe(displayId);
     expect(restored?.frame).toEqual(await frameOf(h, a));
+  });
+
+  test("stop restores parked tiled and floating windows without changing visible windows or focus", async () => {
+    const h = await bootstrap([makeDisplay()]);
+    const tiled = h.fake.addWindow(makeWindow({
+      id: "window:shutdown-tiled",
+      pid: 100,
+      bundleId: "com.example.app",
+      executablePath: "/Applications/Example.app/Contents/MacOS/Example",
+      title: "Example",
+      x: 100,
+      y: 100,
+    }));
+    const floating = h.fake.addWindow(
+      makeWindow({ id: "window:shutdown-floating", x: 300, y: 180, width: 640, height: 480 }),
+    );
+    await h.run({ type: "reconcile" });
+    await h.run({ type: "floatWindow", windowId: floating });
+    await h.run({
+      type: "setWindowFrame",
+      windowId: floating,
+      frame: { x: 420, y: 240, width: 640, height: 480 },
+    });
+    const tiledVisibleFrame = h.fake.frameOf(tiled);
+    const floatingVisibleFrame = h.fake.frameOf(floating);
+
+    await h.run({ type: "focusWorkspace", name: "shutdown-visible" });
+    const visible = h.fake.addWindow(makeWindow({ id: "window:shutdown-visible" }));
+    await h.run({ type: "reconcile" });
+    h.fake.focusWindowExternal(visible);
+    await h.run({ type: "reconcile" });
+    const visibleFrame = h.fake.frameOf(visible);
+    const focusBeforeStop = h.fake.focusedWindowId();
+    const writesBeforeStop = h.fake.writes().length;
+
+    const reports = await Promise.all([
+      Effect.runPromise(h.engine.stop()),
+      Effect.runPromise(h.engine.stop()),
+      Effect.runPromise(h.engine.stop()),
+    ]);
+
+    expect(reports[0]).toEqual(reports[1]);
+    expect(reports[1]).toEqual(reports[2]);
+    expect(reports[0]).toMatchObject({
+      restored: 2,
+      failed: 0,
+      source: "live",
+      displays: [{ id: "display:sim-primary", frame: makeDisplay().frame }],
+    });
+    expect(reports[0].windows.find((window) => window.id === tiled)).toMatchObject({
+      pid: 100,
+      app: "Example",
+      bundle: "com.example.app",
+      title: "Example",
+      workspace: "1",
+      display: "display:sim-primary",
+      frame: tiledVisibleFrame,
+      restore: "ok",
+    });
+    expect(reports[0].windows.find((window) => window.id === visible)).toMatchObject({
+      frame: visibleFrame,
+      restore: null,
+    });
+    expect(h.fake.frameOf(tiled)).toEqual(tiledVisibleFrame);
+    expect(h.fake.frameOf(floating)).toEqual(floatingVisibleFrame);
+    expect(h.fake.frameOf(visible)).toEqual(visibleFrame);
+    expect(h.fake.focusedWindowId()).toBe(focusBeforeStop);
+    expect(
+      h.fake
+        .writes()
+        .slice(writesBeforeStop)
+        .filter((write) => write.windowId === tiled || write.windowId === floating),
+    ).toHaveLength(2);
+
+    const writesAfterFirstStop = h.fake.writes().length;
+    const repeated = await Effect.runPromise(h.engine.stop());
+    expect(repeated).toEqual(reports[0]);
+    expect(h.fake.writes()).toHaveLength(writesAfterFirstStop);
+  });
+
+  test("stop continues restoring parked windows after an individual write failure", async () => {
+    const fake = createFakePlatform({ clock: CLOCK, displays: [makeDisplay()] });
+    const blocked = fake.addWindow(makeWindow({ id: "window:shutdown-blocked" }));
+    const restored = fake.addWindow(makeWindow({ id: "window:shutdown-restored" }));
+    let rejectShutdownWrites = false;
+    const { executeBatch: _executeBatch, ...directAdapter } = fake.adapter;
+    void _executeBatch;
+    const adapter: PlatformAdapter = {
+      ...directAdapter,
+      setWindowFrame: (id, frame, expected) =>
+        rejectShutdownWrites && id === blocked
+          ? Effect.fail(
+              new PlatformError({ code: "rejected", detail: "simulated shutdown failure" }),
+            )
+          : fake.adapter.setWindowFrame(id, frame, expected),
+    };
+    const engine = await Effect.runPromise(
+      createEngine({ adapter, configSource: CONFIG_SOURCE, clock: CLOCK }),
+    );
+    await Effect.runPromise(engine.start());
+    await Effect.runPromise(engine.reconcile());
+    const restoredVisibleFrame = fake.frameOf(restored);
+    await Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "shutdown-failure" }));
+    const blockedParkedFrame = fake.frameOf(blocked);
+    rejectShutdownWrites = true;
+
+    await expect(Effect.runPromise(engine.stop())).resolves.toMatchObject({
+      restored: 1,
+      failed: 1,
+      windows: expect.arrayContaining([
+        expect.objectContaining({ id: blocked, restore: "failed" }),
+        expect.objectContaining({ id: restored, restore: "ok" }),
+      ]),
+    });
+
+    expect(fake.frameOf(blocked)).toEqual(blockedParkedFrame);
+    expect(fake.frameOf(restored)).toEqual(restoredVisibleFrame);
+  });
+
+  test("stop fallback report uses restoration readbacks when live inventory fails", async () => {
+    const fake = createFakePlatform({ clock: CLOCK, displays: [makeDisplay()] });
+    const windowId = fake.addWindow(makeWindow({ id: "window:shutdown-fallback" }));
+    let rejectInventory = false;
+    const adapter: PlatformAdapter = {
+      ...fake.adapter,
+      getWindows: () =>
+        rejectInventory
+          ? Effect.fail(new PlatformError({ code: "unavailable", detail: "simulated inventory failure" }))
+          : fake.adapter.getWindows(),
+    };
+    const engine = await Effect.runPromise(
+      createEngine({ adapter, configSource: CONFIG_SOURCE, clock: CLOCK }),
+    );
+    await Effect.runPromise(engine.start());
+    await Effect.runPromise(engine.reconcile());
+    const visibleFrame = fake.frameOf(windowId);
+    await Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "shutdown-hidden" }));
+    rejectInventory = true;
+
+    const report = await Effect.runPromise(engine.stop());
+
+    expect(report.source).toBe("committed");
+    expect(report.windows.find((window) => window.id === windowId)).toMatchObject({
+      frame: visibleFrame,
+      display: "display:sim-primary",
+      restore: "ok",
+    });
+  });
+
+  test("stop report prefers restoration readbacks over stale live inventory", async () => {
+    const fake = createFakePlatform({ clock: CLOCK, displays: [makeDisplay()] });
+    const windowId = fake.addWindow(makeWindow({ id: "window:shutdown-stale-live" }));
+    let staleInventory: ReadonlyArray<WindowObservation> | null = null;
+    const adapter: PlatformAdapter = {
+      ...fake.adapter,
+      getWindows: () =>
+        staleInventory === null
+          ? fake.adapter.getWindows()
+          : Effect.succeed(staleInventory),
+    };
+    const engine = await Effect.runPromise(
+      createEngine({ adapter, configSource: CONFIG_SOURCE, clock: CLOCK }),
+    );
+    await Effect.runPromise(engine.start());
+    await Effect.runPromise(engine.reconcile());
+    const visibleFrame = fake.frameOf(windowId);
+    await Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "shutdown-hidden" }));
+    staleInventory = await Effect.runPromise(fake.adapter.getWindows());
+
+    const report = await Effect.runPromise(engine.stop());
+
+    expect(report.source).toBe("live");
+    expect(report.windows.find((window) => window.id === windowId)).toMatchObject({
+      frame: visibleFrame,
+      display: "display:sim-primary",
+      restore: "ok",
+    });
+  });
+
+  test("pre-created mutations and reconciles cannot run after stop", async () => {
+    const h = await bootstrap([makeDisplay()]);
+    const windowId = h.fake.addWindow(makeWindow({ id: "window:shutdown-admission" }));
+    await h.run({ type: "reconcile" });
+    const frameBeforeStop = h.fake.frameOf(windowId);
+    const mutation = h.engine.execute({
+      type: "moveWindow",
+      windowId,
+      point: { x: 700, y: 500 },
+    });
+    const reconcile = h.engine.reconcile();
+
+    await Effect.runPromise(h.engine.stop());
+
+    expect((await Effect.runPromiseExit(mutation))._tag).toBe("Failure");
+    await Effect.runPromise(reconcile);
+    expect(h.fake.frameOf(windowId)).toEqual(frameBeforeStop);
+  });
+
+  test("stop interrupts an in-flight window operation before restoration", async () => {
+    const fake = createFakePlatform({ clock: CLOCK, displays: [makeDisplay()] });
+    fake.addWindow(makeWindow({ id: "window:shutdown-in-flight" }));
+    let blockReads = false;
+    let operationStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      operationStarted = resolve;
+    });
+    const adapter: PlatformAdapter = {
+      ...fake.adapter,
+      getWindow: (id) => {
+        if (!blockReads) return fake.adapter.getWindow(id);
+        operationStarted();
+        return Effect.never;
+      },
+    };
+    const engine = await Effect.runPromise(
+      createEngine({ adapter, configSource: CONFIG_SOURCE, clock: CLOCK }),
+    );
+    await Effect.runPromise(engine.start());
+    await Effect.runPromise(engine.reconcile());
+    blockReads = true;
+    Effect.runFork(engine.execute({ type: "focusWorkspace", name: "shutdown-target" }));
+    await started;
+
+    const report = await Promise.race([
+      Effect.runPromise(engine.stop()),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("shutdown did not interrupt active operation")), 1_000)),
+    ]);
+
+    expect(report).toMatchObject({ restored: 0, failed: 0 });
   });
 
   test("workspace switch persists the accepted clamped parking frame", async () => {

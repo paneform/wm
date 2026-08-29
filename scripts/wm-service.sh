@@ -45,8 +45,32 @@ EOF
   mv "$temporary" "$PLIST"
 }
 
+graceful_stop() {
+  local parent_pid="" child_pid="" line candidate
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^[[:space:]]*pid[[:space:]]*=[[:space:]]*([0-9]+)$ ]]; then
+      parent_pid="${BASH_REMATCH[1]}"
+      break
+    fi
+  done < <(launchctl print "$DOMAIN/$LABEL" 2>/dev/null || true)
+  [[ -n "$parent_pid" ]] || return
+
+  while IFS= read -r candidate; do
+    child_pid="$candidate"
+    break
+  done < <(pgrep -P "$parent_pid" -f "$ROOT/packages/node-host/src/cli.ts serve" || true)
+  [[ -n "$child_pid" ]] || return
+
+  kill -TERM "$child_pid" 2>/dev/null || return
+  for ((attempt = 0; attempt < 600; attempt += 1)); do
+    kill -0 "$child_pid" 2>/dev/null || return
+    sleep 0.1
+  done
+}
+
 unload() {
   launchctl bootout "$DOMAIN/$LEGACY_BRIDGE_LABEL" >/dev/null 2>&1 || true
+  graceful_stop
   launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
 }
 
@@ -68,7 +92,10 @@ case "${1:-}" in
     ;;
   start) load ;;
   stop) unload ;;
-  restart) launchctl kickstart -k "$DOMAIN/$LABEL" ;;
+  restart)
+    unload
+    load
+    ;;
   status)
     launchctl print "$DOMAIN/$LABEL"
     "$ROOT/scripts/wm-ts" state --port 17832

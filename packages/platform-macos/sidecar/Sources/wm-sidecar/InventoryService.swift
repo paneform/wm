@@ -146,7 +146,9 @@ final class InventoryService {
         }
         lastMetas = metasByID
 
-        diffAndEmit(current: current)
+        diffAndEmit(
+            current: current,
+            frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier)
     }
 
     nonisolated private static func hiddenPids() -> Set<Int32> {
@@ -155,7 +157,7 @@ final class InventoryService {
                 .filter { $0 > 0 })
     }
 
-    private func diffAndEmit(current: [String: WindowValue]) {
+    private func diffAndEmit(current: [String: WindowValue], frontmostPID: Int32?) {
         let previous = lastWindows
         lastWindows = current
 
@@ -170,11 +172,21 @@ final class InventoryService {
             emit(.windowChanged(value))
         }
 
-        let focusedId = current.first(where: { $0.value.focused })?.key
+        let focusedId = Self.focusedWindowID(in: current, frontmostPID: frontmostPID)
         if focusedId != lastFocusedId {
             lastFocusedId = focusedId
             emit(.focusChanged(windowId: focusedId))
         }
+    }
+
+    nonisolated static func focusedWindowID(
+        in windows: [String: WindowValue],
+        frontmostPID: Int32?
+    ) -> String? {
+        guard let frontmostPID else { return nil }
+        return windows.first {
+            $0.value.pid == Int(frontmostPID) && $0.value.focused
+        }?.key
     }
 
     // MARK: NSWorkspace observers
