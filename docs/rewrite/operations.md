@@ -5,6 +5,13 @@ macOS sidecar. It listens on `127.0.0.1:17832`, loads
 `~/.config/wm/config.jsonc`, and is supervised by the per-user launchd service
 `com.allandeutsch.wm`.
 
+`WM.app` is the single installed application and permission identity. Its native
+executable dispatches CLI commands, hosts the daemon, and provides native system
+API access. The app bundles the JavaScript application and Node runtime, so the
+installed service does not depend on this repository, a package manager, or a
+system Node installation. Packaging installs `~/.local/bin/wm` as a symlink to
+that executable; add `~/.local/bin` to the shell `PATH` once if needed.
+
 Architectural rationale, including the native hotkey-monitor latency decision,
 is recorded in [`docs/design-decisions.md`](../design-decisions.md).
 
@@ -12,10 +19,10 @@ is recorded in [`docs/design-decisions.md`](../design-decisions.md).
 scripts/create-local-signing-identity.sh
 swift build -c release --package-path packages/platform-macos/sidecar
 scripts/package-local-wm-app.sh
-scripts/wm-service.sh install
-scripts/wm-service.sh status
-scripts/wm-service.sh restart
-scripts/wm-service.sh stop
+wm service install
+wm service status
+wm service restart
+wm service stop
 ```
 
 Logs are under `${XDG_STATE_HOME:-~/.local/state}/wm/logs`. The service starts

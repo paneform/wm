@@ -517,11 +517,11 @@ table/quiet formats.
 
 Lifecycle operations are managed by the signed native host and launchd service tooling:
 
-- `scripts/wm-service.sh install`
-- `scripts/wm-service.sh start`
-- `scripts/wm-service.sh stop`
-- `scripts/wm-service.sh restart`
-- `scripts/wm-service.sh uninstall`
+- `wm service install`
+- `wm service start`
+- `wm service stop`
+- `wm service restart`
+- `wm service uninstall`
 
 Command targets default to the focused window and support explicit IDs and
 structured selectors. Selectors apply to all matches.

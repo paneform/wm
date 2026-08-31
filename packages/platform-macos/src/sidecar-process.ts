@@ -17,7 +17,7 @@ export interface SidecarProcess {
 export type SpawnSidecar = (path: string) => SidecarProcess;
 
 export const defaultSpawn: SpawnSidecar = (path) => {
-  const child: ChildProcess = nodeSpawn(path, [], {
+  const child: ChildProcess = nodeSpawn(path, ["sidecar"], {
     stdio: ["pipe", "pipe", "pipe"],
   });
   return {

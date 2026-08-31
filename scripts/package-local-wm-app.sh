@@ -4,6 +4,9 @@ umask 077
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE="$ROOT/packages/platform-macos/sidecar/.build/release/wm-sidecar"
+NODE_RUNTIME="${WM_NODE_RUNTIME:-$(command -v node)}"
+PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH
 APP_ROOT="$HOME/.local/libexec/wm"
 APP="${WM_APP_PATH:-$APP_ROOT/WM.app}"
 SIGNING_SELECTOR="${WM_CODESIGN_IDENTITY:-WM Local Code Signing}"
@@ -29,6 +32,30 @@ cleanup() {
 trap cleanup EXIT
 
 [[ -x "$SOURCE" ]] || { echo "release sidecar not built: $SOURCE" >&2; exit 1; }
+[[ "$NODE_RUNTIME" = /* && -x "$NODE_RUNTIME" ]] || {
+  echo "WM_NODE_RUNTIME must be an absolute executable path" >&2
+  exit 1
+}
+NODE_RUNTIME="$(realpath "$NODE_RUNTIME")"
+[[ -f "$NODE_RUNTIME" && ! -L "$NODE_RUNTIME" ]] || {
+  echo "Node runtime must resolve to a regular file" >&2
+  exit 1
+}
+codesign --verify --strict \
+  -R='anchor apple generic and certificate leaf[subject.OU] = "HX7739G8FX" and identifier "node"' \
+  "$NODE_RUNTIME"
+node_signature="$(codesign -dv --verbose=2 "$NODE_RUNTIME" 2>&1)"
+[[ "$node_signature" == *"Identifier=node"* && "$node_signature" == *"TeamIdentifier=HX7739G8FX"* ]] || {
+  echo "Node runtime must be signed by the Node.js Foundation" >&2
+  exit 1
+}
+while IFS= read -r dependency; do
+  dependency="${dependency#${dependency%%[![:space:]]*}}"
+  [[ "$dependency" == "$NODE_RUNTIME:" || "$dependency" == /System/Library/* || "$dependency" == /usr/lib/* ]] || {
+    echo "Node runtime has an external dependency: $dependency" >&2
+    exit 1
+  }
+done < <(otool -L "$NODE_RUNTIME")
 case "$APP" in
   "$APP_ROOT"/*.app)
     [[ "${APP#"$APP_ROOT"/}" != */* ]] || { echo "WM_APP_PATH must be directly under $APP_ROOT" >&2; exit 1; }
@@ -80,9 +107,32 @@ BACKUP_APP="$TEMPORARY/previous.app"
 
 CONTENTS="$STAGED_APP/Contents"
 EXECUTABLE="$CONTENTS/MacOS/wm"
-mkdir -p "$CONTENTS/MacOS"
+RESOURCES="$CONTENTS/Resources"
+RUNTIME="$RESOURCES/node"
+ENTRY="$RESOURCES/cli.mjs"
+SERVICE_SCRIPT="$RESOURCES/wm-service.sh"
+mkdir -p "$CONTENTS/MacOS" "$RESOURCES"
 cp "$SOURCE" "$EXECUTABLE"
+cp "$NODE_RUNTIME" "$RUNTIME"
+cp "$ROOT/scripts/wm-service.sh" "$SERVICE_SCRIPT"
+cmp -s "$NODE_RUNTIME" "$RUNTIME" || {
+  echo "staged Node runtime does not match its verified source" >&2
+  exit 1
+}
+codesign --verify --strict \
+  -R='anchor apple generic and certificate leaf[subject.OU] = "HX7739G8FX" and identifier "node"' \
+  "$RUNTIME"
+[[ "$("$RUNTIME" --version)" == v24.* ]] || {
+  echo "Node runtime must be version 24" >&2
+  exit 1
+}
 chmod 700 "$EXECUTABLE"
+chmod 700 "$RUNTIME"
+env -i HOME="$HOME" PATH="/usr/bin:/bin" \
+  "$RUNTIME" "$ROOT/scripts/bundle-cli.mjs" "$ENTRY"
+chmod 600 "$ENTRY"
+chmod 600 "$SERVICE_SCRIPT"
+env -i HOME="$HOME" PATH="/usr/bin:/bin" "$RUNTIME" "$ENTRY" --help >/dev/null
 cat >"$CONTENTS/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -100,12 +150,21 @@ cat >"$CONTENTS/Info.plist" <<'EOF'
 </dict></plist>
 EOF
 plutil -lint "$CONTENTS/Info.plist" >/dev/null
-codesign_options=(--force --sign "$SIGNING_FINGERPRINT" --identifier com.allandeutsch.wm)
-if [[ -n "$SIGNING_KEYCHAIN" ]]; then codesign_options+=(--keychain "$SIGNING_KEYCHAIN"); fi
-codesign "${codesign_options[@]}" "$STAGED_APP"
+codesign --verify --strict "$RUNTIME"
+app_codesign_options=(--force --options runtime --sign "$SIGNING_FINGERPRINT" --identifier com.allandeutsch.wm)
+if [[ -n "$SIGNING_KEYCHAIN" ]]; then
+  app_codesign_options+=(--keychain "$SIGNING_KEYCHAIN")
+fi
+codesign "${app_codesign_options[@]}" "$STAGED_APP"
 codesign --verify --deep --strict "$STAGED_APP"
 
 if [[ -e "$APP" ]]; then mv "$APP" "$BACKUP_APP"; fi
 mv "$STAGED_APP" "$APP"
+if ! (mkdir -p "$HOME/.local/bin" && ln -sfn "$APP/Contents/MacOS/wm" "$HOME/.local/bin/wm"); then
+  rm -rf "$APP"
+  if [[ -e "$BACKUP_APP" ]]; then mv "$BACKUP_APP" "$APP"; fi
+  exit 1
+fi
 rm -rf "$BACKUP_APP"
 printf '%s\n' "$APP"
+printf '%s\n' "$HOME/.local/bin/wm"

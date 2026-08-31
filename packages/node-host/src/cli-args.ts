@@ -188,6 +188,8 @@ Local (no daemon required):
   wm doctor                  Report macOS permissions as JSON; read-only
   wm permissions request     Trigger TCC prompts via the sidecar, then report status
                              (--open-settings deep links System Settings panes)
+Service:
+  wm service install|start|stop|restart|status|uninstall
 Daemon:
   wm serve [--port N] [--observe-only] [--sidecar PATH]
 Flags:
