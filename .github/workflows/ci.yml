@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  packages:
+    name: Public packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check formatting
+        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser format:check
+
+      - name: Lint
+        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser lint
+
+      - name: Typecheck
+        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser typecheck
+
+      - name: Test
+        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser test
+
+      - name: Build
+        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser build

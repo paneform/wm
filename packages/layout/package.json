@@ -7,6 +7,10 @@
     "tiling",
     "window-manager"
   ],
+  "homepage": "https://github.com/paneform/wm/tree/main/packages/layout#readme",
+  "bugs": {
+    "url": "https://github.com/paneform/wm/issues"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -33,7 +37,8 @@
         "import": "./dist/testing.js"
       }
     },
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",

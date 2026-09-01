@@ -8,6 +8,10 @@
     "simulation",
     "window-manager"
   ],
+  "homepage": "https://github.com/paneform/wm/tree/main/packages/layout-browser#readme",
+  "bugs": {
+    "url": "https://github.com/paneform/wm/issues"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -34,7 +38,8 @@
       },
       "./styles.css": "./styles.css"
     },
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "dev": "vite",

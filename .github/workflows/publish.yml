@@ -1,0 +1,164 @@
+name: Publish npm packages
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish
+
+jobs:
+  pack:
+    name: Validate and pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+
+          const tagPattern = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(alpha|beta|rc)\.(0|[1-9]\d*))?$/;
+          if (!tagPattern.test(process.env.RELEASE_TAG ?? "")) {
+            throw new Error(`unsupported release tag ${process.env.RELEASE_TAG}`);
+          }
+          const expected = process.env.RELEASE_TAG?.replace(/^v/, "");
+          const paths = ["packages/layout/package.json", "packages/layout-browser/package.json"];
+          const packages = await Promise.all(paths.map(async (path) => JSON.parse(await readFile(path, "utf8"))));
+          for (const packageJson of packages) {
+            if (packageJson.version !== expected) {
+              throw new Error(`${packageJson.name} is ${packageJson.version}; tag requires ${expected}`);
+            }
+          }
+          NODE
+
+      - name: Require a release commit from main
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - name: Check formatting
+        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser format:check
+
+      - name: Lint
+        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser lint
+
+      - name: Typecheck
+        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser typecheck
+
+      - name: Test
+        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser test
+
+      - name: Pack release artifacts
+        env:
+          PACK_DIR: ${{ runner.temp }}/packages
+        run: |
+          mkdir -p "$PACK_DIR"
+          pnpm --filter @paneform/layout pack --pack-destination "$PACK_DIR"
+          pnpm --filter @paneform/layout-browser pack --pack-destination "$PACK_DIR"
+
+      - name: Validate packed manifests
+        env:
+          PACK_DIR: ${{ runner.temp }}/packages
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          tar -xOf "$PACK_DIR/paneform-layout-$version.tgz" package/package.json > "$RUNNER_TEMP/layout-package.json"
+          tar -xOf "$PACK_DIR/paneform-layout-browser-$version.tgz" package/package.json > "$RUNNER_TEMP/layout-browser-package.json"
+          node scripts/validate-release-packages.mjs \
+            "$version" \
+            "$RUNNER_TEMP/layout-package.json" \
+            "$RUNNER_TEMP/layout-browser-package.json"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: npm-packages
+          path: ${{ runner.temp }}/packages/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to npm
+    needs: pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: npm-packages
+          path: release
+
+      - name: Publish packages
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          case "$version" in
+            *-alpha.*) dist_tag="alpha" ;;
+            *-beta.*) dist_tag="beta" ;;
+            *-rc.*) dist_tag="next" ;;
+            *-*) echo "unsupported prerelease version: $version" >&2; exit 1 ;;
+            *) dist_tag="latest" ;;
+          esac
+
+          publish_if_missing() {
+            package_name="$1"
+            tarball="$2"
+            registry_integrity="$(npm view "$package_name@$version" dist.integrity 2>/dev/null || true)"
+            if [ -n "$registry_integrity" ]; then
+              local_integrity="$(node --input-type=module -e \
+                'import { createHash } from "node:crypto"; import { readFileSync } from "node:fs"; console.log(`sha512-${createHash("sha512").update(readFileSync(process.argv[1])).digest("base64")}`)' \
+                "$tarball")"
+              if [ "$registry_integrity" != "$local_integrity" ]; then
+                echo "$package_name@$version exists with different contents" >&2
+                exit 1
+              fi
+              echo "$package_name@$version is already published with matching contents"
+              return
+            fi
+            npm publish "$tarball" --access public --tag "$dist_tag"
+          }
+
+          publish_if_missing "@paneform/layout" "release/paneform-layout-$version.tgz"
+          publish_if_missing "@paneform/layout-browser" "release/paneform-layout-browser-$version.tgz"
+
+          test "$(npm view @paneform/layout@$dist_tag version)" = "$version"
+          test "$(npm view @paneform/layout-browser@$dist_tag version)" = "$version"

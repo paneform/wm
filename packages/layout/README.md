@@ -8,7 +8,7 @@ The package is in alpha. Its public API may change before `1.0.0`.
 ## Install
 
 ```sh
-npm install @paneform/layout
+npm install @paneform/layout@alpha
 ```
 
 ## Usage
