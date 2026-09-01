@@ -34,15 +34,12 @@ Do not add an npm token to the normal release workflow. The staging job uses sho
 Connect credentials and receives `id-token: write` only after the build and package validation job
 succeeds.
 
-## One-Time Bootstrap
+## Initial Bootstrap
 
-npm cannot stage a brand-new package or configure it for trusted publishing. The
-`bootstrap-npm.yml` workflow therefore reserves each name as `0.0.0` under the non-default
-`bootstrap` tag. It uses a short-lived `NPM_TOKEN` secret in the protected `npm` environment.
+npm cannot stage a brand-new package or configure it for trusted publishing. Both package names
+were therefore reserved as `0.0.0` under the `bootstrap` tag before stage-only trust was enabled.
+The temporary bootstrap workflow and npm secret have been removed.
 
-After the bootstrap workflow succeeds:
-
-1. Configure `publish.yml` as the trusted publisher for both packages with stage-only permission.
-2. Delete the `NPM_TOKEN` environment secret.
-3. Delete `bootstrap-npm.yml` from the repository.
-4. Set publishing access to require two-factor authentication and disallow tokens.
+Any future package name will require the same one-time reservation. Use a short-lived token in the
+protected `npm` environment, then delete the workflow and secret immediately after configuring
+stage-only trust.
