@@ -139,7 +139,7 @@ jobs:
             *) dist_tag="latest" ;;
           esac
 
-          npm stage publish "release/paneform-layout-$version.tgz" \
+          npm stage publish "./release/paneform-layout-$version.tgz" \
             --access public --tag "$dist_tag" --provenance
-          npm stage publish "release/paneform-layout-browser-$version.tgz" \
+          npm stage publish "./release/paneform-layout-browser-$version.tgz" \
             --access public --tag "$dist_tag" --provenance
