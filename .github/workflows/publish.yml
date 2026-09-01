@@ -104,7 +104,7 @@ jobs:
           retention-days: 7
 
   publish:
-    name: Publish to npm
+    name: Stage on npm
     needs: pack
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -126,7 +126,7 @@ jobs:
           name: npm-packages
           path: release
 
-      - name: Publish packages
+      - name: Stage packages
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
@@ -139,26 +139,7 @@ jobs:
             *) dist_tag="latest" ;;
           esac
 
-          publish_if_missing() {
-            package_name="$1"
-            tarball="$2"
-            registry_integrity="$(npm view "$package_name@$version" dist.integrity 2>/dev/null || true)"
-            if [ -n "$registry_integrity" ]; then
-              local_integrity="$(node --input-type=module -e \
-                'import { createHash } from "node:crypto"; import { readFileSync } from "node:fs"; console.log(`sha512-${createHash("sha512").update(readFileSync(process.argv[1])).digest("base64")}`)' \
-                "$tarball")"
-              if [ "$registry_integrity" != "$local_integrity" ]; then
-                echo "$package_name@$version exists with different contents" >&2
-                exit 1
-              fi
-              echo "$package_name@$version is already published with matching contents"
-              return
-            fi
-            npm publish "$tarball" --access public --tag "$dist_tag"
-          }
-
-          publish_if_missing "@paneform/layout" "release/paneform-layout-$version.tgz"
-          publish_if_missing "@paneform/layout-browser" "release/paneform-layout-browser-$version.tgz"
-
-          test "$(npm view @paneform/layout@$dist_tag version)" = "$version"
-          test "$(npm view @paneform/layout-browser@$dist_tag version)" = "$version"
+          npm stage publish "release/paneform-layout-$version.tgz" \
+            --access public --tag "$dist_tag" --provenance
+          npm stage publish "release/paneform-layout-browser-$version.tgz" \
+            --access public --tag "$dist_tag" --provenance

@@ -1,0 +1,71 @@
+name: Bootstrap npm packages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    name: Reserve package names
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Create bootstrap packages
+        run: |
+          node --input-type=module <<'NODE'
+          import { mkdir, writeFile } from "node:fs/promises";
+
+          const packages = [
+            ["@paneform/layout", "Portable window layout and workspace policy engine", "packages/layout"],
+            ["@paneform/layout-browser", "Browser renderer and simulator for @paneform/layout", "packages/layout-browser"],
+          ];
+          for (const [name, description, directory] of packages) {
+            const path = `bootstrap/${name.split("/")[1]}`;
+            await mkdir(path, { recursive: true });
+            await writeFile(`${path}/package.json`, `${JSON.stringify({
+              name,
+              version: "0.0.0",
+              description,
+              license: "MIT",
+              repository: {
+                type: "git",
+                url: "git+https://github.com/paneform/wm.git",
+                directory,
+              },
+              publishConfig: {
+                access: "public",
+                registry: "https://registry.npmjs.org/",
+              },
+            }, null, 2)}\n`);
+          }
+          NODE
+
+      - name: Publish bootstrap versions
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          publish_if_missing() {
+            package_name="$1"
+            package_path="$2"
+            if npm view "$package_name@0.0.0" version --json >/dev/null 2>&1; then
+              echo "$package_name@0.0.0 is already published"
+              return
+            fi
+            npm publish "$package_path" --access public --tag bootstrap --provenance
+          }
+
+          publish_if_missing "@paneform/layout" "bootstrap/layout"
+          publish_if_missing "@paneform/layout-browser" "bootstrap/layout-browser"
