@@ -41,12 +41,14 @@ const writeResult = (
   requested: Frame,
   observed: Frame,
   errorKind?: WriteErrorKind,
-): WriteObservation => ({
-  requested,
-  observed,
-  stable: errorKind === undefined,
-  ...(errorKind === undefined ? {} : { errorKind }),
-});
+): WriteObservation => {
+  const result = {
+    requested,
+    observed,
+    stable: errorKind === undefined,
+  };
+  return errorKind === undefined ? result : { ...result, errorKind };
+};
 
 function adapterWith(
   write: (
@@ -101,12 +103,14 @@ const runPositionClamp = (adapter: PlatformAdapter, parking: boolean) =>
   Effect.runPromiseExit(
     applyGeometryRequest(
       { adapter, clock: CLOCK },
-      {
-        windowId: "window:1",
-        frame: TARGET,
-        attempts: parking ? 1 : 2,
-        ...(parking ? { acceptance: "parkingStablePositionClamp" as const } : {}),
-      },
+      parking
+        ? {
+            windowId: "window:1",
+            frame: TARGET,
+            attempts: 1,
+            acceptance: "parkingStablePositionClamp",
+          }
+        : { windowId: "window:1", frame: TARGET, attempts: 2 },
       context,
     ),
   );

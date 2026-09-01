@@ -1,7 +1,6 @@
 import type { Action } from "../actions.js";
 import { DEFAULT_TOLERANCE } from "../constants.js";
 import { withinTolerance } from "../geometry.js";
-import type { Frame } from "../schema.js";
 import type { World } from "../world.js";
 import { plannedTiledFrames } from "./rule.js";
 import type { Rule, RuleContext } from "./rule.js";
@@ -30,7 +29,7 @@ export const tileWorkspaces: Rule = {
         if (observation === undefined) continue;
         // Hidden/minimized members keep their slot but receive no geometry.
         if (observation.minimized || observation.hidden) continue;
-        if (!withinTolerance(observation.frame, frame as Frame, DEFAULT_TOLERANCE)) {
+        if (!withinTolerance(observation.frame, frame, DEFAULT_TOLERANCE)) {
           actions.push({ kind: "setFrame", windowId, frame });
         }
       }

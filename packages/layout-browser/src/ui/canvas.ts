@@ -213,14 +213,17 @@ export function buildScene(snapshot: StateSnapshot, extras: SceneExtras = {}): S
     primary: d.primary,
   }));
 
-  const windows: SceneWindow[] = snapshot.windows.map((w) => ({
-    id: w.id,
-    ...(w.title !== undefined ? { title: w.title } : {}),
-    frame: w.frame,
-    state: windowVisualState(w),
-    classification: w.classification,
-    workspace: w.workspace,
-  }));
+  const windows: SceneWindow[] = snapshot.windows.map((w) => {
+    const window: SceneWindow = {
+      id: w.id,
+      frame: w.frame,
+      state: windowVisualState(w),
+      classification: w.classification,
+      workspace: w.workspace,
+    };
+    if (w.title !== undefined) window.title = w.title;
+    return window;
+  });
 
   const badges: SceneBadge[] = [];
   const splitLines: SceneSplitLine[] = [];

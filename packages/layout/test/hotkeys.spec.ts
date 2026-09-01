@@ -1,7 +1,9 @@
 import { describe, expect, test } from "vitest";
 import { Cause, Effect, Exit, Stream } from "effect";
 import { createEngine } from "../src/engine.ts";
+import type { Engine } from "../src/engine.ts";
 import type { Command, CommandResult, StateSnapshot } from "../src/commands.ts";
+import type { DomainEvent } from "../src/events.ts";
 import type { Clock, ConfigSource } from "../src/platform.ts";
 import type { Frame, WindowId } from "../src/schema.ts";
 import type { PlatformAdapter } from "../src/platform.ts";
@@ -41,24 +43,19 @@ const CONFIG_SOURCE: ConfigSource = {
 
 interface Harness {
   fake: ReturnType<typeof createFakePlatform>;
-  engine: {
-    execute(command: Command): Effect.Effect<CommandResult, unknown>;
-    state(): Effect.Effect<StateSnapshot>;
-    events(): Stream.Stream<unknown>;
-    setRecovery(active: boolean): void;
-    gateState(): { busy: boolean; rerunQueued: boolean };
-  };
+  engine: Engine;
   run(command: Command): Promise<CommandResult>;
   snapshot(): Promise<StateSnapshot>;
   failure(command: Command): Promise<{ code: string; message: string }>;
 }
 
+interface EngineRefs {
+  engine: Pick<Engine, "setRecovery"> | null;
+}
+
 const bootstrap = async (
   displays?: ReadonlyArray<Partial<FakeDisplaySpec>>,
-  wrap?: (
-    inner: PlatformAdapter,
-    refs: { engine: { setRecovery(a: boolean): void } | null },
-  ) => PlatformAdapter,
+  wrap?: (inner: PlatformAdapter, refs: EngineRefs) => PlatformAdapter,
 ): Promise<Harness> => {
   const fake = createFakePlatform({
     clock: CLOCK,
@@ -75,7 +72,7 @@ const bootstrap = async (
           ]
         : displays.map((spec) => makeDisplay(spec)),
   });
-  const refs: { engine: { setRecovery(a: boolean): void } | null } = { engine: null };
+  const refs: EngineRefs = { engine: null };
   const adapter = (() => {
     if (wrap === undefined) return fake.adapter;
     const { executeBatch: _batch, ...legacyAdapter } = wrap(fake.adapter, refs);
@@ -85,23 +82,12 @@ const bootstrap = async (
   const engine = await Effect.runPromise(
     createEngine({ adapter, configSource: CONFIG_SOURCE, clock: CLOCK }),
   );
-  refs.engine = engine as unknown as { setRecovery(a: boolean): void };
+  refs.engine = engine;
   await Effect.runPromise(engine.start());
   return {
     fake,
-    engine: {
-      ...engine,
-      events: () => engine.events(),
-      setRecovery: (a: boolean) =>
-        (engine as unknown as { setRecovery(a: boolean): void }).setRecovery(a),
-      gateState: () =>
-        (
-          engine as unknown as {
-            gateState(): { busy: boolean; rerunQueued: boolean };
-          }
-        ).gateState(),
-    },
-    run: (command) => Effect.runPromise(engine.execute(command) as Effect.Effect<CommandResult>),
+    engine,
+    run: (command) => Effect.runPromise(engine.execute(command)),
     snapshot: () => Effect.runPromise(engine.state()),
     failure: async (command) => {
       const exit = await Effect.runPromiseExit(engine.execute(command));
@@ -868,7 +854,7 @@ describe("committed/draft isolation (round 2 issue 1)", () => {
     let focusEventsSeen = 0;
     const collectorFiber = Effect.runFork(
       Stream.runForEach(
-        Stream.filter(h.engine.events(), (e) => (e as { topic: string }).topic === "focus"),
+        Stream.filter(h.engine.events(), (event: DomainEvent) => event.topic === "focus"),
         () => Effect.sync(() => (focusEventsSeen += 1)),
       ),
     );
@@ -963,12 +949,28 @@ describe("strict reconciliation early exits (round 2 issue 3)", () => {
     let poisonInventory = false;
     const h = await bootstrap(undefined, (inner) => ({
       ...inner,
-      getWindows: () =>
-        poisonInventory
-          ? Effect.succeed([{ bad: true }] as unknown as ReadonlyArray<
-              import("../src/schema.ts").WindowObservation
-            >)
-          : inner.getWindows(),
+      getWindows: () => {
+        if (!poisonInventory) return inner.getWindows();
+        const fixture = {
+          id: "window:malformed",
+          pid: 1,
+          title: "Malformed",
+          role: "AXWindow",
+          frame: { x: 0, y: 0, width: 100, height: 100 },
+          minimized: false,
+          hidden: false,
+          fullscreen: false,
+          focused: false,
+          capabilities: {
+            movable: "unknown",
+            resizable: "unknown",
+            movableEvidence: "platform_report",
+            resizableEvidence: "platform_report",
+          },
+        } satisfies import("../src/schema.ts").WindowObservation;
+        Object.defineProperty(fixture.frame, "width", { value: "invalid" });
+        return Effect.succeed([fixture]);
+      },
     }));
     const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     const w2 = h.fake.addWindow(makeWindow({ x: 900, y: 300 }));
@@ -989,12 +991,18 @@ describe("strict reconciliation early exits (round 2 issue 3)", () => {
     let poisonTopology = false;
     const h = await bootstrap(undefined, (inner) => ({
       ...inner,
-      getTopology: () =>
-        poisonTopology
-          ? Effect.succeed({
-              displays: "garbage",
-            } as unknown as import("../src/schema.ts").TopologyObservation)
-          : inner.getTopology(),
+      getTopology: () => {
+        if (!poisonTopology) return inner.getTopology();
+        const display = {
+          id: "display:malformed",
+          frame: { x: 0, y: 0, width: 100, height: 100 },
+          workArea: { x: 0, y: 0, width: 100, height: 100 },
+          scale: 1,
+          primary: true,
+        } satisfies import("../src/schema.ts").DisplayObservation;
+        Object.defineProperty(display, "scale", { value: "invalid" });
+        return Effect.succeed({ displays: [display] });
+      },
     }));
     const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     const w2 = h.fake.addWindow(makeWindow({ x: 900, y: 300 }));
@@ -1381,8 +1389,9 @@ describe("capture-phase strictness (round 3 issue 3)", () => {
     expect(error.code).toBe("timeout");
     DEADLINE.deadlineMs = 3;
     blockCapture = false;
-    const rc = resumeCapture as (() => void) | null;
-    rc?.();
+    // SAFETY: The async adapter callback is the only writer and stores either a callable resumer or null.
+    const resume = resumeCapture as (() => void) | null;
+    resume?.();
     expect(workspaceOf(await h.snapshot(), "1")!.tree).toEqual(treeBefore);
   }, 12000);
 });
@@ -1406,7 +1415,7 @@ describe("compensation identity race (round 3 issue 4)", () => {
       h.engine.execute({
         type: "moveDirection",
         direction: "right",
-      }) as unknown as Effect.Effect<CommandResult, import("../src/commands.ts").CommandError>,
+      }),
     );
     await waitFor(() => gate.isSuspended());
     h.fake.swapBackingElement(w2);
@@ -1417,8 +1426,7 @@ describe("compensation identity race (round 3 issue 4)", () => {
     DEADLINE.deadlineMs = 3;
     if (Exit.isSuccess(exit)) throw new Error("expected moveDirection to fail");
     const typedFailure = Cause.failureOption(exit.cause);
-    const errCode =
-      typedFailure._tag === "Some" ? (typedFailure.value as { code: string }).code : "unknown";
+    const errCode = typedFailure._tag === "Some" ? typedFailure.value.code : "unknown";
     expect(["inventory_stale", "timeout"]).toContain(errCode);
 
     // Replacement untouched at its nudged position; peer restored.

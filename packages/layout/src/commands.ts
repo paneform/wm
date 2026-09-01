@@ -184,6 +184,21 @@ export const ManagedWindowSnapshot = Schema.Struct({
 });
 export interface ManagedWindowSnapshot extends Schema.Schema.Type<typeof ManagedWindowSnapshot> {}
 
+interface ManagedWindowSnapshotBuilder {
+  id: string;
+  pid: number;
+  bundleId?: string;
+  executablePath?: string;
+  title?: string;
+  classification: string;
+  managed: boolean;
+  workspace: string | null;
+  floating: boolean;
+  parked: boolean;
+  frame: typeof Frame.Type;
+  capabilities: typeof Capabilities.Type;
+}
+
 export interface BspLeafSnapshot {
   readonly kind: "leaf";
   readonly windowId: string;
@@ -228,6 +243,18 @@ export const WorkspaceSnapshot = Schema.Struct({
   lastFocusedMember: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export interface WorkspaceSnapshot extends Schema.Schema.Type<typeof WorkspaceSnapshot> {}
+
+interface WorkspaceSnapshotBuilder {
+  name: string;
+  mode: WorkspaceMode;
+  members: readonly string[];
+  floating: readonly string[];
+  tree: BspTreeSnapshot;
+  visibleOnDisplay: string | null;
+  preferredDisplay: string | null;
+  pinnedDisplayOverride: string | null;
+  lastFocusedMember?: string | null;
+}
 
 export const PendingTransactionSnapshot = Schema.Struct({
   id: Schema.String,
@@ -385,12 +412,9 @@ export function projectSnapshot(
   const windows: ManagedWindowSnapshot[] = [...world.windows.values()].map((obs) => {
     const membership = memberToWorkspace.get(obs.id);
     const parked = [...world.workspaces.values()].some((ws) => ws.parkedFrames.has(obs.id));
-    return {
+    const snapshot: ManagedWindowSnapshotBuilder = {
       id: obs.id,
       pid: obs.pid,
-      ...(obs.bundleId !== undefined ? { bundleId: obs.bundleId } : {}),
-      ...(obs.executablePath !== undefined ? { executablePath: obs.executablePath } : {}),
-      ...(obs.title !== undefined ? { title: obs.title } : {}),
       classification: classify(obs),
       managed: membership !== undefined,
       workspace: membership?.workspace ?? null,
@@ -399,19 +423,26 @@ export function projectSnapshot(
       frame: obs.frame satisfies typeof Frame.Type,
       capabilities: obs.capabilities,
     };
+    if (obs.bundleId !== undefined) snapshot.bundleId = obs.bundleId;
+    if (obs.executablePath !== undefined) snapshot.executablePath = obs.executablePath;
+    if (obs.title !== undefined) snapshot.title = obs.title;
+    return snapshot;
   });
 
-  const workspaces: WorkspaceSnapshot[] = [...world.workspaces.values()].map((ws) => ({
-    name: ws.name,
-    mode: ws.mode as WorkspaceMode,
-    members: tiledMembers(ws.tree).filter((id) => id !== EMPTY_TREE_LEAF),
-    floating: [...ws.floating],
-    tree: ws.tree as unknown as BspTreeSnapshot,
-    visibleOnDisplay: ws.visibleOnDisplay,
-    preferredDisplay: ws.preferredDisplay,
-    pinnedDisplayOverride: ws.pinnedDisplayOverride,
-    ...(ws.lastFocusedMember !== null ? { lastFocusedMember: ws.lastFocusedMember } : {}),
-  }));
+  const workspaces: WorkspaceSnapshot[] = [...world.workspaces.values()].map((ws) => {
+    const snapshot: WorkspaceSnapshotBuilder = {
+      name: ws.name,
+      mode: ws.mode,
+      members: tiledMembers(ws.tree).filter((id) => id !== EMPTY_TREE_LEAF),
+      floating: [...ws.floating],
+      tree: snapshotTree(ws.tree),
+      visibleOnDisplay: ws.visibleOnDisplay,
+      preferredDisplay: ws.preferredDisplay,
+      pinnedDisplayOverride: ws.pinnedDisplayOverride,
+    };
+    if (ws.lastFocusedMember !== null) snapshot.lastFocusedMember = ws.lastFocusedMember;
+    return snapshot;
+  });
 
   return {
     epoch: world.epoch,
@@ -456,9 +487,9 @@ export interface CommandBus {
   execute(command: Command): Effect.Effect<CommandResult, CommandError>;
 }
 
-function decodeCommand(raw: unknown): Command {
-  return Schema.decodeUnknownSync(Command, { onExcessProperty: "error" })(raw);
-}
+export const decodeCommandSync = Schema.decodeUnknownSync(Command, {
+  onExcessProperty: "error",
+});
 
 export function createCommandBus(deps: CommandBusDeps): CommandBus {
   const query = (command: Command): Effect.Effect<CommandResult, CommandError> =>
@@ -589,7 +620,17 @@ export function createCommandBus(deps: CommandBusDeps): CommandBus {
   };
 }
 
-export { decodeCommand as decodeCommandSync };
+function snapshotTree(node: BspNode): BspTreeSnapshot {
+  return node.kind === "leaf"
+    ? { kind: "leaf", windowId: node.windowId }
+    : {
+        kind: "split",
+        axis: node.axis,
+        ratio: node.ratio,
+        first: snapshotTree(node.first),
+        second: snapshotTree(node.second),
+      };
+}
 
 function windowIdOf(command: Command): string | null {
   switch (command.type) {

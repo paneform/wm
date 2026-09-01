@@ -147,15 +147,18 @@ export const createTransactionQueue = (deps: {
   const executeWithDeadline = (unit: WorkUnit, start: number): Effect.Effect<Receipt> => {
     // Both race sides use the SUCCESS channel: a failing winner in
     // Effect.race can strand an uninterruptible loser fiber.
-    const timeoutSignal: { kind: "timeout" } = { kind: "timeout" };
+    const timeoutSignal = { kind: "timeout" } as const;
     return Effect.map(
       Effect.either(
         Effect.race(
           runSteps(unit.id, unit.steps, start).pipe(
-            Effect.map((receipt): { kind: "receipt"; receipt: Receipt } => ({
-              kind: "receipt",
-              receipt,
-            })),
+            Effect.map(
+              (receipt) =>
+                ({
+                  kind: "receipt",
+                  receipt,
+                }) as const,
+            ),
           ),
           Effect.flatMap(deps.clock.sleep(TRANSACTION_TIMEOUT_MS), () =>
             Effect.succeed(timeoutSignal),

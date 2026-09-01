@@ -11,7 +11,8 @@ import {
 } from "../world.js";
 import { DEFAULT_TOLERANCE, REPLAN_BONUS } from "../constants.js";
 import { contentRect, constraintsResolver, planLayout, tiledMembers } from "../layout/bsp.js";
-import { effectiveConstraints, makeProfileKey, type ConstraintAxis } from "../learn.js";
+import * as Learning from "../learn.js";
+import type { ConstraintAxis } from "../learn.js";
 import { withinTolerance } from "../geometry.js";
 import { effectiveSettings } from "../config.js";
 
@@ -120,7 +121,7 @@ export function profileKeyOf(
 ): ProfileKey | null {
   const application = observation.bundleId ?? observation.executablePath;
   if (application === undefined) return null;
-  return makeProfileKey({
+  return Learning.makeProfileKey({
     application,
     role: observation.role,
     subrole: observation.subrole,
@@ -147,7 +148,11 @@ export function constraintsForWindow(
   observation: WindowObservation,
 ): Constraints {
   const profile = profileOf(world, ctx, observation);
-  return effectiveConstraints(observation.constraints, profile?.constraints, observation.frame);
+  return Learning.effectiveConstraints(
+    observation.constraints,
+    profile?.constraints,
+    observation.frame,
+  );
 }
 
 // ---------------------------------------------------------------------------

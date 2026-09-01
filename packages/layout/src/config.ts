@@ -70,6 +70,7 @@ export const ConfigSchema = Schema.Struct({
   keybinds: Schema.optional(KeybindsSchema),
 });
 export interface Config extends Schema.Schema.Type<typeof ConfigSchema> {}
+export type ConfigInput = Schema.Schema.Encoded<typeof ConfigSchema>;
 
 export class ConfigInvalidError extends Error {
   readonly issues: readonly string[];
@@ -81,7 +82,7 @@ export class ConfigInvalidError extends Error {
 }
 
 /** Validate a raw candidate object. Unknown fields are errors. */
-export function parseConfig(raw: unknown): Config {
+export function parseConfig<Input>(raw: Input): Config {
   try {
     const config = Schema.decodeUnknownSync(ConfigSchema, { onExcessProperty: "error" })(raw);
     const selectors = config.displays?.map((entry) => entry.display) ?? [];
@@ -99,8 +100,8 @@ export function parseConfig(raw: unknown): Config {
 }
 
 /** Non-throwing variant for hotload paths that must keep prior config. */
-export function parseConfigSafe(
-  raw: unknown,
+export function parseConfigSafe<Input>(
+  raw: Input,
 ): { ok: true; config: Config } | { ok: false; error: ConfigInvalidError } {
   try {
     return { ok: true, config: parseConfig(raw) };
@@ -218,7 +219,7 @@ export function globalSettings(config: Config): EffectiveWorkspaceSettings {
  * field-by-field; new names are appended. Invalid candidates are rejected
  * BEFORE any merge so the prior config is preserved atomically.
  */
-export function applyConfigDelta(current: Config, rawCandidate: unknown): Config {
+export function applyConfigDelta<Input>(current: Config, rawCandidate: Input): Config {
   const candidate = parseConfig(rawCandidate);
 
   const mergedDefaults: GlobalDefaults | undefined =
@@ -270,16 +271,13 @@ export function applyConfigDelta(current: Config, rawCandidate: unknown): Config
 
   const workspaces = byName.size > 0 ? [...byName.values()] : undefined;
   const displays = displaysById.size > 0 ? [...displaysById.values()] : undefined;
-  return {
-    ...(mergedDefaults === undefined ? {} : { defaults: mergedDefaults }),
-    ...(displays === undefined ? {} : { displays }),
-    ...(workspaces === undefined ? {} : { workspaces }),
-    ...(candidate.keybinds === undefined
-      ? current.keybinds === undefined
-        ? {}
-        : { keybinds: current.keybinds }
-      : { keybinds: candidate.keybinds }),
-  };
+  const merged: { -readonly [Key in keyof Config]: Config[Key] } = {};
+  if (mergedDefaults !== undefined) merged.defaults = mergedDefaults;
+  if (displays !== undefined) merged.displays = displays;
+  if (workspaces !== undefined) merged.workspaces = workspaces;
+  const keybinds = candidate.keybinds ?? current.keybinds;
+  if (keybinds !== undefined) merged.keybinds = keybinds;
+  return merged;
 }
 
 /**
@@ -288,6 +286,6 @@ export function applyConfigDelta(current: Config, rawCandidate: unknown): Config
  * lives outside Config and is preserved by the caller. The candidate is fully
  * validated before the swap.
  */
-export function applyConfigFull(_current: Config, rawCandidate: unknown): Config {
+export function applyConfigFull<Input>(_current: Config, rawCandidate: Input): Config {
   return parseConfig(rawCandidate);
 }

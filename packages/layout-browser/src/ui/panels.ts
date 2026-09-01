@@ -1,6 +1,7 @@
-import type { Command, Engine, StateSnapshot } from "@paneform/layout";
+import { Command, type Engine, type StateSnapshot } from "@paneform/layout";
 import type { CommandError } from "@paneform/layout";
 import type { DomainEvent } from "@paneform/layout";
+import { Schema } from "effect";
 import type { SimGroundTruth } from "../sim/web-platform.js";
 import { SCENARIOS, type RecordedEntry, type ScenarioRecorder } from "./scenarios.js";
 
@@ -117,7 +118,8 @@ export function createPanels(deps: PanelDeps): PanelHandles {
   const selectedWindowId = (): string | null => windowSelect.value || null;
 
   const button = (label: string, fn: () => void, title?: string): HTMLButtonElement => {
-    const b = el("button", { ...(title !== undefined ? { title } : {}), text: label });
+    const b =
+      title === undefined ? el("button", { text: label }) : el("button", { text: label, title });
     b.addEventListener("click", fn);
     return b;
   };
@@ -204,8 +206,10 @@ export function createPanels(deps: PanelDeps): PanelHandles {
   const runJsonButton = el("button", { text: "run JSON", class: "wide" });
   runJsonButton.addEventListener("click", () => {
     try {
-      const parsed: unknown = JSON.parse(jsonInput.value);
-      void deps.runCommand(parsed as Command);
+      const parsed = Schema.decodeUnknownSync(Command, { onExcessProperty: "error" })(
+        JSON.parse(jsonInput.value),
+      );
+      void deps.runCommand(parsed);
     } catch (error) {
       appendLine(commandLog, `parse error: ${String(error)}`, "err");
     }
@@ -469,7 +473,7 @@ function formatScriptedBounds(
 }
 
 function summarizeEvent(event: DomainEvent): string {
-  const payload = event.payload as Record<string, unknown>;
+  const payload = event.payload;
   switch (event.topic) {
     case "diagnostic":
       return `${String(payload.code ?? "")} ${String(payload.detail ?? "").slice(0, 120)}`;

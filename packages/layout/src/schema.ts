@@ -2,6 +2,70 @@ import { Schema } from "effect";
 
 const Attempts = Schema.Number.pipe(Schema.between(1, 5), Schema.int());
 
+export interface JsonObject {
+  readonly [key: string]: JsonValue;
+}
+
+export type JsonValue = null | boolean | number | string | readonly JsonValue[] | JsonObject;
+
+export interface JsonSerializableObject {
+  readonly [key: string]: JsonSerializableValue | undefined;
+}
+
+export type JsonSerializableValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly JsonSerializableValue[]
+  | JsonSerializableObject;
+
+const PlainJsonObject = Schema.declare((value: unknown): value is JsonObject => {
+  if (Object(value) !== value || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+});
+
+const PlainJsonSerializableObject = Schema.declare(
+  (value: unknown): value is JsonSerializableObject => {
+    if (Object(value) !== value || Array.isArray(value)) return false;
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  },
+);
+
+export const JsonValueSchema: Schema.Schema<JsonValue> = Schema.suspend(() =>
+  Schema.Union(
+    Schema.Null,
+    Schema.Boolean,
+    Schema.JsonNumber,
+    Schema.String,
+    Schema.Array(JsonValueSchema),
+    PlainJsonObject.pipe(
+      Schema.compose(Schema.Record({ key: Schema.String, value: JsonValueSchema })),
+    ),
+  ),
+);
+
+export const JsonSerializableValueSchema: Schema.Schema<JsonSerializableValue> = Schema.suspend(
+  () =>
+    Schema.Union(
+      Schema.Null,
+      Schema.Boolean,
+      Schema.JsonNumber,
+      Schema.String,
+      Schema.Array(JsonSerializableValueSchema),
+      PlainJsonSerializableObject.pipe(
+        Schema.compose(
+          Schema.Record({
+            key: Schema.String,
+            value: Schema.Union(JsonSerializableValueSchema, Schema.Undefined),
+          }),
+        ),
+      ),
+    ),
+);
+
 // ---------------------------------------------------------------------------
 // Primitives
 // ---------------------------------------------------------------------------

@@ -161,7 +161,7 @@ class ScriptedOs {
     return horizontal >= this.limits.horizontal - EPS && vertical >= this.limits.vertical - EPS;
   }
 
-  private visibilityOf(id: WindowId, point: { x: number; y: number }): { h: number; v: number } {
+  private visibilityOf(id: WindowId, point: { x: number; y: number }) {
     const current = this.frames.get(id);
     if (current === undefined) throw new Error(`unknown scripted window ${id}`);
     const d = this.osDisplay.frame;
@@ -204,18 +204,18 @@ class ScriptedOs {
     } else {
       // Per-axis continuous clamp to the measured limits (real macOS retains
       // fractional positions rather than snapping to a corner).
-      const clampH = (p: number): number =>
+      const clampH = (): number =>
         isLeftCorner(this.corner)
           ? this.osDisplay.frame.x - size.width + this.limits.horizontal
           : this.osDisplay.frame.x + this.osDisplay.frame.width - this.limits.horizontal;
-      const clampV = (p: number): number =>
+      const clampV = (): number =>
         isBottomCorner(this.corner)
           ? this.osDisplay.frame.y + this.osDisplay.frame.height - this.limits.vertical
           : this.osDisplay.frame.y - size.height + this.limits.vertical;
       const refusedHorizontal = h < this.limits.horizontal - EPS;
       observed = {
-        x: refusedHorizontal ? clampH(point.x) : point.x,
-        y: v < this.limits.vertical - EPS ? clampV(point.y) : point.y,
+        x: refusedHorizontal ? clampH() : point.x,
+        y: v < this.limits.vertical - EPS ? clampV() : point.y,
         width: size.width,
         height: size.height,
       };
@@ -244,21 +244,20 @@ class ScriptedOs {
   }
 
   adapter(): PlatformAdapter {
-    const self = this;
     return {
       events: Stream.empty,
-      getTopology: () => Effect.succeed({ displays: [self.osDisplay] }),
-      getWindows: () => Effect.succeed([...self.frames.keys()].map((id) => self.observationOf(id))),
-      getWindow: (id) => Effect.succeed(self.frames.has(id) ? self.observationOf(id) : null),
-      setWindowFrame: (id, f) => self.setPosition(id, { x: f.x, y: f.y }),
-      setWindowPosition: (id, point) => self.setPosition(id, point),
+      getTopology: () => Effect.succeed({ displays: [this.osDisplay] }),
+      getWindows: () => Effect.succeed([...this.frames.keys()].map((id) => this.observationOf(id))),
+      getWindow: (id) => Effect.succeed(this.frames.has(id) ? this.observationOf(id) : null),
+      setWindowFrame: (id, f) => this.setPosition(id, { x: f.x, y: f.y }),
+      setWindowPosition: (id, point) => this.setPosition(id, point),
       setWindowSize: (id, size) => {
-        const current = self.frames.get(id);
+        const current = this.frames.get(id);
         if (current === undefined) {
           return Effect.fail(new PlatformError({ code: "not_found", detail: `unknown ${id}` }));
         }
         const next: Frame = { ...current, width: size.width, height: size.height };
-        self.frames.set(id, next);
+        this.frames.set(id, next);
         return Effect.succeed({
           requested: { ...current },
           observed: { ...next },

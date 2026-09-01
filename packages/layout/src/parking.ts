@@ -580,7 +580,7 @@ function axisLimitFrom(
     : clamped.y + size.height - display.frame.y;
 }
 
-const centerOf = (display: DisplayObservation): { x: number; y: number } => ({
+const centerOf = (display: DisplayObservation) => ({
   x: display.workArea.x + display.workArea.width / 2,
   y: display.workArea.y + display.workArea.height / 2,
 });

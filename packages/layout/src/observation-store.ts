@@ -3,6 +3,7 @@ import { emptyLearningStore, profileKeyString } from "./learn.js";
 import type { Constraints } from "./schema.js";
 import type { Confidence, Profile, ProfileKey } from "./world.js";
 import type { Effect, Stream } from "effect";
+import { Schema } from "effect";
 
 export const OBSERVATION_SCHEMA_VERSION = 1 as const;
 
@@ -12,6 +13,13 @@ type PendingId = (typeof PENDING_IDS)[number];
 export interface StoredPendingEvidence {
   readonly key: ProfileKey;
   readonly samples: Partial<Record<PendingId, readonly number[]>>;
+}
+
+interface MutableConstraints {
+  minWidth?: number;
+  maxWidth?: number;
+  minHeight?: number;
+  maxHeight?: number;
 }
 
 export interface ObservationDocument {
@@ -55,76 +63,58 @@ export const emptyObservationDocument = (): ObservationDocument => ({
   pending: [],
 });
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+export type ObservationJson =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly ObservationJson[]
+  | { readonly [key: string]: ObservationJson };
 
-const assertKnownKeys = (
-  value: Record<string, unknown>,
-  allowed: readonly string[],
-  name: string,
-): void => {
-  const allowedKeys = new Set(allowed);
-  const unknown = Object.keys(value).find((key) => !allowedKeys.has(key));
-  if (unknown !== undefined) {
-    throw new ObservationStoreError("invalid", `${name} contains unknown field ${unknown}`);
-  }
-};
+const NonEmptyString = Schema.String.pipe(
+  Schema.filter((value) => value.length > 0 && !value.includes("\u0000")),
+);
+const FinitePositive = Schema.Number.pipe(
+  Schema.filter((value) => Number.isFinite(value) && value > 0 && value <= 1_000_000),
+);
+const NonNegativeInteger = Schema.Number.pipe(
+  Schema.filter((value) => Number.isSafeInteger(value) && value >= 0),
+);
+const ProfileKeySchema = Schema.Struct({
+  application: NonEmptyString,
+  role: NonEmptyString,
+  subrole: Schema.optional(NonEmptyString),
+  contextFingerprint: NonEmptyString,
+});
+const ConstraintsSchema = Schema.Struct({
+  minWidth: Schema.optional(FinitePositive),
+  maxWidth: Schema.optional(FinitePositive),
+  minHeight: Schema.optional(FinitePositive),
+  maxHeight: Schema.optional(FinitePositive),
+});
+const ProfileSchema = Schema.Struct({
+  key: ProfileKeySchema,
+  constraints: ConstraintsSchema,
+  sampleCount: NonNegativeInteger,
+  confidence: Schema.Literal("tentative", "learned", "strong"),
+  correctiveAttemptCount: NonNegativeInteger,
+  cooperative: Schema.Boolean,
+});
+const SamplesSchema = Schema.Struct({
+  "width:min": Schema.optional(Schema.Array(FinitePositive).pipe(Schema.maxItems(16))),
+  "width:max": Schema.optional(Schema.Array(FinitePositive).pipe(Schema.maxItems(16))),
+  "height:min": Schema.optional(Schema.Array(FinitePositive).pipe(Schema.maxItems(16))),
+  "height:max": Schema.optional(Schema.Array(FinitePositive).pipe(Schema.maxItems(16))),
+});
+const ObservationDocumentSchema = Schema.Struct({
+  schemaVersion: Schema.Literal(OBSERVATION_SCHEMA_VERSION),
+  profiles: Schema.Array(ProfileSchema).pipe(Schema.maxItems(10_000)),
+  pending: Schema.Array(Schema.Struct({ key: ProfileKeySchema, samples: SamplesSchema })).pipe(
+    Schema.maxItems(10_000),
+  ),
+});
 
-const finitePositive = (value: unknown, name: string): number => {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value > 1_000_000) {
-    throw new ObservationStoreError("invalid", `${name} must be a finite positive number`);
-  }
-  return value;
-};
-
-const nonNegativeInteger = (value: unknown, name: string): number => {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
-    throw new ObservationStoreError("invalid", `${name} must be a non-negative integer`);
-  }
-  return value;
-};
-
-const nonEmptyString = (value: unknown, name: string): string => {
-  if (typeof value !== "string" || value.length === 0 || value.includes("\u0000")) {
-    throw new ObservationStoreError(
-      "invalid",
-      `${name} must be a non-empty string without NUL characters`,
-    );
-  }
-  return value;
-};
-
-const decodeKey = (value: unknown): ProfileKey => {
-  if (!isObject(value)) throw new ObservationStoreError("invalid", "profile key must be an object");
-  assertKnownKeys(value, ["application", "role", "subrole", "contextFingerprint"], "profile key");
-  const key: ProfileKey = {
-    application: nonEmptyString(value["application"], "profile application"),
-    role: nonEmptyString(value["role"], "profile role"),
-    contextFingerprint: nonEmptyString(value["contextFingerprint"], "profile context fingerprint"),
-  };
-  if (value["subrole"] !== undefined) {
-    key.subrole = nonEmptyString(value["subrole"], "profile subrole");
-  }
-  return key;
-};
-
-const decodeConstraints = (value: unknown): Constraints => {
-  if (!isObject(value)) throw new ObservationStoreError("invalid", "constraints must be an object");
-  assertKnownKeys(value, ["minWidth", "maxWidth", "minHeight", "maxHeight"], "constraints");
-  const constraints: Constraints = {
-    ...(value["minWidth"] === undefined
-      ? {}
-      : { minWidth: finitePositive(value["minWidth"], "minWidth") }),
-    ...(value["maxWidth"] === undefined
-      ? {}
-      : { maxWidth: finitePositive(value["maxWidth"], "maxWidth") }),
-    ...(value["minHeight"] === undefined
-      ? {}
-      : { minHeight: finitePositive(value["minHeight"], "minHeight") }),
-    ...(value["maxHeight"] === undefined
-      ? {}
-      : { maxHeight: finitePositive(value["maxHeight"], "maxHeight") }),
-  };
+const validateConstraints = (constraints: Constraints): Constraints => {
   if (
     constraints.minWidth !== undefined &&
     constraints.maxWidth !== undefined &&
@@ -142,84 +132,59 @@ const decodeConstraints = (value: unknown): Constraints => {
   return constraints;
 };
 
-const decodeProfile = (value: unknown): Profile => {
-  if (!isObject(value)) throw new ObservationStoreError("invalid", "profile must be an object");
-  assertKnownKeys(
-    value,
-    ["key", "constraints", "sampleCount", "confidence", "correctiveAttemptCount", "cooperative"],
-    "profile",
-  );
-  const confidence = value["confidence"];
-  if (confidence !== "tentative" && confidence !== "learned" && confidence !== "strong") {
-    throw new ObservationStoreError("invalid", "profile confidence is invalid");
-  }
-  if (typeof value["cooperative"] !== "boolean") {
-    throw new ObservationStoreError("invalid", "profile cooperative must be boolean");
-  }
-  return {
-    key: decodeKey(value["key"]),
-    constraints: decodeConstraints(value["constraints"]),
-    sampleCount: nonNegativeInteger(value["sampleCount"], "profile sampleCount"),
-    confidence: confidence as Confidence,
-    correctiveAttemptCount: nonNegativeInteger(
-      value["correctiveAttemptCount"],
-      "profile correctiveAttemptCount",
-    ),
-    cooperative: value["cooperative"],
-  };
-};
-
-const decodeSamples = (value: unknown): Partial<Record<PendingId, readonly number[]>> => {
-  if (!isObject(value))
-    throw new ObservationStoreError("invalid", "pending samples must be an object");
-  assertKnownKeys(value, PENDING_IDS, "pending samples");
-  const samples: Partial<Record<PendingId, readonly number[]>> = {};
-  for (const id of PENDING_IDS) {
-    const candidate = value[id];
-    if (candidate === undefined) continue;
-    if (!Array.isArray(candidate) || candidate.length > 16) {
-      throw new ObservationStoreError("invalid", `${id} samples must be a bounded array`);
-    }
-    samples[id] = candidate.map((sample) => finitePositive(sample, `${id} sample`));
-  }
-  return samples;
-};
-
 /** Validate untrusted durable data before it enters the engine. */
-export function decodeObservationDocument(value: unknown): ObservationDocument {
-  if (!isObject(value) || value["schemaVersion"] !== OBSERVATION_SCHEMA_VERSION) {
-    throw new ObservationStoreError("invalid", "unsupported observation document schema");
-  }
-  assertKnownKeys(value, ["schemaVersion", "profiles", "pending"], "observation document");
-  if (!Array.isArray(value["profiles"]) || value["profiles"].length > 10_000) {
-    throw new ObservationStoreError("invalid", "profiles must be a bounded array");
-  }
-  if (!Array.isArray(value["pending"]) || value["pending"].length > 10_000) {
-    throw new ObservationStoreError("invalid", "pending evidence must be a bounded array");
+export function decodeObservationDocument<Input>(value: Input): ObservationDocument {
+  let decoded: Schema.Schema.Type<typeof ObservationDocumentSchema>;
+  try {
+    decoded = Schema.decodeUnknownSync(ObservationDocumentSchema, {
+      onExcessProperty: "error",
+    })(value);
+  } catch (error) {
+    throw new ObservationStoreError(
+      "invalid",
+      `unsupported observation document schema: ${String(error)}`,
+    );
   }
 
   const profileKeys = new Set<string>();
-  const profiles = value["profiles"].map((entry) => {
-    const profile = decodeProfile(entry);
-    const key = profileKeyString(profile.key);
-    if (profileKeys.has(key))
-      throw new ObservationStoreError("invalid", `duplicate profile ${key}`);
-    profileKeys.add(key);
+  const profiles = decoded.profiles.map((decodedProfile): Profile => {
+    const key: ProfileKey = {
+      application: decodedProfile.key.application,
+      role: decodedProfile.key.role,
+      contextFingerprint: decodedProfile.key.contextFingerprint,
+    };
+    if (decodedProfile.key.subrole !== undefined) key.subrole = decodedProfile.key.subrole;
+    const profile: Profile = {
+      ...decodedProfile,
+      key,
+      constraints: validateConstraints(decodedProfile.constraints),
+    };
+    const keyString = profileKeyString(profile.key);
+    if (profileKeys.has(keyString))
+      throw new ObservationStoreError("invalid", `duplicate profile ${keyString}`);
+    profileKeys.add(keyString);
     return profile;
   });
 
   const pendingKeys = new Set<string>();
-  const pending = value["pending"].map((entry) => {
-    if (!isObject(entry))
-      throw new ObservationStoreError("invalid", "pending evidence must be an object");
-    assertKnownKeys(entry, ["key", "samples"], "pending evidence");
-    const key = decodeKey(entry["key"]);
+  const pending = decoded.pending.map((entry): StoredPendingEvidence => {
+    const key: ProfileKey = {
+      application: entry.key.application,
+      role: entry.key.role,
+      contextFingerprint: entry.key.contextFingerprint,
+    };
+    if (entry.key.subrole !== undefined) key.subrole = entry.key.subrole;
     const keyString = profileKeyString(key);
     if (pendingKeys.has(keyString)) {
       throw new ObservationStoreError("invalid", `duplicate pending evidence ${keyString}`);
     }
     pendingKeys.add(keyString);
-    return { key, samples: decodeSamples(entry["samples"]) };
+    const samples: Partial<Record<PendingId, readonly number[]>> = {};
+    for (const id of PENDING_IDS) {
+      const values = entry.samples[id];
+      if (values !== undefined) samples[id] = values;
+    }
+    return { key, samples };
   });
 
   return { schemaVersion: OBSERVATION_SCHEMA_VERSION, profiles, pending };
@@ -229,18 +194,30 @@ const keyFromString = (value: string): ProfileKey => {
   const parts = value.split("\u0000");
   if (parts.length !== 4)
     throw new ObservationStoreError("invalid", "invalid internal profile key");
-  const [application, role, subrole, contextFingerprint] = parts as [
-    string,
-    string,
-    string,
-    string,
-  ];
-  return decodeKey({
+  const application = parts[0];
+  const role = parts[1];
+  const subrole = parts[2];
+  const contextFingerprint = parts[3];
+  if (
+    application === undefined ||
+    role === undefined ||
+    subrole === undefined ||
+    contextFingerprint === undefined
+  ) {
+    throw new ObservationStoreError("invalid", "invalid internal profile key");
+  }
+  const key: ProfileKey = {
     application,
     role,
-    ...(subrole.length > 0 ? { subrole } : {}),
     contextFingerprint,
-  });
+  };
+  if (subrole.length > 0) key.subrole = subrole;
+  try {
+    Schema.decodeUnknownSync(ProfileKeySchema, { onExcessProperty: "error" })(key);
+  } catch (error) {
+    throw new ObservationStoreError("invalid", `invalid internal profile key: ${String(error)}`);
+  }
+  return key;
 };
 
 export function observationDocumentFromLearning(store: LearningStore): ObservationDocument {
@@ -249,15 +226,17 @@ export function observationDocumentFromLearning(store: LearningStore): Observati
   );
   const pending = [...store.pending.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([keyString, buckets]) => ({
-      key: store.profiles.get(keyString)?.key ?? keyFromString(keyString),
-      samples: Object.fromEntries(
-        [...buckets.entries()]
-          .filter(([id]) => (PENDING_IDS as readonly string[]).includes(id))
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([id, values]) => [id, [...values]]),
-      ) as Partial<Record<PendingId, readonly number[]>>,
-    }));
+    .map(([keyString, buckets]) => {
+      const samples: Partial<Record<PendingId, readonly number[]>> = {};
+      for (const id of PENDING_IDS) {
+        const values = buckets.get(id);
+        if (values !== undefined) samples[id] = [...values];
+      }
+      return {
+        key: store.profiles.get(keyString)?.key ?? keyFromString(keyString),
+        samples,
+      };
+    });
   return decodeObservationDocument({
     schemaVersion: OBSERVATION_SCHEMA_VERSION,
     profiles,
@@ -265,7 +244,7 @@ export function observationDocumentFromLearning(store: LearningStore): Observati
   });
 }
 
-export function learningFromObservationDocument(value: unknown): LearningStore {
+export function learningFromObservationDocument<Input>(value: Input): LearningStore {
   const document = decodeObservationDocument(value);
   const store = emptyLearningStore();
   const profiles = new Map<string, Profile>();
@@ -280,7 +259,7 @@ export function learningFromObservationDocument(value: unknown): LearningStore {
   return { ...store, profiles, pending };
 }
 
-const sameValue = (left: unknown, right: unknown): boolean =>
+const sameValue = <Value>(left: Value, right: Value): boolean =>
   JSON.stringify(left) === JSON.stringify(right);
 
 const mergeConstraints = (
@@ -288,24 +267,26 @@ const mergeConstraints = (
   local: Constraints,
   remote: Constraints,
 ): Constraints => {
-  const merged = { ...remote } as Record<string, number | undefined>;
+  const merged: MutableConstraints = {};
+  for (const field of ["minWidth", "maxWidth", "minHeight", "maxHeight"] as const) {
+    if (remote[field] !== undefined) merged[field] = remote[field];
+  }
   for (const field of ["minWidth", "maxWidth", "minHeight", "maxHeight"] as const) {
     if (sameValue(base[field], local[field])) continue;
     if (local[field] === undefined) delete merged[field];
     else merged[field] = local[field];
   }
-  const result = merged as Constraints;
   if (
-    (result.minWidth !== undefined &&
-      result.maxWidth !== undefined &&
-      result.minWidth > result.maxWidth) ||
-    (result.minHeight !== undefined &&
-      result.maxHeight !== undefined &&
-      result.minHeight > result.maxHeight)
+    (merged.minWidth !== undefined &&
+      merged.maxWidth !== undefined &&
+      merged.minWidth > merged.maxWidth) ||
+    (merged.minHeight !== undefined &&
+      merged.maxHeight !== undefined &&
+      merged.minHeight > merged.maxHeight)
   ) {
     return { ...local };
   }
-  return result;
+  return merged;
 };
 
 const mergeProfile = (base: Profile, local: Profile, remote: Profile): Profile => ({

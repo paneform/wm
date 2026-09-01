@@ -237,6 +237,11 @@ export interface RecordResult {
   promoted: ConstraintCandidate[];
 }
 
+export interface NoteExactFrameResult {
+  store: LearningStore;
+  replaced: ConstraintCandidate[];
+}
+
 /**
  * Feed candidate evidence into the store. PROMOTION_SAMPLES consistent samples
  * within ±PROMOTION_CONSISTENCY_PT promote to a learned bound; learned bounds
@@ -326,7 +331,7 @@ export function noteExactFrame(
   key: ProfileKey,
   observed: Frame,
   tolerance: number,
-): { store: LearningStore; replaced: ConstraintCandidate[] } {
+): NoteExactFrameResult {
   const keyStr = profileKeyString(key);
   const profile = store.profiles.get(keyStr);
   if (profile === undefined) return { store, replaced: [] };

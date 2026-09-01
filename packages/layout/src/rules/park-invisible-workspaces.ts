@@ -26,7 +26,7 @@ export const parkInvisibleWorkspaces: Rule = {
   },
 };
 
-function scanForPending(world: World, ctx: RuleContext): { pending: boolean } {
+function scanForPending(world: World, ctx: RuleContext) {
   for (const workspace of world.workspaces.values()) {
     if (
       workspace.visibleOnDisplay === null &&

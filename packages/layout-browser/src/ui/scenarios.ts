@@ -1,5 +1,6 @@
-import type { Command, Frame } from "@paneform/layout";
-import type { SimPersonality, WebPlatformSim } from "../sim/web-platform.js";
+import { Command, Frame } from "@paneform/layout";
+import { Schema } from "effect";
+import type { AddWindowSpec, SimPersonality, WebPlatformSim } from "../sim/web-platform.js";
 
 // Scenario system — docs/rewrite/web-renderer.md §UI sketch + §Implementation
 // notes. Scenarios are PURE DATA: scripted edge-case sequences driving the sim
@@ -16,6 +17,8 @@ export type DisplayAlias = "primary" | "secondary" | string;
 
 /** Placeholder prefix substituted with actual window ids at run time. */
 const REF_PREFIX = "@w:";
+
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 export type ScenarioOp =
   | {
@@ -108,20 +111,18 @@ export class ScenarioRunner {
   async apply(op: ScenarioOp): Promise<void> {
     switch (op.kind) {
       case "addWindow": {
-        this.refs.set(
-          op.ref,
-          this.ctx.sim.addWindow({
-            ref: op.ref,
-            title: op.title,
-            bundleId: op.bundleId,
-            width: op.width,
-            height: op.height,
-            x: op.x,
-            y: op.y,
-            personality: op.personality,
-            ...(op.display !== undefined ? { displayId: this.displayId(op.display) } : {}),
-          }),
-        );
+        const spec: AddWindowSpec = {
+          ref: op.ref,
+          title: op.title,
+          bundleId: op.bundleId,
+          width: op.width,
+          height: op.height,
+          x: op.x,
+          y: op.y,
+          personality: op.personality,
+        };
+        if (op.display !== undefined) spec.displayId = this.displayId(op.display);
+        this.refs.set(op.ref, this.ctx.sim.addWindow(spec));
         return;
       }
       case "removeWindow": {
@@ -189,20 +190,14 @@ export class ScenarioRunner {
   }
 
   /** Deep-substitute "@w:<ref>" strings inside a command template. */
-  private substitute<T>(value: T): T {
-    if (typeof value === "string") {
-      if (!value.startsWith(REF_PREFIX)) return value;
-      return this.require(value.slice(REF_PREFIX.length)) as unknown as T;
-    }
-    if (Array.isArray(value)) {
-      return value.map((item) => this.substitute(item)) as unknown as T;
-    }
-    if (value !== null && typeof value === "object") {
-      const out: Record<string, unknown> = {};
-      for (const [key, inner] of Object.entries(value)) out[key] = this.substitute(inner);
-      return out as unknown as T;
-    }
-    return value;
+  private substitute(command: Command): Command {
+    const substituted = JSON.parse(JSON.stringify(command), (_key, value: JsonValue) => {
+      if (Schema.is(Schema.String)(value) && value.startsWith(REF_PREFIX)) {
+        return this.require(value.slice(REF_PREFIX.length));
+      }
+      return value;
+    });
+    return Schema.decodeUnknownSync(Command, { onExcessProperty: "error" })(substituted);
   }
 }
 
@@ -220,6 +215,101 @@ export type RecordableEntry =
   | { kind: "scenario"; scenarioId: string }
   | { kind: "op"; op: ScenarioOp }
   | { kind: "command"; command: Command };
+
+interface RecordingStore {
+  [name: string]: RecordedEntry[];
+}
+
+const SimPersonalitySchema = Schema.Struct({
+  kind: Schema.Literal(
+    "normal",
+    "minMaxClamp",
+    "workAreaClamp",
+    "reanchoring",
+    "animated",
+    "slowAnimated",
+    "fixedSize",
+    "unmovable",
+  ),
+  constraints: Schema.optional(
+    Schema.Struct({
+      minWidth: Schema.optional(Schema.Number),
+      maxWidth: Schema.optional(Schema.Number),
+      minHeight: Schema.optional(Schema.Number),
+      maxHeight: Schema.optional(Schema.Number),
+    }),
+  ),
+  anchor: Schema.optional(Schema.Literal("topleft", "center")),
+  animationFraction: Schema.optional(Schema.Number),
+});
+
+const ScenarioOpSchema = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("addWindow"),
+    ref: Schema.String,
+    title: Schema.optional(Schema.String),
+    bundleId: Schema.optional(Schema.String),
+    display: Schema.optional(Schema.String),
+    x: Schema.optional(Schema.Number),
+    y: Schema.optional(Schema.Number),
+    width: Schema.Number,
+    height: Schema.Number,
+    personality: Schema.optional(SimPersonalitySchema),
+  }),
+  Schema.Struct({ kind: Schema.Literal("removeWindow"), ref: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("focusWindow"), ref: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("replaceIdentity"), ref: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal("driftWindow"),
+    ref: Schema.String,
+    dx: Schema.Number,
+    dy: Schema.Number,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("nudgeWindow"),
+    ref: Schema.String,
+    frame: Schema.Struct({
+      x: Schema.optionalWith(Schema.Number, { exact: true }),
+      y: Schema.optionalWith(Schema.Number, { exact: true }),
+      width: Schema.optionalWith(Schema.Number, { exact: true }),
+      height: Schema.optionalWith(Schema.Number, { exact: true }),
+    }),
+  }),
+  Schema.Struct({ kind: Schema.Literal("disconnectDisplay"), display: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal("connectDisplay"),
+    id: Schema.String,
+    frame: Frame,
+    workArea: Frame,
+    scale: Schema.Number,
+    primary: Schema.Boolean,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("updateWorkArea"),
+    display: Schema.String,
+    workArea: Frame,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("setVisibility"),
+    display: Schema.String,
+    horizontal: Schema.Number,
+    vertical: Schema.Number,
+  }),
+  Schema.Struct({ kind: Schema.Literal("command"), command: Command }),
+);
+
+const RecordedEntrySchema = Schema.Union(
+  Schema.Struct({ t: Schema.Number, kind: Schema.Literal("scenario"), scenarioId: Schema.String }),
+  Schema.Struct({ t: Schema.Number, kind: Schema.Literal("op"), op: ScenarioOpSchema }),
+  Schema.Struct({ t: Schema.Number, kind: Schema.Literal("command"), command: Command }),
+);
+
+const RawRecordingsSchema = Schema.Record({
+  key: Schema.String,
+  value: Schema.Unknown,
+});
+
+const RecordedEntriesSchema = Schema.Array(RecordedEntrySchema);
 
 export const RECORDING_STORE_KEY = "paneform.layout-browser.recordings.v1";
 
@@ -251,13 +341,25 @@ export class ScenarioRecorder {
 
   record(entry: RecordableEntry): void {
     if (this.recordingSince === null) return;
-    this.captured.push({ ...entry, t: this.stamp() } as RecordedEntry);
+    const t = this.stamp();
+    switch (entry.kind) {
+      case "scenario":
+        this.captured.push({ t, kind: entry.kind, scenarioId: entry.scenarioId });
+        return;
+      case "op":
+        this.captured.push({ t, kind: entry.kind, op: entry.op });
+        return;
+      case "command":
+        this.captured.push({ t, kind: entry.kind, command: entry.command });
+    }
   }
 
   save(name: string): void {
     if (typeof localStorage === "undefined") return;
-    const all = loadRecordings();
-    all[name] = this.captured;
+    const entries = Schema.decodeUnknownSync(RecordedEntriesSchema, { onExcessProperty: "error" })(
+      this.captured,
+    );
+    const all = { ...loadRawRecordings(), [name]: entries };
     localStorage.setItem(RECORDING_STORE_KEY, JSON.stringify(all));
   }
 
@@ -271,15 +373,25 @@ export class ScenarioRecorder {
   }
 }
 
-function loadRecordings(): Record<string, RecordedEntry[]> {
+function loadRecordings(): RecordingStore {
+  const recordings: RecordingStore = {};
+  for (const [name, rawEntries] of Object.entries(loadRawRecordings())) {
+    const result = Schema.decodeUnknownEither(RecordedEntriesSchema, {
+      onExcessProperty: "error",
+    })(rawEntries);
+    if (result._tag === "Right") recordings[name] = [...result.right];
+  }
+  return recordings;
+}
+
+function loadRawRecordings(): typeof RawRecordingsSchema.Type {
   if (typeof localStorage === "undefined") return {};
   try {
     const raw = localStorage.getItem(RECORDING_STORE_KEY);
     if (raw === null) return {};
-    const parsed: unknown = JSON.parse(raw);
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, RecordedEntry[]>)
-      : {};
+    return Schema.decodeUnknownSync(RawRecordingsSchema, { onExcessProperty: "error" })(
+      JSON.parse(raw),
+    );
   } catch {
     return {};
   }

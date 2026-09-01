@@ -1,11 +1,11 @@
-import { Effect, Fiber, Stream } from "effect";
-import type {
-  Command,
-  CommandError,
-  CommandResult,
-  DomainEvent,
-  Engine as EngineApi,
-  StateSnapshot,
+import { Effect, Fiber, Schema, Stream } from "effect";
+import {
+  CommandErrorCode,
+  type Command,
+  type CommandResult,
+  type DomainEvent,
+  type Engine as EngineApi,
+  type StateSnapshot,
 } from "@paneform/layout";
 import type { SimGroundTruth, WebPlatformSim } from "./sim/web-platform.js";
 import {
@@ -37,6 +37,21 @@ export interface LayoutRenderer {
 
 const INITIAL_REFS_KEY_PREFIX = "sim-";
 const activeRenderers = new WeakMap<HTMLElement, LayoutRenderer>();
+
+const CommandErrorCandidate = Schema.Struct({
+  _tag: Schema.optional(Schema.String),
+  code: Schema.optional(Schema.String),
+  message: Schema.optional(Schema.String),
+});
+
+const CommandErrorSchema = Schema.Struct({
+  _tag: Schema.Literal("CommandError"),
+  code: CommandErrorCode,
+  message: Schema.String,
+});
+
+export const isCommandTimeout = (error: typeof CommandErrorCandidate.Type): boolean =>
+  Schema.is(CommandErrorSchema)(error) && error.code === "timeout";
 
 export function mountLayoutRenderer(
   container: HTMLElement,
@@ -92,16 +107,15 @@ export function mountLayoutRenderer(
       const result: CommandResult = await Effect.runPromise(engine.execute(command));
       handles.logCommand(command, `ok ${summarizeResult(result)}`);
     } catch (error) {
-      const code = (error as Partial<CommandError>)?.code;
-      if (code === "timeout") {
+      const commandError = Schema.is(CommandErrorSchema)(error) ? error : undefined;
+      const code = commandError?.code;
+      if (Schema.is(CommandErrorCandidate)(error) && isCommandTimeout(error)) {
         // Mutation receipts resolve via the timeout race even
         // though their work applies. Report honestly as deferred.
         handles.logCommand(command, "deferred (applied asynchronously)");
       } else {
         const detail =
-          (error as Partial<CommandError>)?.message !== undefined
-            ? `${code}: ${(error as Partial<CommandError>).message}`
-            : String(error);
+          commandError?.message !== undefined ? `${code}: ${commandError.message}` : String(error);
         handles.logCommand(command, `error ${detail}`);
       }
     }
@@ -117,15 +131,18 @@ export function mountLayoutRenderer(
     return refs;
   };
 
-  const makeScenarioContext = () => ({
-    sim: sim as WebPlatformSim,
+  const makeScenarioContext = (scenarioSim: WebPlatformSim) => ({
+    sim: scenarioSim,
     execute: async (command: Command) => {
       try {
         await Effect.runPromise(engine.execute(command));
         return { ok: true as const, detail: "ok" };
       } catch (error) {
-        const code = (error as Partial<CommandError>)?.code;
-        if (code === "timeout") return { ok: true as const, detail: "deferred" };
+        const commandError = Schema.is(CommandErrorSchema)(error) ? error : undefined;
+        if (Schema.is(CommandErrorCandidate)(error) && isCommandTimeout(error)) {
+          return { ok: true as const, detail: "deferred" };
+        }
+        const code = commandError?.code;
         return { ok: false as const, detail: String(code ?? "failed") };
       }
     },
@@ -136,7 +153,7 @@ export function mountLayoutRenderer(
     if (scenario === undefined || sim === undefined) return;
     recorder.record({ kind: "scenario", scenarioId });
     void (async () => {
-      const runner = new ScenarioRunner(makeScenarioContext(), initialRefs());
+      const runner = new ScenarioRunner(makeScenarioContext(sim), initialRefs());
       await runner.run(scenario);
       await reconcileScenario();
     })();
@@ -147,7 +164,10 @@ export function mountLayoutRenderer(
     const entries = ScenarioRecorder.load(name);
     if (entries === null || entries.length === 0) return;
     void (async () => {
-      await replayEntries(entries, () => new ScenarioRunner(makeScenarioContext(), initialRefs()));
+      await replayEntries(
+        entries,
+        () => new ScenarioRunner(makeScenarioContext(sim), initialRefs()),
+      );
       await reconcileScenario();
     })();
   };

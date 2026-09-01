@@ -1,4 +1,4 @@
-import type { Action } from "../actions.js";
+import type { Action, InsertWindowAction } from "../actions.js";
 import type { World } from "../world.js";
 import { findMembership } from "./rule.js";
 import type { Rule, RuleContext } from "./rule.js";
@@ -23,13 +23,20 @@ export const restoreMembership: Rule = {
       if (!world.windows.has(id)) continue;
       if (findMembership(world, id) !== null) continue;
       if (!world.workspaces.has(tombstone.workspace)) continue;
-      actions.push({
+      const base: InsertWindowAction = {
         kind: "insertWindow",
         windowId: id,
         workspace: tombstone.workspace,
-        ...(tombstone.anchor !== null ? { beside: tombstone.anchor } : {}),
-        ...(tombstone.floating ? { floating: true } : {}),
-      });
+      };
+      let action: InsertWindowAction;
+      if (tombstone.anchor !== null) {
+        action = tombstone.floating
+          ? { ...base, beside: tombstone.anchor, floating: true }
+          : { ...base, beside: tombstone.anchor };
+      } else {
+        action = tombstone.floating ? { ...base, floating: true } : base;
+      }
+      actions.push(action);
     }
     return actions;
   },

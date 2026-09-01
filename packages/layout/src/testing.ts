@@ -70,10 +70,12 @@ export const runToPromise = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
   Effect.runPromise(effect);
 
 /** Collect the first n events pushed into an array by a subscriber. */
-export const createCollector = <T>(): {
+export interface Collector<T> {
   push(value: T): void;
   values(): readonly T[];
-} => {
+}
+
+export const createCollector = <T>(): Collector<T> => {
   const seen: T[] = [];
   return {
     push: (value) => seen.push(value),

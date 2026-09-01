@@ -42,21 +42,31 @@ const workspace = (
   lastFocusedMember: windowId,
 });
 
-const context = {
+const context: RuleContext = {
   config: {},
   now: 0,
   tombstones: new Map(),
   overrides: { managed: new Set(), unmanaged: new Set() },
   contextFingerprint: "test",
-  settings: () => ({
+  settings: (name) => ({
+    name,
     mode: "bsp",
     gap: 0,
+    resizeIncrement: 0.05,
     margins: { top: 0, right: 0, bottom: 0, left: 0 },
     preferredDisplay: null,
     assign: [],
   }),
-  globalSettings: () => ({ ignoredWindows: [] }),
-} as unknown as RuleContext;
+  globalSettings: () => ({
+    name: "",
+    mode: "bsp",
+    gap: 0,
+    resizeIncrement: 0.05,
+    margins: { top: 0, right: 0, bottom: 0, left: 0 },
+    preferredDisplay: null,
+    assign: [],
+  }),
+};
 
 describe("workspace visibility reconciliation", () => {
   test("reveals an invisible focused workspace without parking it first", () => {

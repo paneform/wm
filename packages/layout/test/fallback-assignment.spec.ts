@@ -1,7 +1,7 @@
 import { Effect, Stream } from "effect";
 import { describe, expect, test } from "vitest";
 import type { Command, CommandResult, StateSnapshot } from "../src/commands.ts";
-import { createEngine } from "../src/engine.ts";
+import { createEngine, type Engine } from "../src/engine.ts";
 import type { Clock, ConfigSource } from "../src/platform.ts";
 import { createFakePlatform, makeDisplay, makeWindow } from "./helpers/fake-platform.ts";
 
@@ -117,8 +117,5 @@ describe("unmatched normal-window fallback assignment", () => {
   });
 });
 
-const execute = (
-  engine: { execute(command: Command): Effect.Effect<CommandResult, unknown> },
-  command: Command,
-): Promise<CommandResult> =>
-  Effect.runPromise(engine.execute(command) as Effect.Effect<CommandResult>);
+const execute = (engine: Engine, command: Command): Promise<CommandResult> =>
+  Effect.runPromise(engine.execute(command));

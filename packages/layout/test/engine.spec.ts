@@ -1,7 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
 import { createEngine, type ShutdownReport } from "../src/engine.ts";
-import type { CommandResult, StateSnapshot } from "../src/commands.ts";
+import type { Command, CommandError, CommandResult, StateSnapshot } from "../src/commands.ts";
+import type { Config } from "../src/config.ts";
 import type { Clock, ConfigSource, PlatformAdapter } from "../src/platform.ts";
 import { PlatformError, type Frame, type WindowObservation } from "../src/schema.ts";
 import {
@@ -28,14 +29,12 @@ const CONFIG_SOURCE: ConfigSource = {
   changes: () => Stream.empty,
 };
 
-import type { Command } from "../src/commands.ts";
-
 interface Harness {
   fake: ReturnType<typeof createFakePlatform>;
   engine: {
     start(): Effect.Effect<void>;
     stop(): Effect.Effect<ShutdownReport>;
-    execute(command: Command): Effect.Effect<CommandResult, unknown>;
+    execute(command: Command): Effect.Effect<CommandResult, CommandError>;
     state(): Effect.Effect<StateSnapshot>;
     events(): Stream.Stream<unknown>;
     reconcile(): Effect.Effect<void>;
@@ -65,7 +64,7 @@ const bootstrap = async (
   return {
     fake,
     engine,
-    run: (command) => Effect.runPromise(engine.execute(command) as Effect.Effect<CommandResult>),
+    run: (command) => Effect.runPromise(engine.execute(command)),
     snapshot: () => Effect.runPromise(engine.state()),
   };
 };
@@ -187,9 +186,20 @@ describe("engine pipeline (fake platform)", () => {
     await Effect.runPromise(engine.stop());
   });
 
+  test("fake observations omit absent optional fields", async () => {
+    const fake = createFakePlatform({ clock: CLOCK, displays: [makeDisplay()] });
+    fake.addWindow(makeWindow());
+
+    const [observation] = await Effect.runPromise(fake.adapter.getWindows());
+
+    expect(observation).not.toHaveProperty("bundleId");
+    expect(observation).not.toHaveProperty("subrole");
+    expect(observation).not.toHaveProperty("constraints");
+  });
+
   test("prepares effective native config for startup and full reload", async () => {
     const fake = createFakePlatform({ clock: CLOCK, displays: [makeDisplay()] });
-    let raw: unknown = { keybinds: { "shift s": "workspace focus S" } };
+    let raw: Config = { keybinds: { "shift s": "workspace focus S" } };
     const prepared: Array<{ keybinds: Readonly<Record<string, string>>; mode: string }> = [];
     const configSource: ConfigSource = {
       load: () => Effect.succeed(raw),
@@ -1299,7 +1309,6 @@ function focusedWorkspaceOf(snap: StateSnapshot): string | null {
   return snap.focusedWorkspace;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function engineOf(h: Harness): any {
+function engineOf(h: Harness): Harness["engine"] {
   return h.engine;
 }

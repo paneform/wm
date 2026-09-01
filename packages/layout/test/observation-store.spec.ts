@@ -5,7 +5,9 @@ import {
   mergeLearningChanges,
   observationDocumentFromLearning,
   ObservationStoreError,
+  type ObservationDocument,
 } from "../src/observation-store.ts";
+import type { Profile } from "../src/world.ts";
 import {
   emptyLearningStore,
   makeProfileKey,
@@ -86,7 +88,7 @@ describe("observation documents", () => {
   });
 
   test("merges independent concurrent fields on the same profile", () => {
-    const document = (profile: Record<string, unknown>) => ({
+    const document = (overrides: Partial<Profile>): ObservationDocument => ({
       schemaVersion: 1 as const,
       profiles: [
         {
@@ -96,7 +98,7 @@ describe("observation documents", () => {
           confidence: "learned",
           correctiveAttemptCount: 0,
           cooperative: false,
-          ...profile,
+          ...overrides,
         },
       ],
       pending: [],

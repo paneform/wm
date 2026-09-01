@@ -172,6 +172,7 @@ interface HealthRef {
 }
 
 type StepFailure = { code: string; message: string; diagnostic?: string };
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
 const TOMBSTONE_TTL_MS = 5 * 60 * 1000;
 
@@ -679,9 +680,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         effectiveSettings(config, workspaceName, insertionHost?.id).margins,
       );
 
-      const tree =
+      const tree: BspNode =
         beside === undefined || besideFrame === undefined || isEmptyTree(workspace.tree)
-          ? ({ kind: "leaf", windowId } as BspNode)
+          ? { kind: "leaf", windowId }
           : (insertLeaf(workspace.tree, beside, windowId, besideFrame) ?? workspace.tree);
 
       commitWorkspace({ ...workspace, tree, lastFocusedMember: windowId });
@@ -742,9 +743,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         correctiveAttemptCount:
           key === null
             ? undefined
-            : (world.profiles.get(profileKeyString(key))?.correctiveAttemptCount as
-                | number
-                | undefined),
+            : world.profiles.get(profileKeyString(key))?.correctiveAttemptCount,
       };
     };
 
@@ -763,14 +762,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             message: `unknown window ${windowId}`,
           });
         }
-        const request: GeometryRequest = {
-          windowId,
-          frame,
-          ...(tolerance !== undefined ? { tolerance } : {}),
-          ...(parkingDisplayId !== undefined
-            ? { acceptance: "parkingStablePositionClamp" as const }
-            : {}),
-        };
+        const request: Mutable<GeometryRequest> = { windowId, frame };
+        if (tolerance !== undefined) request.tolerance = tolerance;
+        if (parkingDisplayId !== undefined) request.acceptance = "parkingStablePositionClamp";
         const result = yield* Effect.either(
           applyGeometryRequest({ adapter, clock }, request, geometryContextFor(observation)),
         );
@@ -812,13 +806,15 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         return result.right;
       });
 
+    interface ChosenCorner {
+      readonly corner: ParkingCorner;
+      readonly visibility: ParkingVisibility;
+    }
+
     const chooseCorner = (
       display: DisplayObservation,
       size: { width: number; height: number },
-    ): {
-      corner: (typeof CORNER_PRIORITY)[number];
-      visibility: { horizontal: number; vertical: number };
-    } => {
+    ): ChosenCorner => {
       for (const corner of CORNER_PRIORITY) {
         const fact = findParkingFact(world.parkingFacts, display, corner);
         const visibility = fact?.visibility ?? defaultParkingVisibility();
@@ -827,7 +823,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           return { corner, visibility };
         }
       }
-      return { corner: CORNER_PRIORITY[0]!, visibility: defaultParkingVisibility() };
+      return { corner: "bottomLeft", visibility: defaultParkingVisibility() };
     };
 
     const factFingerprint = (display: DisplayObservation): string =>
@@ -844,15 +840,13 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           primaryDisplay();
         if (display === undefined) return;
 
-        const members = [...tiledMembers(workspace.tree), ...[...workspace.floating]].filter(
-          (id) => {
-            if (id === EMPTY_TREE_LEAF) return false;
-            const obs = world.windows.get(id);
-            return (
-              obs !== undefined && !obs.minimized && !obs.hidden && classify(obs) !== "transient"
-            );
-          },
-        );
+        const members = [...tiledMembers(workspace.tree), ...workspace.floating].filter((id) => {
+          if (id === EMPTY_TREE_LEAF) return false;
+          const obs = world.windows.get(id);
+          return (
+            obs !== undefined && !obs.minimized && !obs.hidden && classify(obs) !== "transient"
+          );
+        });
 
         for (const id of members) {
           const observation = world.windows.get(id);
@@ -1085,11 +1079,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           case "learnConstraints": {
             const observation = world.windows.get(action.windowId);
             if (observation !== undefined) {
-              learnFrom(observation, observation.frame, "stableClamp", {
-                ...observation.frame,
-                ...(action.minWidth !== undefined ? { width: action.minWidth } : {}),
-                ...(action.minHeight !== undefined ? { height: action.minHeight } : {}),
-              });
+              const learnedFrame = { ...observation.frame };
+              if (action.minWidth !== undefined) learnedFrame.width = action.minWidth;
+              if (action.minHeight !== undefined) learnedFrame.height = action.minHeight;
+              learnFrom(observation, observation.frame, "stableClamp", learnedFrame);
             }
             return;
           }
@@ -1250,7 +1243,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           windowsMap.set(observation.id, observation);
           if (!firstSeen.has(observation.id)) firstSeen.set(observation.id, observation.frame);
         }
-        for (const id of [...firstSeen.keys()]) {
+        for (const id of firstSeen.keys()) {
           if (!windowsMap.has(id)) {
             firstSeen.delete(id);
             shutdownRestoreIntents.delete(id);
@@ -1372,7 +1365,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     //                              degraded health (never unguarded retries).
     // ------------------------------------------------------------------
 
-    type BufferedEvent = { topic: DomainTopic; payload: Record<string, unknown> };
+    type BufferedEvent = { topic: DomainTopic; payload: Parameters<EventBus["publish"]>[1] };
 
     type CompoundIntent =
       | { kind: "retile"; workspace: WorkspaceName }
@@ -1386,6 +1379,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       /** Precondition handed to the adapter's ATOMIC identity-guarded write. */
       readonly expected: ExpectedWindowIdentity;
     }
+
+    type TrackedWindowIds =
+      | { readonly kind: "known"; readonly ids: readonly WindowId[] }
+      | { readonly kind: "deferred"; readonly resolve: () => readonly WindowId[] | null };
 
     interface PlannedWrite {
       readonly windowId: WindowId;
@@ -1441,7 +1438,8 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       besideHint?: WindowId | null,
     ): World => {
       const withWs = ensureWorkspaceIn(w, wsName);
-      const ws = withWs.workspaces.get(wsName)!;
+      const ws = withWs.workspaces.get(wsName);
+      if (ws === undefined) return withWs;
       const members = tiledMembers(ws.tree);
       const beside =
         besideHint !== undefined && besideHint !== null && members.includes(besideHint)
@@ -1458,9 +1456,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         observedBesideFrame,
         effectiveSettings(config, wsName, insertionHost?.id).margins,
       );
-      const tree =
+      const tree: BspNode =
         beside === undefined || besideFrame === undefined || isEmptyTree(ws.tree)
-          ? ({ kind: "leaf", windowId } as BspNode)
+          ? { kind: "leaf", windowId }
           : (insertLeaf(ws.tree, beside, windowId, besideFrame) ?? ws.tree);
       return {
         ...withWs,
@@ -1614,8 +1612,8 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         for (const [id, frame] of plan.frames) {
           const obs = acc.observationOf(id);
           if (obs === undefined || obs.minimized || obs.hidden) continue;
-          if (!withinTolerance(obs.frame, frame as Frame, DEFAULT_TOLERANCE)) {
-            writes.push({ windowId: id, frame: frame as Frame });
+          if (!withinTolerance(obs.frame, frame, DEFAULT_TOLERANCE)) {
+            writes.push({ windowId: id, frame });
           }
         }
         return null;
@@ -1644,11 +1642,12 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           }
           return null;
         }
-        const memberIds = [...tiledMembers(ws.tree), ...[...ws.floating]].filter(
+        const memberIds = [...tiledMembers(ws.tree), ...ws.floating].filter(
           (id) => id !== EMPTY_TREE_LEAF && draft.windows.has(id),
         );
         for (const id of memberIds) {
-          const observation = draft.windows.get(id)!;
+          const observation = draft.windows.get(id);
+          if (observation === undefined) continue;
           if (
             observation.minimized ||
             observation.hidden ||
@@ -1676,7 +1675,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               break;
             }
           }
-          const corner = chosen ?? CORNER_PRIORITY[0]!;
+          const corner = chosen ?? "bottomLeft";
           const target = cornerTarget(display, corner, size, visibility);
           writes.push({
             windowId: id,
@@ -1784,7 +1783,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
      * Execute a compound command transactionally (see block comment above).
      */
     const executeCompound = (
-      trackedIds: readonly WindowId[] | (() => readonly WindowId[] | null),
+      trackedIds: TrackedWindowIds,
       reduce: (tools: {
         intents: CompoundIntent[];
         buffer: BufferedEvent[];
@@ -1800,7 +1799,8 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           // required affected window that is missing/unreadable fails
           // inventory_stale with ZERO mutations performed.
           const preFrames: CapturedFrame[] = [];
-          const capturedIds = typeof trackedIds === "function" ? trackedIds() : trackedIds;
+          const capturedIds =
+            trackedIds.kind === "deferred" ? trackedIds.resolve() : trackedIds.ids;
           if (capturedIds === null) return;
           for (const id of capturedIds) {
             const current = yield* Effect.either(adapter.getWindow(id));
@@ -1908,57 +1908,54 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               }));
               const focusId = focusAfter?.(built.draft) ?? null;
               const focusCapture = focusId === null ? undefined : captured.get(focusId);
-              const operations: PlatformBatchOperation[] = [
-                ...writeOperations,
-                ...(focusId !== null && focusCapture !== undefined
-                  ? [
-                      {
-                        operationId: `focus:${focusId}`,
-                        kind: "focus" as const,
-                        windowId: focusId,
-                        expectedIdentity: focusCapture.expected,
-                        dependsOn: writeOperations
-                          .filter((operation) => operation.windowId === focusId)
-                          .map((operation) => operation.operationId),
-                      },
-                    ]
-                  : []),
-              ];
+              const operations: PlatformBatchOperation[] = [...writeOperations];
+              if (focusId !== null && focusCapture !== undefined) {
+                operations.push({
+                  operationId: `focus:${focusId}`,
+                  kind: "focus",
+                  windowId: focusId,
+                  expectedIdentity: focusCapture.expected,
+                  dependsOn: writeOperations
+                    .filter((operation) => operation.windowId === focusId)
+                    .map((operation) => operation.operationId),
+                });
+              }
               const sequentialBatch = () =>
                 Effect.gen(function* () {
                   const results: PlatformBatchOperationResult[] = [];
                   for (const operation of operations) {
-                    const effect =
-                      operation.kind === "setFrame"
-                        ? adapter.setWindowFrame(
-                            operation.windowId,
-                            operation.frame,
-                            operation.expectedIdentity,
-                          )
-                        : adapter.focusWindow(operation.windowId, operation.expectedIdentity);
+                    if (operation.kind === "focus") {
+                      const outcome = yield* Effect.either(
+                        adapter.focusWindow(operation.windowId, operation.expectedIdentity),
+                      );
+                      results.push(
+                        outcome._tag === "Left"
+                          ? { operationId: operation.operationId, error: outcome.left }
+                          : { operationId: operation.operationId, ...outcome.right },
+                      );
+                      continue;
+                    }
                     const outcome = yield* Effect.either(
-                      effect as Effect.Effect<
-                        WriteObservation | PlatformFocusResult,
-                        PlatformError
-                      >,
+                      adapter.setWindowFrame(
+                        operation.windowId,
+                        operation.frame,
+                        operation.expectedIdentity,
+                      ),
                     );
                     if (outcome._tag === "Left") {
                       results.push({ operationId: operation.operationId, error: outcome.left });
-                    } else if (operation.kind === "focus") {
-                      results.push({ operationId: operation.operationId, ...outcome.right });
-                    } else {
-                      const write = outcome.right as WriteObservation;
-                      results.push({
-                        operationId: operation.operationId,
-                        requested: write.requested,
-                        observed: write.observed,
-                        stable: write.stable,
-                        stableReads: write.stableReads,
-                        ...(write.errorKind === undefined
-                          ? {}
-                          : { error: { code: write.errorKind } }),
-                      });
+                      continue;
                     }
+                    const write = outcome.right;
+                    const result: Mutable<PlatformBatchOperationResult> = {
+                      operationId: operation.operationId,
+                      requested: write.requested,
+                      observed: write.observed,
+                      stable: write.stable,
+                      stableReads: write.stableReads,
+                    };
+                    if (write.errorKind !== undefined) result.error = { code: write.errorKind };
+                    results.push(result);
                   }
                   return {
                     operations: results,
@@ -2201,7 +2198,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     const memberIdsOf = (wsName: WorkspaceName | null | undefined): WindowId[] => {
       const ws = wsName === null || wsName === undefined ? undefined : world.workspaces.get(wsName);
       if (ws === undefined) return [];
-      return [...tiledMembers(ws.tree), ...[...ws.floating]].filter(
+      return [...tiledMembers(ws.tree), ...ws.floating].filter(
         (id) => id !== EMPTY_TREE_LEAF && world.windows.has(id),
       );
     };
@@ -2322,7 +2319,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         }
         const candidates: DirectionalCandidate[] = [
           ...tiledMembers(workspace.tree),
-          ...[...workspace.floating],
+          ...workspace.floating,
         ]
           .filter((id) => id !== originId && id !== EMPTY_TREE_LEAF && world.windows.has(id))
           .map((id) => {
@@ -3022,19 +3019,20 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   : {
                       application,
                       role: initial.role,
-                      ...(initial.subrole !== undefined ? { subrole: initial.subrole } : {}),
                       contextFingerprint: topologyFingerprint,
                     };
+              if (key !== null && initial.subrole !== undefined) key.subrole = initial.subrole;
               let profileUpdated = false;
               if (key !== null) {
-                const verifiedConstraints = {
-                  ...(minWidthFinding.kind === "exact" ? { minWidth: minWidthFinding.value } : {}),
-                  ...(minHeightFinding.kind === "exact"
-                    ? { minHeight: minHeightFinding.value }
-                    : {}),
-                  ...(maxWidth.kind === "exact" ? { maxWidth: maxWidth.value } : {}),
-                  ...(maxHeight.kind === "exact" ? { maxHeight: maxHeight.value } : {}),
-                };
+                const verifiedConstraints: Mutable<Constraints> = {};
+                if (minWidthFinding.kind === "exact") {
+                  verifiedConstraints.minWidth = minWidthFinding.value;
+                }
+                if (minHeightFinding.kind === "exact") {
+                  verifiedConstraints.minHeight = minHeightFinding.value;
+                }
+                if (maxWidth.kind === "exact") verifiedConstraints.maxWidth = maxWidth.value;
+                if (maxHeight.kind === "exact") verifiedConstraints.maxHeight = maxHeight.value;
                 if (Object.keys(verifiedConstraints).length > 0) {
                   const previousLearning = learning;
                   const previousPersistedLearning = persistedLearning;
@@ -3168,26 +3166,30 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 ...occupantIdsOfDisplay(destDisplay),
               ]),
             );
-            yield* executeCompound(affected, ({ intents, buffer, base }) => (w0) => {
-              let w = moveWindowBetweenWorkspacesIn(w0, windowId, command.workspace, base);
-              // skhd parity (skhdrc: "…and follow it to the destination"):
-              // focus follows the moved window.
-              w = { ...w, focusedWorkspace: command.workspace };
-              buffer.push({ topic: "focus", payload: { workspace: command.workspace } });
-              if (destDisplay !== null) {
-                w = revealIn(w, intents, command.workspace, destDisplay);
-                // When the destination kept its OWN display elsewhere, the
-                // source stays visible with its remaining members — retile it.
-                if (
-                  sourceWs !== undefined &&
-                  sourceWs.name !== command.workspace &&
-                  destDisplay !== sourceDisplay
-                ) {
-                  intents.push({ kind: "retile", workspace: sourceWs.name });
-                }
-              }
-              return w;
-            });
+            yield* executeCompound(
+              { kind: "known", ids: affected },
+              ({ intents, buffer, base }) =>
+                (w0) => {
+                  let w = moveWindowBetweenWorkspacesIn(w0, windowId, command.workspace, base);
+                  // skhd parity (skhdrc: "…and follow it to the destination"):
+                  // focus follows the moved window.
+                  w = { ...w, focusedWorkspace: command.workspace };
+                  buffer.push({ topic: "focus", payload: { workspace: command.workspace } });
+                  if (destDisplay !== null) {
+                    w = revealIn(w, intents, command.workspace, destDisplay);
+                    // When the destination kept its OWN display elsewhere, the
+                    // source stays visible with its remaining members — retile it.
+                    if (
+                      sourceWs !== undefined &&
+                      sourceWs.name !== command.workspace &&
+                      destDisplay !== sourceDisplay
+                    ) {
+                      intents.push({ kind: "retile", workspace: sourceWs.name });
+                    }
+                  }
+                  return w;
+                },
+            );
             break;
           }
           case "moveFocusedWorkspaceToNextDisplay": {
@@ -3195,38 +3197,41 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             let selectedDisplayId: DisplayId | null = null;
             let capturedDisplayIds = "";
             yield* executeCompound(
-              () => {
-                const selected = focusedWorkspaceForCommand();
-                selectedWorkspaceName = selected?.name ?? null;
-                capturedDisplayIds = world.topology.displays
-                  .map((display) => display.id)
-                  .join("\0");
-                if (selected === undefined || world.topology.displays.length === 0) return [];
-                if (world.topology.displays.length === 1) return null;
-                const currentId =
-                  selected.visibleOnDisplay ??
-                  selected.pinnedDisplayOverride ??
-                  selected.preferredDisplay;
-                const currentIndex = world.topology.displays.findIndex(
-                  (display) => display.id === currentId,
-                );
-                selectedDisplayId =
-                  world.topology.displays[
-                    (currentIndex + 1 + world.topology.displays.length) %
-                      world.topology.displays.length
-                  ]!.id;
-                const displaced = [...world.workspaces.values()].find(
-                  (workspace) =>
-                    workspace.name !== selected.name &&
-                    workspace.visibleOnDisplay === selectedDisplayId,
-                );
-                return Array.from(
-                  new Set([
-                    ...memberIdsOf(selected.name),
-                    ...(displaced === undefined ? [] : memberIdsOf(displaced.name)),
-                    ...occupantIdsOfDisplay(selectedDisplayId),
-                  ]),
-                );
+              {
+                kind: "deferred",
+                resolve: () => {
+                  const selected = focusedWorkspaceForCommand();
+                  selectedWorkspaceName = selected?.name ?? null;
+                  capturedDisplayIds = world.topology.displays
+                    .map((display) => display.id)
+                    .join("\0");
+                  if (selected === undefined || world.topology.displays.length === 0) return [];
+                  if (world.topology.displays.length === 1) return null;
+                  const currentId =
+                    selected.visibleOnDisplay ??
+                    selected.pinnedDisplayOverride ??
+                    selected.preferredDisplay;
+                  const currentIndex = world.topology.displays.findIndex(
+                    (display) => display.id === currentId,
+                  );
+                  selectedDisplayId =
+                    world.topology.displays[
+                      (currentIndex + 1 + world.topology.displays.length) %
+                        world.topology.displays.length
+                    ]!.id;
+                  const displaced = [...world.workspaces.values()].find(
+                    (workspace) =>
+                      workspace.name !== selected.name &&
+                      workspace.visibleOnDisplay === selectedDisplayId,
+                  );
+                  return Array.from(
+                    new Set([
+                      ...memberIdsOf(selected.name),
+                      ...(displaced === undefined ? [] : memberIdsOf(displaced.name)),
+                      ...occupantIdsOfDisplay(selectedDisplayId),
+                    ]),
+                  );
+                },
               },
               ({ intents }) =>
                 (w0) => {
@@ -3362,33 +3367,37 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             // must verify before the tree commit becomes visible; on failure
             // or interruption nothing is committed and frames restore
             // identity-safely.
-            yield* executeCompound(memberIdsOf(ctx.workspaceName), ({ intents }) => (w0) => {
-              const wsNow = w0.workspaces.get(ctx.workspaceName)!;
-              const observedTargetFrame = w0.windows.get(neighborId)?.frame;
-              const insertionHost = insertionDisplay(w0, wsNow, observedTargetFrame);
-              const targetFrame = insertionTargetFrame(
-                w0,
-                wsNow,
-                observedTargetFrame,
-                effectiveSettings(config, ctx.workspaceName, insertionHost?.id).margins,
-              );
-              const tree = moveLeaf(
-                wsNow.tree,
-                ctx.originId,
-                neighborId,
-                command.direction,
-                targetFrame,
-              );
-              intents.push({ kind: "retile", workspace: ctx.workspaceName });
-              return {
-                ...w0,
-                workspaces: new Map(w0.workspaces).set(ctx.workspaceName, {
-                  ...wsNow,
-                  tree,
-                  lastFocusedMember: ctx.originId,
-                }),
-              };
-            });
+            yield* executeCompound(
+              { kind: "known", ids: memberIdsOf(ctx.workspaceName) },
+              ({ intents }) =>
+                (w0) => {
+                  const wsNow = w0.workspaces.get(ctx.workspaceName)!;
+                  const observedTargetFrame = w0.windows.get(neighborId)?.frame;
+                  const insertionHost = insertionDisplay(w0, wsNow, observedTargetFrame);
+                  const targetFrame = insertionTargetFrame(
+                    w0,
+                    wsNow,
+                    observedTargetFrame,
+                    effectiveSettings(config, ctx.workspaceName, insertionHost?.id).margins,
+                  );
+                  const tree = moveLeaf(
+                    wsNow.tree,
+                    ctx.originId,
+                    neighborId,
+                    command.direction,
+                    targetFrame,
+                  );
+                  intents.push({ kind: "retile", workspace: ctx.workspaceName });
+                  return {
+                    ...w0,
+                    workspaces: new Map(w0.workspaces).set(ctx.workspaceName, {
+                      ...wsNow,
+                      tree,
+                      lastFocusedMember: ctx.originId,
+                    }),
+                  };
+                },
+            );
             break;
           }
           case "manageWindow":
@@ -3420,23 +3429,27 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 ...memberIdsOf(command.workspace),
               ]),
             );
-            yield* executeCompound(affected, ({ intents, base }) => (w0) => {
-              const w = moveWindowBetweenWorkspacesIn(
-                w0,
-                command.windowId,
-                command.workspace,
-                base,
-              );
-              intents.push({ kind: "retile", workspace: command.workspace });
-              if (
-                sourceWs !== undefined &&
-                sourceWs.name !== command.workspace &&
-                sourceWs.visibleOnDisplay !== null
-              ) {
-                intents.push({ kind: "retile", workspace: sourceWs.name });
-              }
-              return w;
-            });
+            yield* executeCompound(
+              { kind: "known", ids: affected },
+              ({ intents, base }) =>
+                (w0) => {
+                  const w = moveWindowBetweenWorkspacesIn(
+                    w0,
+                    command.windowId,
+                    command.workspace,
+                    base,
+                  );
+                  intents.push({ kind: "retile", workspace: command.workspace });
+                  if (
+                    sourceWs !== undefined &&
+                    sourceWs.name !== command.workspace &&
+                    sourceWs.visibleOnDisplay !== null
+                  ) {
+                    intents.push({ kind: "retile", workspace: sourceWs.name });
+                  }
+                  return w;
+                },
+            );
             break;
           }
           case "focusWorkspace": {
@@ -3478,7 +3491,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 : (primaryDisplayIn(draft)?.id ?? null);
             };
             yield* executeCompound(
-              affected,
+              { kind: "known", ids: affected },
               ({ intents, buffer }) =>
                 (w0) => {
                   let w = ensureWorkspaceIn(w0, command.name);
@@ -3523,7 +3536,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               ]),
             );
             yield* executeCompound(
-              affected,
+              { kind: "known", ids: affected },
               ({ intents }) =>
                 (w0) => {
                   let w = ensureWorkspaceIn(w0, command.workspace);
@@ -3571,7 +3584,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   .filter((ws) => ws.visibleOnDisplay !== null)
                   .map((ws) => ws.name);
             const affected = Array.from(new Set(targets.flatMap((t) => memberIdsOf(t))));
-            yield* executeCompound(affected, ({ intents }) => (w0) => {
+            yield* executeCompound({ kind: "known", ids: affected }, ({ intents }) => (w0) => {
               for (const t of targets) intents.push({ kind: "retile", workspace: t });
               return w0;
             });
@@ -3750,10 +3763,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       readonly frames: ReadonlyMap<WindowId, Frame>;
     }
 
-    const planShutdownWrites = (): {
-      readonly writes: ShutdownWrite[];
-      readonly skipped: WindowId[];
-    } => {
+    const planShutdownWrites = () => {
       const layouts = new Map<string, ReadonlyMap<WindowId, Frame>>();
       const writes: ShutdownWrite[] = [];
       const skipped: WindowId[] = [];
@@ -3811,13 +3821,18 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 operationId: operations[index]!.operationId,
                 error,
               }),
-              onSuccess: (result): PlatformBatchOperationResult => ({
-                operationId: operations[index]!.operationId,
-                observed: result.observed,
-                requested: result.requested,
-                stable: result.stable,
-                ...(result.errorKind === undefined ? {} : { error: { code: result.errorKind } }),
-              }),
+              onSuccess: (result): PlatformBatchOperationResult => {
+                const operationResult: Mutable<PlatformBatchOperationResult> = {
+                  operationId: operations[index]!.operationId,
+                  observed: result.observed,
+                  requested: result.requested,
+                  stable: result.stable,
+                };
+                if (result.errorKind !== undefined) {
+                  operationResult.error = { code: result.errorKind };
+                }
+                return operationResult;
+              },
             },
           ),
         ),

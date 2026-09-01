@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { Schema } from "effect";
-import type { StateSnapshot } from "../src/commands.ts";
+import type { Command, StateSnapshot } from "../src/commands.ts";
 import {
   Frame,
   GeometryRequest,
@@ -9,6 +9,7 @@ import {
   Size,
   WindowObservation,
   windowIdentityFingerprint,
+  JsonValueSchema,
 } from "../src/schema.ts";
 import {
   decodeWireMessage,
@@ -17,8 +18,8 @@ import {
   wireResponseError,
   wireResponseOk,
   wireSnapshot,
+  type JsonValue,
 } from "../src/transport.ts";
-import type { WireRequest } from "../src/transport.ts";
 
 const decoderOf = <A, I>(schema: Schema.Schema<A, I, never>) => Schema.decodeUnknownSync(schema);
 
@@ -284,6 +285,16 @@ describe("wire message round-trips", () => {
     };
     const envelope = wireSnapshot(snapshot);
     expect(decodeWireMessage(encodeWireMessage(envelope))).toEqual(envelope);
+
+    const withUndefinedOptionals = wireSnapshot({
+      ...snapshot,
+      focusedWindow: undefined,
+      windows: [{ ...snapshot.windows[0]!, title: undefined }],
+    });
+    const encoded = encodeWireMessage(withUndefinedOptionals);
+    expect(encoded).not.toContain("focusedWindow");
+    expect(encoded).not.toContain('"title"');
+    expect(decodeWireMessage(encoded)).toEqual(envelope);
   });
 
   test("hand-written server frames decode", () => {
@@ -293,14 +304,71 @@ describe("wire message round-trips", () => {
   });
 });
 
+describe("JSON value boundaries", () => {
+  test("accepts nested JSON values", () => {
+    const value = { null: null, bool: true, number: 1.5, text: "x", nested: [1, { ok: false }] };
+    expect(decoderOf(JsonValueSchema)(value)).toEqual(value);
+    expect(wireResponseOk("json", value).data).toEqual(value);
+    expect(wireEvent(1, "diagnostic", value).payload).toEqual(value);
+  });
+
+  test.each([
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    undefined,
+    () => undefined,
+    Symbol("non-json"),
+    1n,
+    { omitted: undefined },
+  ])("rejects non-JSON value %s", (value) => {
+    expect(() => decoderOf(JsonValueSchema)(value)).toThrow();
+    expect(() => wireResponseOk("json", value)).toThrow();
+    expect(() => wireEvent(1, "diagnostic", value)).toThrow();
+  });
+
+  test.each([new Date("2026-01-01"), new (class Example {})()])(
+    "rejects non-plain object %s directly and when nested",
+    (value) => {
+      expect(() => decoderOf(JsonValueSchema)(value)).toThrow();
+      expect(() => decoderOf(JsonValueSchema)({ nested: [value] })).toThrow();
+      expect(() =>
+        encodeWireMessage({ v: 1, type: "response", id: "json", ok: true, data: value }),
+      ).toThrow();
+    },
+  );
+
+  test.each([
+    [undefined],
+    { nested: [undefined] },
+    { value: Number.NaN },
+    { value: Number.POSITIVE_INFINITY },
+    { value: new Date("2026-01-01") },
+    { value: new (class Example {})() },
+  ])("encodeWireMessage rejects non-serializable value %s", (data) => {
+    expect(() =>
+      encodeWireMessage({ v: 1, type: "response", id: "json", ok: true, data }),
+    ).toThrow();
+  });
+
+  test("accepts null-prototype dictionaries", () => {
+    const value: Record<string, JsonValue> = Object.create(null);
+    value.nested = [1, { ok: true }];
+    expect(decoderOf(JsonValueSchema)(value)).toEqual(value);
+  });
+});
+
 describe("hotkey parity commands — wire round-trips (bean wm-pmys)", () => {
-  const requestEnvelope = (command: Record<string, unknown>): string =>
+  const requestEnvelope = (command: Command): string =>
     encodeWireMessage({
       v: 1,
       type: "request",
       id: "req-hotkey",
-      command: command as unknown as WireRequest["command"],
+      command,
     });
+
+  const rawRequestEnvelope = (command: JsonValue): string =>
+    JSON.stringify({ v: 1, type: "request", id: "req-hotkey", command });
 
   test("every new hotkey command survives a wire encode/decode round-trip", () => {
     const commands = [
@@ -309,7 +377,7 @@ describe("hotkey parity commands — wire round-trips (bean wm-pmys)", () => {
       { type: "moveFocusedWorkspaceToNextDisplay" },
       { type: "focusDirection", direction: "left" },
       { type: "moveDirection", direction: "up" },
-    ];
+    ] satisfies readonly Command[];
     for (const command of commands) {
       expect(decodeWireMessage(requestEnvelope(command))).toEqual({
         v: 1,
@@ -323,20 +391,22 @@ describe("hotkey parity commands — wire round-trips (bean wm-pmys)", () => {
   test("direction literals outside the closed union are rejected", () => {
     for (const direction of ["diagonal", "LEFT", "", "north"]) {
       expect(() =>
-        decodeWireMessage(requestEnvelope({ type: "focusDirection", direction })),
+        decodeWireMessage(rawRequestEnvelope({ type: "focusDirection", direction })),
       ).toThrow();
       expect(() =>
-        decodeWireMessage(requestEnvelope({ type: "moveDirection", direction })),
+        decodeWireMessage(rawRequestEnvelope({ type: "moveDirection", direction })),
       ).toThrow();
     }
   });
 
   test("missing or excess fields are rejected on the wire", () => {
-    expect(() => decodeWireMessage(requestEnvelope({ type: "togglePause", extra: 1 }))).toThrow();
     expect(() =>
-      decodeWireMessage(requestEnvelope({ type: "moveFocusedWindowToWorkspace" })),
+      decodeWireMessage(rawRequestEnvelope({ type: "togglePause", extra: 1 })),
     ).toThrow();
-    expect(() => decodeWireMessage(requestEnvelope({ type: "focusDirection" }))).toThrow();
+    expect(() =>
+      decodeWireMessage(rawRequestEnvelope({ type: "moveFocusedWindowToWorkspace" })),
+    ).toThrow();
+    expect(() => decodeWireMessage(rawRequestEnvelope({ type: "focusDirection" }))).toThrow();
   });
 });
 
@@ -365,16 +435,13 @@ describe("wire decode rejections", () => {
     expect(() => decodeWireMessage('{"v":1,"type":"snapshot"}')).toThrow();
   });
 
-  test("Schema.Unknown envelope fields are currently optional (transport gap)", () => {
-    const okMissingData = decodeWireMessage('{"v":1,"type":"response","id":"r1","ok":true}');
-    expect("data" in okMissingData).toBe(true);
-    expect((okMissingData as { data?: unknown }).data).toBeUndefined();
-
-    const eventMissingPayload = decodeWireMessage('{"v":1,"type":"event","seq":0,"topic":"t"}') as {
-      payload?: unknown;
-    };
-    expect(eventMissingPayload.payload).toBeUndefined();
-
+  test("unknown envelope fields preserve their established decode behavior", () => {
+    const response = decodeWireMessage('{"v":1,"type":"response","id":"r1","ok":true}');
+    expect(response).toHaveProperty("data", undefined);
+    expect(decodeWireMessage(encodeWireMessage(response))).toEqual(response);
+    const event = decodeWireMessage('{"v":1,"type":"event","seq":0,"topic":"t"}');
+    expect(event).toHaveProperty("payload", undefined);
+    expect(decodeWireMessage(encodeWireMessage(event))).toEqual(event);
     expect(() =>
       decodeWireMessage('{"v":1,"type":"response","id":"r1","ok":true,"data":{"x":1}}'),
     ).not.toThrow();

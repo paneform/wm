@@ -280,7 +280,7 @@ export function aggregateBounds(
   if (node.kind === "leaf") {
     const c = resolve(node.windowId);
     if (c === undefined) return {};
-    return axis === "vertical" ? { ...(c.width ?? {}) } : { ...(c.height ?? {}) };
+    return axis === "vertical" ? { ...c.width } : { ...c.height };
   }
   const a = aggregateBounds(node.first, axis, gap, resolve);
   const b = aggregateBounds(node.second, axis, gap, resolve);
@@ -506,7 +506,7 @@ function overflowFrames(
     const mins = aggregateBounds(n, n.axis, gap, resolve);
     const required = mins.min;
     if (required !== undefined && current[comp] < required) {
-      return { ...current, [comp]: required } as Frame;
+      return comp === "width" ? { ...current, width: required } : { ...current, height: required };
     }
     return current;
   };

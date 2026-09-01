@@ -23,9 +23,8 @@ export const pruneDeadMembership: Rule = {
         if (!world.windows.has(id)) dead.add(id);
       }
     }
-    return dedupeActions(
-      [...dead].map((windowId) => ({ kind: "removeWindow", windowId }) as Action),
-    );
+    const actions: Action[] = [...dead].map((windowId) => ({ kind: "removeWindow", windowId }));
+    return dedupeActions(actions);
   },
 };
 

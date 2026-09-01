@@ -64,10 +64,10 @@ const STABLE_READS_TO_STOP = 3;
 // between component writes; the fake settles synchronously instead.
 
 /** Fraction of remaining distance covered per settle read, by kind. */
-const ANIMATION_FRACTIONS: Record<string, number> = {
+const ANIMATION_FRACTIONS = {
   animated: 0.35,
   slowAnimated: 0.06,
-};
+} satisfies Partial<Record<PersonalityKind, number>>;
 
 const ANIMATED_KINDS: readonly string[] = ["animated", "slowAnimated"];
 
@@ -132,7 +132,7 @@ export function offscreenSliverTarget(
   requested: Frame,
   displays: readonly DisplayObservation[],
   visibilityFor: (display: DisplayObservation) => { horizontal: number; vertical: number },
-): { frame: Frame; displayId: DisplayId } {
+) {
   const centerX = requested.x + requested.width / 2;
   const centerY = requested.y + requested.height / 2;
   let host = displays[0];
@@ -156,7 +156,11 @@ export function offscreenSliverTarget(
       host = display;
     }
   }
-  if (host === undefined) return { frame: { ...requested }, displayId: "" };
+  if (host === undefined)
+    return { frame: { ...requested }, displayId: "" } satisfies {
+      frame: Frame;
+      displayId: DisplayId;
+    };
   const limits = visibilityFor(host);
   const toLeft = centerX < host.frame.x + host.frame.width / 2;
   const toTop = centerY < host.frame.y + host.frame.height / 2;
@@ -166,7 +170,10 @@ export function offscreenSliverTarget(
   const y = toTop
     ? host.frame.y - requested.height + limits.vertical
     : host.frame.y + host.frame.height - limits.vertical;
-  return { frame: { x, y, width: requested.width, height: requested.height }, displayId: host.id };
+  return {
+    frame: { x, y, width: requested.width, height: requested.height },
+    displayId: host.id,
+  } satisfies { frame: Frame; displayId: DisplayId };
 }
 
 /** Work-area pull-back: the OS keeps some apps' frames inside the usable area. */
@@ -297,13 +304,9 @@ const DEFAULT_WINDOW: FakeWindowSpec = {
 };
 
 const mergeDefined = <T extends object>(base: T, patch: Partial<T> | undefined): T => {
-  const out = { ...base };
-  if (patch !== undefined) {
-    for (const [key, value] of Object.entries(patch)) {
-      if (value !== undefined) (out as Record<string, unknown>)[key] = value;
-    }
-  }
-  return out;
+  if (patch === undefined) return { ...base };
+  const definedEntries = Object.entries(patch).filter((entry) => entry[1] !== undefined);
+  return { ...base, ...Object.fromEntries(definedEntries) };
 };
 
 /** Builder: display spec with defaults (primary 1512×982, notch-style work area). */
@@ -324,7 +327,8 @@ const anchorOf = (p: FakePersonality): "topleft" | "center" =>
 
 const animationFractionOf = (p: FakePersonality): number => {
   if (p.settlePolls !== undefined && p.settlePolls > 0) return 1 / p.settlePolls;
-  return ANIMATION_FRACTIONS[p.kind] ?? 1;
+  if (p.kind === "animated" || p.kind === "slowAnimated") return ANIMATION_FRACTIONS[p.kind];
+  return 1;
 };
 
 const platformError = (code: PlatformError["code"], detail: string): PlatformError =>
@@ -440,6 +444,23 @@ interface SimWindow {
   replacementPending: boolean;
   replacementDescriptor?: { samePid?: boolean; subrole?: string | undefined } | undefined;
   initialFrame: Frame;
+}
+
+interface MutableWindowObservation {
+  id: WindowId;
+  pid: number;
+  bundleId?: string;
+  executablePath?: string;
+  title?: string;
+  role: string;
+  subrole?: string;
+  frame: Frame;
+  minimized: boolean;
+  hidden: boolean;
+  fullscreen: boolean;
+  focused: boolean;
+  capabilities: WindowObservation["capabilities"];
+  constraints?: Constraints;
 }
 
 export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
@@ -564,22 +585,25 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
     }
   };
 
-  const observationOf = (w: SimWindow): WindowObservation => ({
-    id: w.id,
-    pid: w.pid,
-    ...(w.bundleId !== undefined ? { bundleId: w.bundleId } : {}),
-    ...(w.executablePath !== undefined ? { executablePath: w.executablePath } : {}),
-    title: w.title,
-    role: w.role,
-    ...(w.subrole != null ? { subrole: w.subrole } : {}),
-    frame: { ...w.frame },
-    minimized: w.minimized,
-    hidden: w.hidden,
-    fullscreen: w.fullscreen,
-    focused: w.id === (deferFocus ? visibleFocusedId : focusedId),
-    capabilities: capabilitiesOf(w),
-    ...(w.constraints !== undefined ? { constraints: w.constraints } : {}),
-  });
+  const observationOf = (w: SimWindow): WindowObservation => {
+    const observation: MutableWindowObservation = {
+      id: w.id,
+      pid: w.pid,
+      title: w.title,
+      role: w.role,
+      frame: { ...w.frame },
+      minimized: w.minimized,
+      hidden: w.hidden,
+      fullscreen: w.fullscreen,
+      focused: w.id === (deferFocus ? visibleFocusedId : focusedId),
+      capabilities: capabilitiesOf(w),
+    };
+    if (w.bundleId !== undefined) observation.bundleId = w.bundleId;
+    if (w.executablePath !== undefined) observation.executablePath = w.executablePath;
+    if (w.subrole !== undefined && w.subrole !== null) observation.subrole = w.subrole;
+    if (w.constraints !== undefined) observation.constraints = w.constraints;
+    return observation;
+  };
 
   const resolveWindow = (id: WindowId): SimWindow | undefined => windows.get(id);
 
@@ -604,7 +628,12 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
    * virtual read, stop early on three identical reads or budget exhaustion.
    * Runs synchronously — no clock advancement required by callers.
    */
-  const settleWindow = (w: SimWindow): { frame: Frame; stable: boolean } => {
+  interface SettledWindow {
+    frame: Frame;
+    stable: boolean;
+  }
+
+  const settleWindow = (w: SimWindow): SettledWindow => {
     let previous = JSON.stringify(w.frame);
     let stableReads = 0;
     for (let read = 0; read < SETTLE_SAMPLES; read++) {
@@ -913,42 +942,54 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
               phase: "settle",
               active: activeBatchOperations,
             });
-            const effect =
-              operation.kind === "setFrame"
-                ? setWindowFrame(operation.windowId, operation.frame, operation.expectedIdentity)
-                : Effect.gen(function* () {
-                    const window = resolveWindow(operation.windowId);
-                    if (window === undefined)
-                      return yield* failWith("not_found", `unknown window ${operation.windowId}`);
-                    if (!matchesExpected(window, operation.expectedIdentity)) {
-                      return yield* failWith("stale", "window identity changed before focus");
-                    }
-                    return yield* focusWindow(operation.windowId);
-                  });
-            const outcome = yield* Effect.either(
-              effect as Effect.Effect<WriteObservation | PlatformFocusResult, PlatformError>,
-            );
-            activeBatchOperations -= 1;
-            batchEvents.push({
-              operationId: operation.operationId,
-              phase: "finish",
-              active: activeBatchOperations,
-            });
-            if (outcome._tag === "Left")
-              wave.push({ operationId: operation.operationId, error: outcome.left });
-            else if (operation.kind === "focus") {
-              const focus = outcome.right as unknown as PlatformFocusResult;
+            if (operation.kind === "focus") {
+              const outcome = yield* Effect.either(
+                Effect.gen(function* () {
+                  const window = resolveWindow(operation.windowId);
+                  if (window === undefined)
+                    return yield* failWith("not_found", `unknown window ${operation.windowId}`);
+                  if (!matchesExpected(window, operation.expectedIdentity)) {
+                    return yield* failWith("stale", "window identity changed before focus");
+                  }
+                  return yield* focusWindow(operation.windowId);
+                }),
+              );
+              activeBatchOperations -= 1;
+              batchEvents.push({
+                operationId: operation.operationId,
+                phase: "finish",
+                active: activeBatchOperations,
+              });
+              if (outcome._tag === "Left") {
+                wave.push({ operationId: operation.operationId, error: outcome.left });
+                continue;
+              }
+              const focus: PlatformFocusResult = outcome.right;
               const rejected = rejectedBatchFocus.get(operation.windowId);
               rejectedBatchFocus.delete(operation.windowId);
               wave.push({
                 operationId: operation.operationId,
                 ...focus,
-                ...(rejected !== undefined
-                  ? { error: platformError(rejected, `simulated ${rejected} after AX focus`) }
-                  : {}),
+                error:
+                  rejected === undefined
+                    ? undefined
+                    : platformError(rejected, `simulated ${rejected} after AX focus`),
               });
             } else {
-              const write = outcome.right as unknown as WriteObservation;
+              const outcome = yield* Effect.either(
+                setWindowFrame(operation.windowId, operation.frame, operation.expectedIdentity),
+              );
+              activeBatchOperations -= 1;
+              batchEvents.push({
+                operationId: operation.operationId,
+                phase: "finish",
+                active: activeBatchOperations,
+              });
+              if (outcome._tag === "Left") {
+                wave.push({ operationId: operation.operationId, error: outcome.left });
+                continue;
+              }
+              const write: WriteObservation = outcome.right;
               const rejected = rejectedBatchWrites.get(operation.windowId);
               rejectedBatchWrites.delete(operation.windowId);
               wave.push({
@@ -957,9 +998,10 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
                 observed: write.observed,
                 stable: write.stable,
                 stableReads: write.stable ? STABLE_READS_TO_STOP : 0,
-                ...(rejected === undefined
-                  ? {}
-                  : { error: platformError(rejected, `simulated ${rejected} after write`) }),
+                error:
+                  rejected === undefined
+                    ? undefined
+                    : platformError(rejected, `simulated ${rejected} after write`),
               });
             }
           }
@@ -1010,15 +1052,12 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
     const window: SimWindow = {
       id,
       pid: spec.pid ?? nextPid,
-      ...(bundleId !== undefined ? { bundleId } : {}),
       executablePath:
         spec.executablePath ??
         `/Applications/${(bundleId ?? "sim.app").split(".").pop()}/MacOS/sim`,
       title: spec.title ?? `Sim Window ${numberForTitle}`,
       role: spec.role ?? "AXWindow",
-      ...(spec.subrole !== undefined ? { subrole: spec.subrole } : {}),
       personality: spec.personality ?? { kind: "normal" },
-      ...(spec.constraints !== undefined ? { constraints: spec.constraints } : {}),
       frame,
       target: null,
       minimized: spec.minimized ?? false,
@@ -1027,6 +1066,9 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
       replacementPending: false,
       initialFrame: { ...frame },
     };
+    if (bundleId !== undefined) window.bundleId = bundleId;
+    if (spec.subrole !== undefined) window.subrole = spec.subrole;
+    if (spec.constraints !== undefined) window.constraints = spec.constraints;
     nextPid += 1;
     windows.set(id, window);
     if (focusedId === null && !window.minimized) {
@@ -1085,10 +1127,10 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
     // `null` models a replacement whose subrole is explicitly ABSENT — the
     // descriptor drops the key so SimWindow keeps undefined (== null view).
     const o = opts ?? {};
-    w.replacementDescriptor = {
-      ...(o.samePid !== undefined ? { samePid: o.samePid } : {}),
-      ...(o.subrole !== undefined && o.subrole !== null ? { subrole: o.subrole } : {}),
-    };
+    const descriptor: NonNullable<SimWindow["replacementDescriptor"]> = {};
+    if (o.samePid !== undefined) descriptor.samePid = o.samePid;
+    if (o.subrole !== undefined && o.subrole !== null) descriptor.subrole = o.subrole;
+    w.replacementDescriptor = descriptor;
   };
 
   const connectDisplay = (spec: FakeDisplaySpec): void => {

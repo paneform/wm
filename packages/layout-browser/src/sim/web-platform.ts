@@ -59,10 +59,10 @@ export interface SimPersonality {
   animationFraction?: number | undefined;
 }
 
-const ANIMATION_FRACTIONS: Record<string, number> = {
-  animated: 0.35,
-  slowAnimated: 0.06,
-};
+const ANIMATION_FRACTIONS = new Map<PersonalityKind, number>([
+  ["animated", 0.35],
+  ["slowAnimated", 0.06],
+]);
 
 const ANIMATED_KINDS: readonly string[] = ["animated", "slowAnimated"];
 
@@ -168,6 +168,20 @@ interface SimWindow {
   initialFrame: Frame;
 }
 
+interface SimVisibility {
+  horizontal: number;
+  vertical: number;
+}
+
+interface OffscreenSliverTarget {
+  frame: Frame;
+  displayId: DisplayId;
+}
+
+type MutableWindowObservation = {
+  -readonly [Key in keyof WindowObservation]: WindowObservation[Key];
+};
+
 const DEFAULT_VISIBILITY = { horizontal: 1, vertical: 52 } as const;
 
 /** Adapter-side settle budget (sidecar emulation: ≤36 samples). */
@@ -226,8 +240,8 @@ const intersectsArea = (a: Frame, b: Frame): boolean =>
 export function offscreenSliverTarget(
   requested: Frame,
   displays: readonly DisplayObservation[],
-  visibilityFor: (display: DisplayObservation) => { horizontal: number; vertical: number },
-): { frame: Frame; displayId: DisplayId } {
+  visibilityFor: (display: DisplayObservation) => SimVisibility,
+): OffscreenSliverTarget {
   const centerX = requested.x + requested.width / 2;
   const centerY = requested.y + requested.height / 2;
   let host = displays[0];
@@ -413,28 +427,31 @@ export function createWebPlatformSim(options: WebPlatformSimOptions = {}): WebPl
     }
   };
 
-  const observationOf = (w: SimWindow): WindowObservation => ({
-    id: w.id,
-    pid: w.pid,
-    ...(w.bundleId !== undefined ? { bundleId: w.bundleId } : {}),
-    ...(w.executablePath !== undefined ? { executablePath: w.executablePath } : {}),
-    title: w.title,
-    role: w.role,
-    ...(w.subrole !== undefined ? { subrole: w.subrole } : {}),
-    frame: { ...w.frame },
-    minimized: w.minimized,
-    hidden: w.hidden,
-    fullscreen: w.fullscreen,
-    focused: w.id === focusedId,
-    capabilities: capabilitiesOf(w),
-  });
+  const observationOf = (w: SimWindow): WindowObservation => {
+    const observation: MutableWindowObservation = {
+      id: w.id,
+      pid: w.pid,
+      title: w.title,
+      role: w.role,
+      frame: { ...w.frame },
+      minimized: w.minimized,
+      hidden: w.hidden,
+      fullscreen: w.fullscreen,
+      focused: w.id === focusedId,
+      capabilities: capabilitiesOf(w),
+    };
+    if (w.bundleId !== undefined) observation.bundleId = w.bundleId;
+    if (w.executablePath !== undefined) observation.executablePath = w.executablePath;
+    if (w.subrole !== undefined) observation.subrole = w.subrole;
+    return observation;
+  };
 
   const resolveWindow = (id: WindowId): SimWindow | undefined => windows.get(id);
 
   // --- animation (read-driven; deterministic, zero timers) ---
 
   const animationFractionOf = (w: SimWindow): number =>
-    w.personality.animationFraction ?? ANIMATION_FRACTIONS[w.personality.kind] ?? 1;
+    w.personality.animationFraction ?? ANIMATION_FRACTIONS.get(w.personality.kind) ?? 1;
 
   const advanceAnimation = (w: SimWindow): void => {
     if (w.target === null) return;
@@ -665,11 +682,9 @@ export function createWebPlatformSim(options: WebPlatformSimOptions = {}): WebPl
     const window: SimWindow = {
       id,
       pid: spec.pid ?? nextPid++,
-      ...(spec.bundleId !== undefined ? { bundleId: spec.bundleId } : {}),
       executablePath: `/Applications/${(spec.bundleId ?? "sim.app").split(".").pop()}/MacOS/sim`,
       title: spec.title ?? `Sim Window ${nextWindowNumber - 1}`,
       role: spec.role ?? "AXWindow",
-      ...(spec.subrole !== undefined ? { subrole: spec.subrole } : {}),
       personality: spec.personality ?? { kind: "normal" },
       frame,
       target: null,
@@ -680,6 +695,8 @@ export function createWebPlatformSim(options: WebPlatformSimOptions = {}): WebPl
       replacementPending: false,
       initialFrame: { ...frame },
     };
+    if (spec.bundleId !== undefined) window.bundleId = spec.bundleId;
+    if (spec.subrole !== undefined) window.subrole = spec.subrole;
     windows.set(id, window);
     if (focusedId === null && !window.minimized) focusedId = id;
     dispatch({ kind: "window_added", window: observationOf(window) });

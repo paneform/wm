@@ -28,13 +28,16 @@ import {
   type SceneExtras,
 } from "../src/ui/canvas.ts";
 import {
+  RECORDING_STORE_KEY,
   SCENARIOS,
+  ScenarioRecorder,
   ScenarioRunner,
   replayEntries,
   scenarioById,
   type ScenarioContext,
   type ScenarioExecuteOutcome,
 } from "../src/ui/scenarios.ts";
+import { isCommandTimeout } from "../src/host.ts";
 
 // Headless sanity suite — docs/rewrite/web-renderer.md §Implementation notes:
 // sim platform determinism, scenario replay stability, DOM-free canvas math.
@@ -578,10 +581,62 @@ describe("scenarios", () => {
     expect(await run()).toEqual(await run());
   });
 
+  it.each(['quoted"ref', "back\\slash", "control\n\tref", ""])(
+    "substitutes the decoded window ref %j in commands",
+    async (ref) => {
+      const sim = createWebPlatformSim({ seed: 1 });
+      const commands: Command[] = [];
+      const runner = new ScenarioRunner(
+        {
+          sim,
+          execute: async (command) => {
+            commands.push(command);
+            return { ok: true, detail: "ok" };
+          },
+        },
+        new Map([[ref, `window-id:${ref}`]]),
+      );
+
+      await runner.apply({
+        kind: "command",
+        command: { type: "focusWindow", windowId: `@w:${ref}` },
+      });
+
+      expect(commands).toEqual([{ type: "focusWindow", windowId: `window-id:${ref}` }]);
+    },
+  );
+
+  it("loads valid recording siblings and preserves malformed siblings when saving", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    const valid = [{ t: 0, kind: "command", command: { type: "retile" } }];
+    const malformed = [{ t: "legacy", kind: "command", command: { type: "retile" } }];
+    values.set(RECORDING_STORE_KEY, JSON.stringify({ valid, malformed }));
+
+    expect(ScenarioRecorder.listNames()).toEqual(["valid"]);
+    expect(ScenarioRecorder.load("valid")).toEqual(valid);
+    expect(ScenarioRecorder.load("malformed")).toBeNull();
+
+    const recorder = new ScenarioRecorder();
+    recorder.start();
+    recorder.record({ kind: "command", command: { type: "retile" } });
+    recorder.save("new");
+
+    const saved = JSON.parse(values.get(RECORDING_STORE_KEY)!);
+    expect(saved.malformed).toEqual(malformed);
+    expect(ScenarioRecorder.load("valid")).toEqual(valid);
+    expect(ScenarioRecorder.load("new")).toHaveLength(1);
+    Reflect.deleteProperty(globalThis, "localStorage");
+  });
+
   it("recorded entries replay deterministically on fresh instances", async () => {
     const recorded = [
       { t: 0, kind: "scenario" as const, scenarioId: "topology-churn" },
-      { t: 5, kind: "command" as const, command: { type: "retile" } as Command },
+      { t: 5, kind: "command" as const, command: { type: "retile" } satisfies Command },
       { t: 9, kind: "scenario" as const, scenarioId: "disconnect-second-display" },
       { t: 12, kind: "scenario" as const, scenarioId: "animated-settling" },
     ];
@@ -600,6 +655,19 @@ describe("scenarios", () => {
     };
 
     expect(await replayOnce()).toEqual(await replayOnce());
+  });
+});
+
+describe("command timeout recognition", () => {
+  it("accepts a structurally valid tagged timeout", () => {
+    expect(isCommandTimeout({ _tag: "CommandError", code: "timeout", message: "later" })).toBe(
+      true,
+    );
+  });
+
+  it("rejects malformed command errors", () => {
+    expect(isCommandTimeout({ _tag: "CommandError", code: "timeout" })).toBe(false);
+    expect(isCommandTimeout({ _tag: "CommandError", code: "other", message: "later" })).toBe(false);
   });
 });
 
