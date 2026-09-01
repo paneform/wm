@@ -5,7 +5,7 @@ thin Swift native host; those tests require macOS but do not mutate managed wind
 Engine platform behavior is emulated by fakes implementing
 `docs/rewrite/platform-contract.md`.
 
-## Fake platform (`packages/engine/test/helpers/fake-platform.ts`)
+## Fake platform (`packages/layout/test/helpers/fake-platform.ts`)
 
 A deterministic simulator with scripted per-window "app personalities". Owned by the
 TEST agent. It must emulate these documented macOS behaviors (from ground truth +

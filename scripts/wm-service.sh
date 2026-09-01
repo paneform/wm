@@ -2,13 +2,18 @@
 set -euo pipefail
 umask 077
 
-LABEL="com.allandeutsch.wm"
+LABEL="com.paneform.wm"
 DOMAIN="gui/$(id -u)"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+LEGACY_LABEL="com.allandeutsch.wm"
+LEGACY_PLIST="$HOME/Library/LaunchAgents/$LEGACY_LABEL.plist"
+LEGACY_APP="$HOME/.local/libexec/wm/WM.app"
+LEGACY_BRIDGE_IDENTITY="$LEGACY_LABEL.sketchybar"
+LEGACY_BRIDGE_IDENTITY_PLIST="$HOME/Library/LaunchAgents/$LEGACY_BRIDGE_IDENTITY.plist"
 LEGACY_BRIDGE_LABEL="$LABEL.sketchybar"
 LEGACY_BRIDGE_PLIST="$HOME/Library/LaunchAgents/$LEGACY_BRIDGE_LABEL.plist"
 CONFIG="${WM_CONFIG:-$HOME/.config/wm/config.jsonc}"
-SIDECAR="${WM_NATIVE_HOST:-$HOME/.local/libexec/wm/WM.app/Contents/MacOS/wm}"
+SIDECAR="${WM_NATIVE_HOST:-$HOME/.local/libexec/wm/wm.app/Contents/MacOS/wm}"
 STATE="${XDG_STATE_HOME:-$HOME/.local/state}/wm"
 SERVICE_PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
@@ -41,6 +46,27 @@ write_plist() {
   plutil -lint "$temporary" >/dev/null
   chmod 600 "$temporary"
   mv "$temporary" "$PLIST"
+}
+
+migrate_legacy_identity() {
+  local current_app="${SIDECAR%/Contents/MacOS/wm}" found=false legacy_app_is_distinct=false
+  if [[ -e "$LEGACY_APP" ]] && { [[ ! -e "$current_app" ]] || [[ ! "$LEGACY_APP" -ef "$current_app" ]]; }; then
+    legacy_app_is_distinct=true
+  fi
+  if [[ -e "$LEGACY_PLIST" || -e "$LEGACY_BRIDGE_IDENTITY_PLIST" || "$legacy_app_is_distinct" == true ]] ||
+    launchctl print "$DOMAIN/$LEGACY_LABEL" >/dev/null 2>&1 ||
+    launchctl print "$DOMAIN/$LEGACY_BRIDGE_IDENTITY" >/dev/null 2>&1; then
+    found=true
+  fi
+  [[ "$found" == true ]] || return 0
+
+  launchctl bootout "$DOMAIN/$LEGACY_LABEL" >/dev/null 2>&1 || true
+  launchctl bootout "$DOMAIN/$LEGACY_BRIDGE_IDENTITY" >/dev/null 2>&1 || true
+  rm -f "$LEGACY_PLIST" "$LEGACY_BRIDGE_IDENTITY_PLIST"
+  if [[ "$legacy_app_is_distinct" == true ]]; then rm -rf "$LEGACY_APP"; fi
+  tccutil reset Accessibility "$LEGACY_LABEL" >/dev/null 2>&1 || true
+  tccutil reset ScreenCapture "$LEGACY_LABEL" >/dev/null 2>&1 || true
+  tccutil reset ListenEvent "$LEGACY_LABEL" >/dev/null 2>&1 || true
 }
 
 graceful_stop() {
@@ -77,6 +103,7 @@ case "${1:-}" in
       exit 1
     }
     [[ -r "$CONFIG" ]] || { echo "config not found: $CONFIG" >&2; exit 1; }
+    migrate_legacy_identity
     write_plist
     unload
     rm -f "$LEGACY_BRIDGE_PLIST"

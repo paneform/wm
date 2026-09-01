@@ -1,0 +1,61 @@
+{
+  "name": "@paneform/layout",
+  "version": "0.1.0-alpha.0",
+  "description": "Portable window layout and workspace policy engine",
+  "keywords": [
+    "layout",
+    "tiling",
+    "window-manager"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/paneform/wm.git",
+    "directory": "packages/layout"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing.d.ts",
+        "import": "./dist/testing.js"
+      }
+    },
+    "access": "public"
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "pnpm run clean && tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build",
+    "prepublishOnly": "node ../../scripts/require-pnpm-publish.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "oxlint src test vitest.config.ts",
+    "lint:fix": "oxlint --fix src test vitest.config.ts",
+    "format": "oxfmt src test vitest.config.ts package.json tsconfig.json tsconfig.build.json .oxlintrc.json .oxfmtrc.json",
+    "format:check": "oxfmt --check src test vitest.config.ts package.json tsconfig.json tsconfig.build.json .oxlintrc.json .oxfmtrc.json"
+  },
+  "dependencies": {
+    "effect": "3.22.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "fast-check": "^4.9.0",
+    "oxfmt": "0.65.0",
+    "oxlint": "1.80.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.11"
+  }
+}

@@ -2,8 +2,8 @@
 
 Defines the ONLY boundary between engine and any host system. Three implementations
 exist: the macOS sidecar host (`packages/platform-macos`), the headless test fake
-(`packages/engine/test/helpers/fake-platform.ts`), and the renderer simulation
-(`packages/renderer`). All must behave identically at this interface.
+(`packages/layout/test/helpers/fake-platform.ts`), and the renderer simulation
+(`packages/layout-browser`). All must behave identically at this interface.
 
 ## PlatformAdapter interface (engine-side, TypeScript)
 

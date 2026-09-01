@@ -12,14 +12,14 @@ flowchart LR
     SK["Sketchybar bridge"]
   end
 
-  subgraph NodeHost["@wm/node-host"]
+  subgraph NodeHost["@paneform/wm"]
     WS["Loopback WebSocket server"]
     CH["Command handler"]
     CFG["JSONC config source"]
     OBS["Observation file store"]
   end
 
-  subgraph Core["@wm/engine"]
+  subgraph Core["@paneform/layout"]
     CMD["Command bus"]
     ENG["Engine and World"]
     RULES["Ordered policy rules"]
@@ -30,7 +30,7 @@ flowchart LR
     EVENTS["Domain event bus"]
   end
 
-  subgraph MacAdapter["@wm/platform-macos"]
+  subgraph MacAdapter["@paneform/wm-macos"]
     ADAPTER["PlatformAdapter"]
     IPC["NDJSON request correlation"]
   end
@@ -134,11 +134,11 @@ sequenceDiagram
 
 ```mermaid
 flowchart TB
-  NODE["@wm/node-host<br/>CLI, daemon, WebSocket, filesystem ports"]
-  MAC["@wm/platform-macos<br/>TypeScript native adapter"]
-  ENGINE["@wm/engine<br/>Portable policy and state"]
+  NODE["@paneform/wm<br/>CLI, daemon, WebSocket, filesystem ports"]
+  MAC["@paneform/wm-macos<br/>TypeScript native adapter"]
+  ENGINE["@paneform/layout<br/>Portable policy and state"]
   SIDECAR["Swift wm-sidecar<br/>Native observation and primitives"]
-  RENDERER["@wm/renderer<br/>Browser debugger"]
+  RENDERER["@paneform/layout-browser<br/>Browser simulator"]
   SIM["In-memory PlatformAdapter"]
   EFFECT["Effect"]
   WS["ws"]

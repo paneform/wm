@@ -1,5 +1,6 @@
 {
-  "name": "@wm/platform-macos",
+  "name": "@paneform/wm-macos",
+  "private": true,
   "version": "2.0.0-alpha.0",
   "type": "module",
   "scripts": {
@@ -9,7 +10,7 @@
     "lint": "oxlint src test"
   },
   "dependencies": {
-    "@wm/engine": "workspace:*",
+    "@paneform/layout": "workspace:*",
     "effect": "3.22.1"
   },
   "devDependencies": {

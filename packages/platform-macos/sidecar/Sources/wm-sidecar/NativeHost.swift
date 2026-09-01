@@ -49,7 +49,7 @@ struct BundledRuntime: Equatable {
       .appendingPathComponent("Resources", isDirectory: true)
     let resources = expectedResources.resolvingSymlinksInPath()
     guard resources == expectedResources else {
-      throw RuntimeError.invalid("WM.app Resources must not be a symlink")
+      throw RuntimeError.invalid("wm.app Resources must not be a symlink")
     }
     let runtime = Self(
       node: resources.appendingPathComponent("node").resolvingSymlinksInPath(),
@@ -61,7 +61,7 @@ struct BundledRuntime: Equatable {
         $0.deletingLastPathComponent() == resources
       })
     else {
-      throw RuntimeError.invalid("bundled resource escapes WM.app")
+      throw RuntimeError.invalid("bundled resource escapes wm.app")
     }
     guard FileManager.default.isExecutableFile(atPath: runtime.node.path) else {
       throw RuntimeError.missing(runtime.node.path)
@@ -82,13 +82,13 @@ struct BundledRuntime: Equatable {
     let created = SecStaticCodeCreateWithPath(bundle as CFURL, [], &staticCode)
     guard created == errSecSuccess, let staticCode else {
       throw RuntimeError.invalid(
-        "cannot inspect WM.app signature at \(bundle.path) (OSStatus \(created))")
+        "cannot inspect wm.app signature at \(bundle.path) (OSStatus \(created))")
     }
     let validationFlags = SecCSFlags(
       rawValue: kSecCSStrictValidate | kSecCSCheckNestedCode | kSecCSCheckAllArchitectures)
     let checked = SecStaticCodeCheckValidity(staticCode, validationFlags, nil)
     guard checked == errSecSuccess else {
-      throw RuntimeError.invalid("WM.app signature is invalid (OSStatus \(checked))")
+      throw RuntimeError.invalid("wm.app signature is invalid (OSStatus \(checked))")
     }
   }
 }

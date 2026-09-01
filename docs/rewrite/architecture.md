@@ -40,8 +40,15 @@ observations and probes and adapts.
 ## Package layout (pnpm workspace)
 
 ```
+apps/
+  wm/                @paneform/wm — private Homebrew application composition root
+    src/config-file.ts   fs config loader/watcher implementing ConfigSource
+    src/observation-file.ts atomic fs implementation of ObservationStore
+    src/ws-server.ts     ws-based WebSocketPort implementation
+    src/cli.ts           `wm` bin: thin arg parsing → CommandBus → print JSON
+
 packages/
-  engine/            @wm/engine — portable core (Effect, effect Schema). No runtime deps.
+  layout/            @paneform/layout — public portable core (Effect, effect Schema)
     src/
       schema.ts      All Effect Schema domain types (single source of truth)
       world.ts       World snapshot type + immutable update helpers
@@ -61,21 +68,15 @@ packages/
       transport.ts   WebSocketPort interface + message schemas for CLI/WS
     test/            Vitest suites + test/helpers/fake-platform.ts (owned by TEST agent)
 
-  node-host/         @wm/node-host — Node implementations of engine ports
-    src/config-file.ts   fs config loader/watcher implementing ConfigSource
-    src/observation-file.ts atomic fs implementation of ObservationStore
-    src/ws-server.ts     ws-based WebSocketPort implementation
-    src/cli.ts           `wm` bin: thin arg parsing → CommandBus → print JSON
-
-  platform-macos/    @wm/platform-macos — macOS adapter
+  platform-macos/    @paneform/wm-macos — private macOS adapter
     sidecar/             Swift package (see docs/rewrite/platform-contract.md)
     src/host.ts          TS glue: sidecar messages ↔ PlatformAdapter
 
-  renderer/          @wm/renderer — web visualization (Vite + vanilla TS)
+  layout-browser/    @paneform/layout-browser — public web visualization and simulator
 ```
 
-Dependency direction: `node-host`, `platform-macos`, `renderer`, CLI → `engine`.
-`engine` depends on nothing runtime-specific. `renderer` runs the engine directly against
+Dependency direction: `wm`, `platform-macos`, `layout-browser`, CLI → `layout`.
+`layout` depends on nothing runtime-specific. `layout-browser` runs the engine directly against
 a simulated platform (the same interface as the macOS adapter).
 
 ## Data flow

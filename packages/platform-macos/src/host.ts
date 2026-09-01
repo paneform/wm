@@ -10,11 +10,11 @@ import type {
   WindowId,
   PlatformBatchRequest,
   PlatformBatchResult,
-} from "@wm/engine";
+} from "@paneform/layout";
 import {
   PlatformError as PlatformErrorClass,
   WriteObservation as WriteObservationSchema,
-} from "@wm/engine";
+} from "@paneform/layout";
 import type { PermissionStatus, SettingsTarget } from "./protocol.ts";
 import { existsSync } from "node:fs";
 import { createInterface } from "node:readline";

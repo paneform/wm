@@ -1,2 +1,2 @@
 #!/usr/bin/env node
-import "../packages/node-host/src/sketchybar-daemon.ts";
+import "../apps/wm/src/sketchybar-daemon.ts";

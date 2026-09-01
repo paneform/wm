@@ -12,7 +12,38 @@ importers:
         specifier: 0.28.2
         version: 0.28.2
 
-  packages/engine:
+  apps/wm:
+    dependencies:
+      '@paneform/layout':
+        specifier: workspace:*
+        version: link:../../packages/layout
+      '@paneform/wm-macos':
+        specifier: workspace:*
+        version: link:../../packages/platform-macos
+      effect:
+        specifier: 3.22.1
+        version: 3.22.1
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      oxlint:
+        specifier: 1.80.0
+        version: 1.80.0
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2))
+
+  packages/layout:
     dependencies:
       effect:
         specifier: 3.22.1
@@ -37,74 +68,49 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2))
 
-  packages/node-host:
+  packages/layout-browser:
     dependencies:
-      '@wm/engine':
-        specifier: workspace:*
-        version: link:../engine
-      '@wm/platform-macos':
-        specifier: workspace:*
-        version: link:../platform-macos
       effect:
         specifier: 3.22.1
         version: 3.22.1
-      ws:
-        specifier: ^8.21.3
-        version: 8.21.3
     devDependencies:
-      '@types/node':
-        specifier: ^24.0.0
-        version: 24.13.3
-      '@types/ws':
-        specifier: ^8.18.1
-        version: 8.18.1
+      '@paneform/layout':
+        specifier: workspace:*
+        version: link:../layout
+      oxfmt:
+        specifier: 0.65.0
+        version: 0.65.0
       oxlint:
         specifier: 1.80.0
         version: 1.80.0
-      typescript:
-        specifier: ^5.9.0
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.11
-        version: 4.1.11(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2))
-
-  packages/platform-macos:
-    dependencies:
-      '@wm/engine':
-        specifier: workspace:*
-        version: link:../engine
-      effect:
-        specifier: 3.22.1
-        version: 3.22.1
-    devDependencies:
-      '@types/node':
-        specifier: ^24.0.0
-        version: 24.13.3
-      oxlint:
-        specifier: 1.80.0
-        version: 1.80.0
-      typescript:
-        specifier: ^5.9.0
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.11
-        version: 4.1.11(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2))
-
-  packages/renderer:
-    dependencies:
-      '@wm/engine':
-        specifier: workspace:*
-        version: link:../engine
-      effect:
-        specifier: 3.22.1
-        version: 3.22.1
-    devDependencies:
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
       vite:
         specifier: ^8.2.2
         version: 8.2.2(@types/node@24.13.3)(esbuild@0.28.2)
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2))
+
+  packages/platform-macos:
+    dependencies:
+      '@paneform/layout':
+        specifier: workspace:*
+        version: link:../layout
+      effect:
+        specifier: 3.22.1
+        version: 3.22.1
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      oxlint:
+        specifier: 1.80.0
+        version: 1.80.0
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2))

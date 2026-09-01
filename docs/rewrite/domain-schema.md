@@ -1,7 +1,7 @@
 # Domain Schema & Constants
 
 Source of truth for all types. Implemented with Effect Schema (`effect/Schema`) in
-`packages/engine/src/schema.ts`. Names below are canonical; agents must use them exactly.
+`packages/layout/src/schema.ts`. Names below are canonical; agents must use them exactly.
 
 ## Coordinates
 

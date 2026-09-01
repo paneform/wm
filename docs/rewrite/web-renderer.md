@@ -1,8 +1,9 @@
 # Web Renderer Guide
 
-`packages/renderer` — a Vite + vanilla TypeScript web app (no framework) that runs the
-REAL engine from `@wm/engine` against a simulated platform. Purpose: visualize layout
-edge cases, debug multi-display behavior deterministically, and demo the engine.
+`packages/layout-browser` is the public `@paneform/layout-browser` package and a Vite +
+vanilla TypeScript playground. It runs the real `@paneform/layout` engine against a
+simulated platform to visualize edge cases, debug multi-display behavior deterministically,
+and embed an interactive layout demo.
 
 ## Core ideas
 
@@ -11,7 +12,7 @@ edge cases, debug multi-display behavior deterministically, and demo the engine.
 - It implements `PlatformAdapter` from docs/rewrite/platform-contract.md with an
   in-memory window system ("web windows"): draggable/resizable DOM rectangles obeying
   scripted personalities (same personality model as the test fake; share concepts, not
-  code — renderer lives in its own package).
+  code; the renderer lives in its own package).
 - Users can inject events (display connect/disconnect, window close, focus changes,
   topology churn) from a control panel to exercise edge cases live.
 
@@ -34,8 +35,13 @@ localStorage of scenarios. It is a debugging/visualization tool.
 
 ## Implementation notes
 
-- Import engine directly: `import { createEngine } from "@wm/engine"` — same schemas,
+- Import the engine directly: `import { createEngine } from "@paneform/layout"` — same schemas,
   rules, command bus as production. Renderer drives it through the CommandBus like the
   CLI does, plus direct PlatformAdapter event injection.
+- Importing `@paneform/layout-browser` has no browser side effects. Consumers explicitly
+  call `createLayoutSimulator(container)` or `mountLayoutRenderer(container, engine)`.
+- Existing-engine mounts are read-only unless the trusted host explicitly enables commands.
+- The package stylesheet is opt-in through `@paneform/layout-browser/styles.css` and is
+  scoped under the renderer mount root.
 - Render loop subscribes to committed-state epochs; redraw on change only.
 - Determinism: all randomness seeded; scenarios are pure data.

@@ -5,6 +5,7 @@
 
 node_modules/
 dist/
+packages/layout-browser/playground-dist/
 *.tsbuildinfo
 xcuserdata/
 DerivedData/

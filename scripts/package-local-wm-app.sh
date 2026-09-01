@@ -8,7 +8,7 @@ NODE_RUNTIME="${WM_NODE_RUNTIME:-$(command -v node)}"
 PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH
 APP_ROOT="$HOME/.local/libexec/wm"
-APP="${WM_APP_PATH:-$APP_ROOT/WM.app}"
+APP="${WM_APP_PATH:-$APP_ROOT/wm.app}"
 SIGNING_SELECTOR="${WM_CODESIGN_IDENTITY:-WM Local Code Signing}"
 SIGNING_KEYCHAIN="${WM_CODESIGN_KEYCHAIN:-}"
 SIGNING_SELECTOR_LOWER="$(printf '%s' "$SIGNING_SELECTOR" | tr '[:upper:]' '[:lower:]')"
@@ -137,9 +137,9 @@ cat >"$CONTENTS/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleIdentifier</key><string>com.allandeutsch.wm</string>
-  <key>CFBundleName</key><string>WM</string>
-  <key>CFBundleDisplayName</key><string>WM</string>
+  <key>CFBundleIdentifier</key><string>com.paneform.wm</string>
+  <key>CFBundleName</key><string>wm</string>
+  <key>CFBundleDisplayName</key><string>wm</string>
   <key>CFBundleExecutable</key><string>wm</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.0.1</string>
@@ -151,7 +151,7 @@ cat >"$CONTENTS/Info.plist" <<'EOF'
 EOF
 plutil -lint "$CONTENTS/Info.plist" >/dev/null
 codesign --verify --strict "$RUNTIME"
-app_codesign_options=(--force --options runtime --sign "$SIGNING_FINGERPRINT" --identifier com.allandeutsch.wm)
+app_codesign_options=(--force --options runtime --sign "$SIGNING_FINGERPRINT" --identifier com.paneform.wm)
 if [[ -n "$SIGNING_KEYCHAIN" ]]; then
   app_codesign_options+=(--keychain "$SIGNING_KEYCHAIN")
 fi

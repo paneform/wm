@@ -6,7 +6,7 @@ const outfile = process.argv[2];
 if (outfile === undefined) throw new Error("usage: node scripts/bundle-cli.mjs OUTFILE");
 
 await build({
-  entryPoints: [`${root}/packages/node-host/src/cli.ts`],
+  entryPoints: [`${root}/apps/wm/src/cli.ts`],
   bundle: true,
   platform: "node",
   format: "esm",

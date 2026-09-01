@@ -107,7 +107,7 @@ replacement window behind the same handle aborts before mutating the replacement
 
 ### Durable observations
 
-`@wm/engine` defines a browser-safe `ObservationStore` port. Its versioned document
+`@paneform/layout` defines a browser-safe `ObservationStore` port. Its versioned document
 contains promoted profiles and pending evidence, so a restart does not reset the
 three-sample promotion window. The host implementation provides `load`, `changes`,
 and compare-and-swap `save` operations using opaque revisions.
@@ -170,7 +170,7 @@ sliver visible (~1 pt horizontal, ~52 pt vertical, probed per display+corner):
    from magic coordinates alone. Startup/audits compare intent vs observation and repair.
 6. Tiled windows park via size→position→size; floating via position-only.
 
-## Public API surface (`@wm/engine`)
+## Public API surface (`@paneform/layout`)
 
 Frozen contract — node-host, platform-macos, renderer, and tests compile against this.
 

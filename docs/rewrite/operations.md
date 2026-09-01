@@ -3,14 +3,18 @@
 The production window manager is the TypeScript engine with the persistent
 macOS sidecar. It listens on `127.0.0.1:17832`, loads
 `~/.config/wm/config.jsonc`, and is supervised by the per-user launchd service
-`com.allandeutsch.wm`.
+`com.paneform.wm`.
 
-`WM.app` is the single installed application and permission identity. Its native
+`wm.app` is the single installed application and permission identity. Its native
 executable dispatches CLI commands, hosts the daemon, and provides native system
 API access. The app bundles the JavaScript application and Node runtime, so the
 installed service does not depend on this repository, a package manager, or a
 system Node installation. Packaging installs `~/.local/bin/wm` as a symlink to
 that executable; add `~/.local/bin` to the shell `PATH` once if needed.
+
+The first `wm service install` after the Paneform identity migration unloads and
+removes the former `com.allandeutsch.wm` service and `WM.app`, then revokes that
+identity's privacy grants before installing `com.paneform.wm`.
 
 Architectural rationale, including the native hotkey-monitor latency decision,
 is recorded in [`docs/design-decisions.md`](../design-decisions.md).
@@ -69,11 +73,11 @@ ID signing or notarization for distribution.
 After replacing an older ad-hoc build, clear its stale privacy records once:
 
 ```sh
-tccutil reset Accessibility com.allandeutsch.wm
-tccutil reset ScreenCapture com.allandeutsch.wm
-tccutil reset ListenEvent com.allandeutsch.wm
+tccutil reset Accessibility com.paneform.wm
+tccutil reset ScreenCapture com.paneform.wm
+tccutil reset ListenEvent com.paneform.wm
 ```
 
-Then add the packaged `~/.local/libexec/wm/WM.app` in Accessibility, Screen & System
+Then add the packaged `~/.local/libexec/wm/wm.app` in Accessibility, Screen & System
 Audio Recording, and Input Monitoring before starting the service. Release distribution
 uses the Developer ID and notarization workflow tracked by `wm-v9ea`.

@@ -25,8 +25,8 @@ import Testing
   @Test func locatesRuntimeRelativeToResolvedExecutable() throws {
     let temporary = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
-    let executable = temporary.appendingPathComponent("WM.app/Contents/MacOS/wm")
-    let resources = temporary.appendingPathComponent("WM.app/Contents/Resources")
+    let executable = temporary.appendingPathComponent("wm.app/Contents/MacOS/wm")
+    let resources = temporary.appendingPathComponent("wm.app/Contents/Resources")
     try FileManager.default.createDirectory(
       at: executable.deletingLastPathComponent(), withIntermediateDirectories: true)
     try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)

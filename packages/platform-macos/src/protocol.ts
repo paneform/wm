@@ -5,7 +5,7 @@ import {
   TopologyObservation,
   WindowObservation,
   WriteObservation,
-} from "@wm/engine";
+} from "@paneform/layout";
 
 /**
  * Wire schemas for the sidecar protocol (docs/rewrite/platform-contract.md
