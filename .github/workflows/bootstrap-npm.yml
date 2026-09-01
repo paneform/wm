@@ -67,5 +67,5 @@ jobs:
             npm publish "$package_path" --access public --tag bootstrap --provenance
           }
 
-          publish_if_missing "@paneform/layout" "bootstrap/layout"
-          publish_if_missing "@paneform/layout-browser" "bootstrap/layout-browser"
+          publish_if_missing "@paneform/layout" "./bootstrap/layout"
+          publish_if_missing "@paneform/layout-browser" "./bootstrap/layout-browser"
