@@ -154,7 +154,7 @@ export interface ShutdownReport {
 }
 
 export interface Engine {
-  start(): Effect.Effect<void>;
+  start(): Effect.Effect<void, CommandError>;
   stop(): Effect.Effect<ShutdownReport>;
   execute(command: Command): Effect.Effect<CommandResult, CommandError>;
   state(): Effect.Effect<StateSnapshot>;
@@ -285,6 +285,21 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       health.state = next;
       bus.publish("health", { state: next, issues: [...health.issues] });
     };
+
+    const setNativeHotkeySwallowing = (
+      enabled: boolean,
+    ): Effect.Effect<void, CommandError> =>
+      adapter.setHotkeySwallowing === undefined
+        ? Effect.void
+        : Effect.mapError(
+            adapter.setHotkeySwallowing(enabled),
+            (error) =>
+              new CommandError({
+                code: "internal_error",
+                message: error.detail ?? "native hotkey swallowing control failed",
+              }),
+          );
+
     if (observationStoreFailed) setHealth("degraded", "observation_store_unavailable");
 
     // ------------------------------------------------------------------
@@ -3115,10 +3130,12 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         yield* failIfStopping();
         switch (command.type) {
           case "pause":
+            yield* setNativeHotkeySwallowing(false);
             world = { ...world, paused: true };
             bus.publish("pause", { paused: true });
             break;
           case "resume":
+            yield* setNativeHotkeySwallowing(true);
             world = { ...world, paused: false };
             bus.publish("pause", { paused: false });
             yield* gatedReconcile();
@@ -3127,6 +3144,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             // Atomic read-modify-write on committed state inside the
             // serialized transaction step — never a CLI query + race.
             const next = !world.paused;
+            yield* setNativeHotkeySwallowing(!next);
             world = { ...world, paused: next };
             bus.publish("pause", { paused: next });
             if (!next) yield* gatedReconcile();
@@ -3967,6 +3985,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     return {
       start: () =>
         Effect.gen(function* () {
+          // Synchronize before loading keybinds so initially-paused startup
+          // never briefly swallows bindings while the native tap is active.
+          yield* setNativeHotkeySwallowing(!world.paused);
           const loaded = yield* Effect.either(configSource.load());
           if (loaded._tag === "Right") {
             const parsed = parseConfigSafe(loaded.right);

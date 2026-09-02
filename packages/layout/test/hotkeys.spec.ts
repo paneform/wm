@@ -514,6 +514,20 @@ describe("moveDirection", () => {
 });
 
 describe("pause gating for hotkey commands", () => {
+  test("engine synchronizes native hotkey swallowing around pause transitions", async () => {
+    const swallowing: boolean[] = [];
+    const h = await bootstrap(undefined, (inner) => ({
+      ...inner,
+      setHotkeySwallowing: (enabled) => Effect.sync(() => swallowing.push(enabled)),
+    }));
+
+    expect(swallowing).toEqual([true]);
+    await h.run({ type: "pause" });
+    expect(swallowing).toEqual([true, false]);
+    await h.run({ type: "togglePause" });
+    expect(swallowing).toEqual([true, false, true]);
+  });
+
   test("directional/layout mutations fail paused; togglePause still works", async () => {
     const h = await bootstrap();
     const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));

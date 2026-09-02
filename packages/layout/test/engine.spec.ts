@@ -32,7 +32,7 @@ const CONFIG_SOURCE: ConfigSource = {
 interface Harness {
   fake: ReturnType<typeof createFakePlatform>;
   engine: {
-    start(): Effect.Effect<void>;
+    start(): Effect.Effect<void, unknown>;
     stop(): Effect.Effect<ShutdownReport>;
     execute(command: Command): Effect.Effect<CommandResult, CommandError>;
     state(): Effect.Effect<StateSnapshot>;

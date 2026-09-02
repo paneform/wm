@@ -48,7 +48,13 @@ export type SidecarRequest =
   | { readonly op: "ping"; readonly reqId: string }
   | { readonly op: "permissionsStatus"; readonly reqId: string }
   | { readonly op: "requestPermissions"; readonly reqId: string }
-  | { readonly op: "configureKeybinds"; readonly reqId: string; readonly keybinds: Readonly<Record<string, string>> }
+  | {
+      readonly op: "configureKeybinds";
+      readonly reqId: string;
+      readonly keybinds: Readonly<Record<string, string>>;
+      readonly alwaysSwallow?: readonly string[];
+    }
+  | { readonly op: "setHotkeySwallowing"; readonly reqId: string; readonly swallow: boolean }
   | {
       readonly op: "openPermissionsSettings";
       readonly reqId: string;
@@ -87,6 +93,7 @@ export type ResultSchemaFor = {
   requestPermissions: typeof PermissionsResult;
   openPermissionsSettings: typeof OpenedResult;
   configureKeybinds: typeof KeybindsConfiguredResult;
+  setHotkeySwallowing: typeof HotkeySwallowingResult;
 };
 
 const BatchOperationResult = Schema.Struct({
@@ -148,6 +155,7 @@ export interface PermissionStatus extends Schema.Schema.Type<typeof PermissionSt
 export const PermissionsResult = Schema.Struct({ permissions: PermissionStatus });
 export const OpenedResult = Schema.Struct({ opened: Schema.Literal(true) });
 export const KeybindsConfiguredResult = Schema.Struct({ configured: Schema.Number });
+export const HotkeySwallowingResult = Schema.Struct({ swallowing: Schema.Boolean });
 
 export const ErrorBody = Schema.Struct({
   code: Schema.String,

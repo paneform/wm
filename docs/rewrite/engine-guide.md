@@ -232,8 +232,11 @@ Global keybinds use chord strings as object keys (JSON cannot use arrays as keys
 Modifiers are unordered and side-aware: `shift` accepts either side, while `lshift` and
 `rshift` match those physical keys independently. The persistent macOS sidecar applies
 bindings on config load/hotload and sends actions on matching keydown events; Input
-Monitoring permission is required. Matched non-repeat keydown events are suppressed;
-modifier, repeated, and unmatched events remain visible to other applications.
+Monitoring permission is required. Matched non-repeat keydown events are suppressed
+while running; modifier, repeated, and unmatched events remain visible to other
+applications. During pause, the engine tells the sidecar not to suppress matched
+events, except for configured `togglePause` or `resume` chords, which remain
+suppressed. Every matched action is still sent to the engine in either state.
 
 ## Command execution layer (single source of truth)
 

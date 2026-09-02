@@ -163,7 +163,7 @@ final class SidecarServer {
           request, code: "invalid_request", detail: "configureKeybinds requires keybinds")
       }
       do {
-        try keyMonitor.configure(keybinds)
+        try keyMonitor.configure(keybinds, alwaysSwallowing: request.alwaysSwallow ?? [])
         send(ResultMessage(reqId: requestId(request), result: .keybindsConfigured(keybinds.count)))
       } catch KeyMonitorError.permissionDenied {
         sendError(
@@ -172,6 +172,14 @@ final class SidecarServer {
       } catch {
         sendError(request, code: "invalid_request", detail: String(describing: error))
       }
+
+    case "setHotkeySwallowing":
+      guard let swallow = request.swallow else {
+        return sendError(
+          request, code: "invalid_request", detail: "setHotkeySwallowing requires \"swallow\"")
+      }
+      keyMonitor.setHotkeySwallowing(swallow)
+      send(ResultMessage(reqId: requestId(request), result: .hotkeySwallowing(swallow)))
 
     case "getTopology":
       if let topology = inventory.currentTopology() {

@@ -60,6 +60,9 @@ const makeSpawn = (): { spawn: SpawnSidecar; fake: FakeSidecar } => {
         case "configureKeybinds":
           emit({ reqId, result: { configured: Object.keys(message.keybinds as object).length } });
           break;
+        case "setHotkeySwallowing":
+          emit({ reqId, result: { swallowing: message.swallow } });
+          break;
         case "focusWindow":
           emit({ reqId, result: { frontmostPid: 42, focused: true, main: true } });
           break;
@@ -168,6 +171,27 @@ describe("MacOsSidecarAdapter permission ops", () => {
     fake.emit({ ev: "keybind", action: "workspace focus S" });
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(actions).toEqual(["workspace focus S"]);
+    adapter.stop();
+  });
+  test("configures pause exceptions and native swallowing state", async () => {
+    const { spawn, fake } = makeSpawn();
+    const adapter = Effect.runSync(createMacOsSidecarAdapter({ spawn, sidecarPath: "/x" }));
+    fake.emit(READY);
+
+    await Effect.runPromise(
+      adapter.configureKeybinds(
+        { "rshift s": "workspace focus S", "rshift p": "workspace pause --toggle" },
+        ["rshift p"],
+      ),
+    );
+    await Effect.runPromise(adapter.setHotkeySwallowing(false));
+
+    expect(fake.requests.find((request) => request.op === "configureKeybinds")).toMatchObject({
+      alwaysSwallow: ["rshift p"],
+    });
+    expect(fake.requests.find((request) => request.op === "setHotkeySwallowing")).toMatchObject({
+      swallow: false,
+    });
     adapter.stop();
   });
   test("compound mutations use one sidecar request with ordered results", async () => {

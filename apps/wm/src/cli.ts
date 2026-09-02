@@ -171,7 +171,13 @@ async function main(): Promise<number> {
         })),
         catch: (error) => new ConfigInvalidError([String(error)]),
       });
-      yield* adapter.configureKeybinds(keybinds).pipe(
+      const alwaysSwallow = Object.entries(keybinds)
+        .filter(([, action]) => {
+          const command = commands.get(action);
+          return command?.type === "togglePause" || command?.type === "resume";
+        })
+        .map(([chord]) => chord);
+      yield* adapter.configureKeybinds(keybinds, alwaysSwallow).pipe(
         Effect.mapError((error) => new ConfigInvalidError([String(error)])),
       );
       keybindCommands = commands;
