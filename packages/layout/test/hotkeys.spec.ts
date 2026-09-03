@@ -549,6 +549,21 @@ describe("pause gating for hotkey commands", () => {
     await h.run({ type: "focusDirection", direction: "right" });
     expect(h.fake.focusedWindowId()).toBe(w2);
   });
+
+  test("all commands except resume and togglePause fail while paused", async () => {
+    const h = await bootstrap();
+    await h.run({ type: "pause" });
+
+    expect((await h.failure({ type: "getState" })).code).toBe("paused");
+    expect((await h.failure({ type: "focusWorkspace", name: "1" })).code).toBe("paused");
+    expect((await h.failure({ type: "pause" })).code).toBe("paused");
+
+    await h.run({ type: "resume" });
+    expect((await h.snapshot()).paused).toBe(false);
+    await h.run({ type: "pause" });
+    await h.run({ type: "togglePause" });
+    expect((await h.snapshot()).paused).toBe(false);
+  });
 });
 
 describe("transactional compound commands (review issue 1)", () => {

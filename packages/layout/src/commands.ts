@@ -141,27 +141,9 @@ export function coalesceKeyFor(command: Command): string | undefined {
   }
 }
 
-/** Mutations rejected while paused; pause/resume/togglePause/config/queries
- * stay valid (the toggle must work exactly so the engine can be un-paused). */
-export function isBlockedWhenPaused(command: Command): boolean {
-  switch (command.type) {
-    case "focusWindow":
-    case "setWindowFrame":
-    case "moveWindow":
-    case "resizeWindow":
-    case "floatWindow":
-    case "tileWindow":
-    case "retile":
-    case "moveWorkspaceToDisplay":
-    case "moveFocusedWindowToWorkspace":
-    case "moveFocusedWorkspaceToNextDisplay":
-    case "focusDirection":
-    case "moveDirection":
-    case "probeWindowLimits":
-      return true;
-    default:
-      return false;
-  }
+/** Only commands that can leave paused mode may execute while paused. */
+export function isAllowedWhenPaused(command: Command): boolean {
+  return command.type === "resume" || command.type === "togglePause";
 }
 
 // ---------------------------------------------------------------------------
@@ -548,10 +530,6 @@ export function createCommandBus(deps: CommandBusDeps): CommandBus {
   const mutate = (command: Command): Effect.Effect<CommandResult, CommandError> => {
     const world = deps.getWorld();
 
-    if (isBlockedWhenPaused(command) && world.paused) {
-      return Effect.fail(new CommandError({ code: "paused", message: "engine is paused" }));
-    }
-
     const windowId = windowIdOf(command);
     if (windowId !== null && !world.windows.has(windowId)) {
       return Effect.fail(
@@ -599,6 +577,11 @@ export function createCommandBus(deps: CommandBusDeps): CommandBus {
 
   const execute = (raw: Command): Effect.Effect<CommandResult, CommandError> =>
     Effect.gen(function* () {
+      if (deps.getWorld().paused && !isAllowedWhenPaused(raw)) {
+        return yield* Effect.fail(
+          new CommandError({ code: "paused", message: "engine is paused" }),
+        );
+      }
       switch (raw.type) {
         case "getState":
         case "getWindows":
