@@ -33,13 +33,3 @@ npm trust list @paneform/layout-browser
 Do not add an npm token to the normal release workflow. The staging job uses short-lived OpenID
 Connect credentials and receives `id-token: write` only after the build and package validation job
 succeeds.
-
-## Initial Bootstrap
-
-npm cannot stage a brand-new package or configure it for trusted publishing. Both package names
-were therefore reserved as `0.0.0` under the `bootstrap` tag before stage-only trust was enabled.
-The temporary bootstrap workflow and npm secret have been removed.
-
-Any future package name will require the same one-time reservation. Use a short-lived token in the
-protected `npm` environment, then delete the workflow and secret immediately after configuring
-stage-only trust.
