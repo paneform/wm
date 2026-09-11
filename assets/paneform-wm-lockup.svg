@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 516 72" role="img" aria-labelledby="title desc">
+  <title id="title">Paneform WM</title>
+  <desc id="desc">Paneform WM horizontal logo lockup.</desc>
+  <style>:root{--pf-black:#26233a;--pf-white:#e0def4;--pf-cyan:#ebbcba;--pf-bright-black:#6e6a86;--pf-pane:#6e6a86;--pf-accent:#ebbcba}@media(prefers-color-scheme:light){:root{--pf-black:#f2e9e1;--pf-white:#575279;--pf-cyan:#d7827e;--pf-bright-black:#9893a5;--pf-pane:#575279;--pf-accent:#d7827e}}</style>
+  <defs><clipPath id="icon-clip"><rect x="4" y="4" width="64" height="64" rx="8"/></clipPath></defs>
+  <rect x="4" y="4" width="64" height="64" rx="8" fill="var(--ansi-black, var(--pf-black))"/>
+  <rect x="4" y="4" width="64" height="8" fill="var(--paneform-pane, var(--ansi-bright-black, var(--pf-pane)))" clip-path="url(#icon-clip)"/>
+  <rect x="10" y="18" width="25" height="44" rx="5" fill="var(--paneform-pane, var(--ansi-bright-black, var(--pf-pane)))"/>
+  <rect x="37" y="18" width="25" height="25" rx="5" fill="var(--paneform-accent, var(--ansi-cyan, var(--pf-accent)))"/>
+  <rect x="37" y="45" width="25" height="17" rx="5" fill="var(--paneform-pane, var(--ansi-bright-black, var(--pf-pane)))"/>
+  <g fill="var(--ansi-white, var(--pf-white))" font-family="Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <text x="88" y="54" font-size="68" font-weight="650" letter-spacing="-2.5">paneform</text>
+    <text x="386" y="54" font-size="68" font-weight="500" letter-spacing="-2" fill="var(--ansi-bright-black, var(--pf-bright-black))">wm</text>
+  </g>
+</svg>

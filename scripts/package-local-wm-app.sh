@@ -4,6 +4,7 @@ umask 077
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE="$ROOT/packages/platform-macos/sidecar/.build/release/wm-sidecar"
+ICON_DOCUMENT="$ROOT/assets/wm-clean.icon"
 NODE_RUNTIME="${WM_NODE_RUNTIME:-$(command -v node)}"
 PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH
@@ -32,6 +33,10 @@ cleanup() {
 trap cleanup EXIT
 
 [[ -x "$SOURCE" ]] || { echo "release sidecar not built: $SOURCE" >&2; exit 1; }
+[[ -d "$ICON_DOCUMENT" && -f "$ICON_DOCUMENT/icon.json" ]] || {
+  echo "Icon Composer document not found: $ICON_DOCUMENT" >&2
+  exit 1
+}
 [[ "$NODE_RUNTIME" = /* && -x "$NODE_RUNTIME" ]] || {
   echo "WM_NODE_RUNTIME must be an absolute executable path" >&2
   exit 1
@@ -111,6 +116,7 @@ RESOURCES="$CONTENTS/Resources"
 RUNTIME="$RESOURCES/node"
 ENTRY="$RESOURCES/cli.mjs"
 SERVICE_SCRIPT="$RESOURCES/wm-service.sh"
+ICON_INFO="$TEMPORARY/icon-info.plist"
 mkdir -p "$CONTENTS/MacOS" "$RESOURCES"
 cp "$SOURCE" "$EXECUTABLE"
 cp "$NODE_RUNTIME" "$RUNTIME"
@@ -133,6 +139,24 @@ env -i HOME="$HOME" PATH="/usr/bin:/bin" \
 chmod 600 "$ENTRY"
 chmod 600 "$SERVICE_SCRIPT"
 env -i HOME="$HOME" PATH="/usr/bin:/bin" "$RUNTIME" "$ENTRY" --help >/dev/null
+xcrun actool "$ICON_DOCUMENT" \
+  --compile "$RESOURCES" \
+  --platform macosx \
+  --target-device mac \
+  --minimum-deployment-target 15.0 \
+  --app-icon wm-clean \
+  --output-partial-info-plist "$ICON_INFO" \
+  --output-format human-readable-text \
+  --warnings \
+  --notices
+[[ -s "$ICON_INFO" ]] || {
+  echo "asset compiler did not generate icon metadata" >&2
+  exit 1
+}
+if [[ ! -f "$RESOURCES/Assets.car" ]] && ! find "$RESOURCES" -maxdepth 1 -name '*.icns' -print -quit | grep -q .; then
+  echo "asset compiler did not generate app icon resources" >&2
+  exit 1
+fi
 cat >"$CONTENTS/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -149,6 +173,7 @@ cat >"$CONTENTS/Info.plist" <<'EOF'
   <key>NSScreenCaptureUsageDescription</key><string>WM reads window metadata for window management.</string>
 </dict></plist>
 EOF
+/usr/libexec/PlistBuddy -c "Merge $ICON_INFO" "$CONTENTS/Info.plist"
 plutil -lint "$CONTENTS/Info.plist" >/dev/null
 codesign --verify --strict "$RUNTIME"
 app_codesign_options=(--force --options runtime --sign "$SIGNING_FINGERPRINT" --identifier com.paneform.wm)
