@@ -1,6 +1,6 @@
 {
   "name": "@paneform/layout-browser",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0-alpha.1",
   "description": "Browser renderer and simulator for @paneform/layout",
   "keywords": [
     "browser",
@@ -74,6 +74,6 @@
     "vitest": "^4.1.11"
   },
   "peerDependencies": {
-    "@paneform/layout": ">=0.1.0-alpha.0 <1"
+    "@paneform/layout": ">=0.1.0-alpha.1 <1"
   }
 }
