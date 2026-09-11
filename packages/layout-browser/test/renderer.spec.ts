@@ -515,8 +515,8 @@ describe("scene building", () => {
     expect(scene.badges[0]).toMatchObject({ workspace: "1", mode: "bsp", focused: true });
     expect(scene.splitLines).toHaveLength(1);
     const line = scene.splitLines[0]!;
-    // floor(1512 · 0.5)=756; divider sits at 756 + gap/2.
-    expect(line.x1).toBe(756 + 4);
+    // floor((1512 - 8) · 0.5)=752; divider sits at 752 + gap/2.
+    expect(line.x1).toBe(752 + 4);
     expect(line.y1).toBe(38);
     expect(line.y2).toBe(982);
     expect(scene.focusedWindowId).toBe("w1");
@@ -541,8 +541,25 @@ describe("scene building", () => {
       8,
     );
     expect(lines).toHaveLength(2);
-    expect(lines[0]!.x1).toBe(404);
-    expect(lines[1]!.y1).toBe(304);
+    expect(lines[0]!.x1).toBe(400);
+    expect(lines[1]!.y1).toBe(300);
+  });
+
+  it("matches gap-exclusive solver rounding for an odd split", () => {
+    const [line] = splitLinesForTree(
+      {
+        kind: "split",
+        axis: "vertical",
+        ratio: 0.5,
+        first: { kind: "leaf", windowId: "a" },
+        second: { kind: "leaf", windowId: "b" },
+      },
+      { x: 10, y: 20, width: 101, height: 60 },
+      8,
+    );
+
+    // floor((101 - 8) · 0.5)=46, leaving 47 points after the 8-point gap.
+    expect(line).toEqual({ x1: 60, y1: 20, x2: 60, y2: 80 });
   });
 });
 

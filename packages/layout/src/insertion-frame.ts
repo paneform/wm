@@ -114,7 +114,7 @@ function retainPathDividers(
   const firstLength = subtreeLength(node.first, node.axis, frames, gap);
   const secondLength = subtreeLength(node.second, node.axis, frames, gap);
   if (firstLength === null || secondLength === null) return node;
-  const available = firstLength + gap + secondLength;
+  const available = firstLength + secondLength;
   const ratio =
     Math.floor(available * node.ratio) === firstLength
       ? node.ratio

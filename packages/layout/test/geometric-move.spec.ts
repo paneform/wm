@@ -128,6 +128,36 @@ describe("moveGeometrically confirmed transformations", () => {
     });
   });
 
+  test("same-axis swap excludes the divider gap from its rebuilt ratio", () => {
+    const tree = vertical(0.5, leaf("A"), vertical(0.75, leaf("B"), leaf("C")));
+    const result = move(tree, "B", "right", frame(0, 0, 810, 800), { gap: 10 });
+
+    expect(result).toEqual(vertical(0.5, leaf("A"), vertical(98 / 390, leaf("C"), leaf("B"))));
+    expectFrames(
+      result,
+      frame(0, 0, 810, 800),
+      {
+        A: frame(0, 0, 400, 800),
+        C: frame(410, 0, 98, 800),
+        B: frame(518, 0, 292, 800),
+      },
+      10,
+    );
+  });
+
+  test.each([30, 908])("swaps and restores rounding-sensitive widths in %s points", (width) => {
+    const first = width === 30 ? 7 : 785;
+    const content = frame(0, 0, width, 800);
+    const tree = vertical(first / (width - 8), leaf("A"), leaf("B"));
+    const original = framesFor(tree, content, 8);
+    const swapped = move(tree, "A", "right", content, { gap: 8 });
+    const swappedFrames = framesFor(swapped, content, 8);
+    expect(swappedFrames.get("A")!.width).toBe(original.get("A")!.width);
+    expect(swappedFrames.get("B")!.width).toBe(original.get("B")!.width);
+    const restored = move(swapped, "A", "left", content, { gap: 8 });
+    expect(framesFor(restored, content, 8)).toEqual(original);
+  });
+
   test("two panes change split axis in movement order", () => {
     const tree = vertical(0.5, leaf("A"), leaf("B"));
     const result = move(tree, "B", "up", frame(0, 0, 600, 800));
@@ -163,6 +193,26 @@ describe("edge selection and divider preservation", () => {
       A: frame(0, 300, 450, 300),
       C: frame(450, 300, 450, 300),
     });
+  });
+
+  test("edge regrouping excludes gaps and repeated outer moves do not drift", () => {
+    const tree = vertical(20 / 61, leaf("A"), vertical(0.5, leaf("B"), leaf("C")));
+    const content = frame(0, 0, 930, 600);
+    const expected = horizontal(0.5, leaf("B"), vertical(0.5, leaf("A"), leaf("C")));
+    const regrouped = move(tree, "B", "up", content, { gap: 15 });
+
+    expect(regrouped).toEqual(expected);
+    expect(move(regrouped, "B", "up", content, { gap: 15 })).toBe(regrouped);
+    expectFrames(
+      regrouped,
+      content,
+      {
+        B: frame(0, 0, 930, 292),
+        A: frame(0, 307, 457, 293),
+        C: frame(472, 307, 458, 293),
+      },
+      15,
+    );
   });
 
   test("a non-0.5 T rotation carries both existing divider ratios", () => {
@@ -258,7 +308,7 @@ describe("geometric candidate ranking", () => {
       ["B", frame(-499, -39, 291, 799)],
       ["C", frame(-199, -41, 191, 801)],
     ]);
-    const expected = vertical(0.4, leaf("A"), vertical(191 / 491, leaf("C"), leaf("B")));
+    const expected = vertical(0.4, leaf("A"), vertical(191 / 482, leaf("C"), leaf("B")));
 
     expect(move(tree, "B", "right", frame(0, 0, 1, 1), { frames: observed, gap: 9 })).toEqual(
       expected,
@@ -267,6 +317,31 @@ describe("geometric candidate ranking", () => {
 });
 
 describe("equivalent visible layouts", () => {
+  test("aligned grid reconstruction excludes horizontal and vertical gaps", () => {
+    const tree = vertical(
+      0.25,
+      horizontal(0.5, leaf("A"), leaf("C")),
+      horizontal(0.5, leaf("B"), leaf("D")),
+    );
+    const content = frame(0, 0, 1210, 810);
+    const result = move(tree, "A", "right", content, { gap: 10 });
+
+    expectFrames(
+      result,
+      content,
+      {
+        B: frame(0, 0, 900, 400),
+        A: frame(910, 0, 300, 400),
+        C: frame(0, 410, 300, 400),
+        D: frame(310, 410, 900, 400),
+      },
+      10,
+    );
+    expect(
+      Object.fromEntries(framesFor(move(result, "A", "left", content, { gap: 10 }), content, 10)),
+    ).toEqual(Object.fromEntries(framesFor(tree, content, 10)));
+  });
+
   test.each([0.25, 0.5])(
     "aligned grid cells swap independently of nesting at ratio %s",
     (ratio) => {

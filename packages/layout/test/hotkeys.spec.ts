@@ -396,7 +396,7 @@ describe("moveDirection", () => {
     expect(ws1.tree).toEqual({
       kind: "split",
       axis: "vertical",
-      ratio: 748 / 1512,
+      ratio: 0.5,
       first: { kind: "leaf", windowId: w2 },
       second: { kind: "leaf", windowId: w1 },
     });
@@ -405,8 +405,8 @@ describe("moveDirection", () => {
     expect(h.fake.focusedWindowId()).toBe(w1);
     expect(ws1.lastFocusedMember).toBe(w1);
     // Retile produced verified SetFrames through the adapter.
-    expect(await frameOf(h, w1)).toEqual(frame(756, 38, 756, 944));
-    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 748, 944));
+    expect(await frameOf(h, w1)).toEqual(frame(760, 38, 752, 944));
+    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 752, 944));
     expect(h.fake.writes().length).toBeGreaterThan(writesBefore);
   });
 
@@ -426,8 +426,8 @@ describe("moveDirection", () => {
       first: { kind: "leaf", windowId: w2 },
       second: { kind: "leaf", windowId: w1 },
     });
-    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 1512, 472));
-    expect(await frameOf(h, w1)).toEqual(frame(0, 518, 1512, 464));
+    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 1512, 468));
+    expect(await frameOf(h, w1)).toEqual(frame(0, 514, 1512, 468));
     expect(h.fake.focusedWindowId()).toBe(w1);
   });
 
@@ -474,14 +474,14 @@ describe("moveDirection", () => {
       second: {
         kind: "split",
         axis: "horizontal",
-        ratio: 232 / 472,
+        ratio: 0.5,
         first: { kind: "leaf", windowId: w3 },
         second: { kind: "leaf", windowId: w2 },
       },
     });
-    expect(await frameOf(h, w1)).toEqual(frame(0, 38, 756, 944));
-    expect(await frameOf(h, w2)).toEqual(frame(764, 510, 748, 472));
-    expect(await frameOf(h, w3)).toEqual(frame(764, 38, 748, 464));
+    expect(await frameOf(h, w1)).toEqual(frame(0, 38, 752, 944));
+    expect(await frameOf(h, w2)).toEqual(frame(760, 514, 752, 468));
+    expect(await frameOf(h, w3)).toEqual(frame(760, 38, 752, 468));
     expect(h.fake.focusedWindowId()).toBe(w2);
     expect(ws1.lastFocusedMember).toBe(w2);
   });
@@ -535,12 +535,12 @@ describe("moveDirection", () => {
     expect(workspaceOf(await h.snapshot(), "1")!.tree).toEqual({
       kind: "split",
       axis: "vertical",
-      ratio: 748 / 1512,
+      ratio: 0.5,
       first: { kind: "leaf", windowId: w2 },
       second: { kind: "leaf", windowId: w1 },
     });
-    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 748, 944));
-    expect(await frameOf(h, w1)).toEqual(frame(756, 38, 756, 944));
+    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 752, 944));
+    expect(await frameOf(h, w1)).toEqual(frame(760, 38, 752, 944));
   });
 
   test("a later stale native result aborts before an earlier failure can retry", async () => {
@@ -1176,7 +1176,7 @@ describe("committed/draft isolation (round 2 issue 1)", () => {
     DEADLINE.deadlineMs = 4000; // keep the transaction alive while suspended
     gate.arm((id, op) => id === w1 && op === "frame");
     const pending = h.run({ type: "moveDirection", direction: "right" });
-    await waitFor(() => h.fake.writes().some((x) => x.windowId === w2 && x.observed.width === 748));
+    await waitFor(() => h.fake.writes().some((x) => x.windowId === w2 && x.observed.width === 752));
 
     // Queries during tentative work see ONLY the old committed world.
     const mid = await h.snapshot();
@@ -1297,7 +1297,7 @@ describe("strict reconciliation early exits (round 2 issue 3)", () => {
 
     await h.run({ type: "resume" });
     await h.run({ type: "retile" });
-    expect(await frameOf(h, w1)).toEqual(frame(0, 38, 756, 944)); // repaired
+    expect(await frameOf(h, w1)).toEqual(frame(0, 38, 752, 944)); // repaired
   });
 
   test("invalid inventory observation fails inventory_stale", async () => {
@@ -1993,8 +1993,8 @@ describe("busy-event coalesced rerun guarantees convergence (final issue 2)", ()
     // Post-release rerun converged tiles onto the NEW work area (the swap
     // put w2 in the LEFT pane and w1 in the RIGHT).
     await waitFor(() => (h.fake.frameOf(w1)?.height ?? 0) === 500);
-    expect(await frameOf(h, w1)).toEqual(frame(756, 38, 756, 500));
-    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 748, 500));
+    expect(await frameOf(h, w1)).toEqual(frame(760, 38, 752, 500));
+    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 752, 500));
   });
 });
 
@@ -2161,7 +2161,7 @@ describe("required-nullable subrole in identity fingerprint (final fix 2)", () =
     // replacement is the live window (engine re-captures a FRESH identity
     // each attempt). Leaves after this second swap: [w2, w1].
     await h.run({ type: "moveDirection", direction: "left" });
-    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 748, 944));
-    expect(await frameOf(h, w1)).toEqual(frame(756, 38, 756, 944));
+    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 752, 944));
+    expect(await frameOf(h, w1)).toEqual(frame(760, 38, 752, 944));
   });
 });

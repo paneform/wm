@@ -16,6 +16,13 @@ import { insetFrame, isFiniteFrame, type FrameComponent } from "../geometry.js";
 export const isValidRatio = (ratio: number): boolean =>
   Number.isFinite(ratio) && ratio > 0 && ratio < 1;
 
+/** Encode an observed length without losing a pixel when the solver floors it. */
+export function ratioForLength(first: number, space: number): number {
+  const ratio = first / space;
+  if (Math.floor(space * ratio) === Math.floor(first)) return ratio;
+  return (Math.floor(first) + Math.min(1, space - Math.floor(first)) / 2) / space;
+}
+
 /** Longest dimension of a frame; square tiles split with a vertical divider. */
 export function axisForFrame(frame: Frame): SplitAxis {
   return frame.width >= frame.height ? "vertical" : "horizontal";
@@ -322,7 +329,7 @@ export interface PartitionResult {
 }
 
 /**
- * Two-pane length solve. Preferred first pane = floor(available · ratio); the
+ * Two-pane length solve. Preferred first pane = floor((available - gap) * ratio); the
  * second pane starts after the gap. Each side is clamped into its bounds,
  * deficits/surplus flowing to the peer, iterated to a fixed point.
  * Degenerate ranges collapse safely (feasible=false rather than negative panes).
@@ -338,7 +345,7 @@ export function partitionLengths(
   const space = available - gap;
   if (space <= 0) return { first: 0, second: 0, feasible: false };
 
-  let first = Math.floor(available * ratio);
+  let first = Math.floor(space * ratio);
   for (let i = 0; i < 4; i++) {
     first = clampToBounds(first, firstBounds);
     const second = space - first;

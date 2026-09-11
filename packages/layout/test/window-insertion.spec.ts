@@ -210,8 +210,9 @@ describe("focused window insertion (fake engine)", () => {
       .slice(writesBefore)
       .filter((write) => write.windowId === "E");
     expect(eWrites.some((write) => write.requested.height === 800)).toBe(true);
-    expect(eWrites.at(-1)?.requested.height).toBe(400);
-    expect(h.fake.frameOf("E")).toEqual({ x: 1512, y: 0, width: 488, height: 400 });
+    expect(eWrites.at(-1)?.requested.height).toBe(396);
+    expect(h.fake.frameOf("E")).toEqual({ x: 1506, y: 0, width: 494, height: 396 });
+    expect(h.fake.frameOf("F")).toEqual({ x: 1506, y: 404, width: 494, height: 396 });
     const finalFrames = ["A", "B", "E", "F"].map((id) => h.fake.frameOf(id));
     expect(finalFrames).not.toContain(null);
     for (let index = 0; index < finalFrames.length; index += 1) {

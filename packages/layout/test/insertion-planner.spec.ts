@@ -74,7 +74,7 @@ describe("window insertion planner", () => {
 
     expect(result?.beside).toBe("b");
     expect(result?.axis).toBe("horizontal");
-    expect(result?.frame).toEqual(frame(508, 308, 492, 292));
+    expect(result?.frame).toEqual(frame(504, 304, 496, 296));
   });
 
   test("uses the other axis when minima and gap make the preferred split infeasible", () => {
@@ -83,7 +83,7 @@ describe("window insertion planner", () => {
     const result = plan(leaf("a"), "a", resolve);
 
     expect(result?.axis).toBe("horizontal");
-    expect(result?.frame).toEqual(frame(0, 308, 1000, 292));
+    expect(result?.frame).toEqual(frame(0, 304, 1000, 296));
   });
 
   test("honors margins, gap, and maximum size", () => {
@@ -118,8 +118,8 @@ describe("window insertion planner", () => {
       gap: 8,
       resolve: () => undefined,
     });
-    expect(layout.feasible && layout.frames.get("b")).toEqual(frame(508, 0, 492, 300));
-    expect(layout.feasible && layout.frames.get("c")).toEqual(frame(508, 308, 492, 292));
+    expect(layout.feasible && layout.frames.get("b")).toEqual(frame(504, 0, 496, 296));
+    expect(layout.feasible && layout.frames.get("c")).toEqual(frame(504, 304, 496, 296));
   });
 
   test("retains a divider previously clamped by an ancestor maximum", () => {
@@ -128,7 +128,7 @@ describe("window insertion planner", () => {
     const result = plan(tree, "a", resolve);
 
     expect(result?.axis).toBe("horizontal");
-    expect(result?.frame).toEqual(frame(0, 308, 400, 292));
+    expect(result?.frame).toEqual(frame(0, 304, 400, 296));
     if (result === null) return;
     const layout = planLayout({
       tree: result.tree,
@@ -139,6 +139,30 @@ describe("window insertion planner", () => {
     expect(layout.feasible && layout.frames.get("b")).toEqual(frame(408, 0, 592, 600));
     if (result.tree.kind !== "split" || tree.kind !== "split") return;
     expect(result.tree.second).toBe(tree.second);
+  });
+
+  test("retains a gap-exclusive divider after inserting into its constrained pane", () => {
+    const tree: BspNode = {
+      kind: "split",
+      axis: "vertical",
+      ratio: 0.5,
+      first: leaf("a"),
+      second: leaf("b"),
+    };
+    const resolve: ConstraintResolver = (id) => (id === "a" ? { width: { max: 401 } } : undefined);
+    const result = plan(tree, "a", resolve, {}, 11);
+
+    expect(result).not.toBeNull();
+    if (result === null) return;
+    const layout = planLayout({
+      tree: result.tree,
+      content: frame(0, 0, 1000, 600),
+      gap: 11,
+      resolve,
+    });
+    expect(layout.feasible && layout.frames.get("a")?.width).toBe(401);
+    expect(layout.feasible && layout.frames.get("b")).toEqual(frame(412, 0, 588, 600));
+    expect(result.tree.kind === "split" && result.tree.ratio).toBe((401 + 0.5) / 989);
   });
 
   test("uses planned logical geometry instead of a parked observed frame", () => {
@@ -156,7 +180,7 @@ describe("window insertion planner", () => {
     });
 
     expect(result?.axis).toBe("horizontal");
-    expect(result?.frame).toEqual(frame(508, 308, 492, 292));
+    expect(result?.frame).toEqual(frame(504, 304, 496, 296));
   });
 
   test("preserves the default fallback when neither strict split fits", () => {

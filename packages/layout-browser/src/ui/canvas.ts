@@ -167,7 +167,7 @@ export function windowVisualState(window: StateSnapshot["windows"][number]): Win
 
 /**
  * BSP divider segments for one workspace over its display content rect.
- * Mirrors the documented split math (first pane = floor(available · ratio),
+ * Mirrors the documented split math (first pane = floor((available - gap) · ratio),
  * second pane offset += gap) WITHOUT constraints — the renderer cannot see
  * learned bounds through the frozen public API, so visuals use plain ratios.
  */
@@ -180,7 +180,7 @@ export function splitLinesForTree(
   const walk = (node: BspTreeSnapshot, rect: Frame): void => {
     if (node.kind !== "split") return;
     if (node.axis === "vertical") {
-      const firstLen = Math.max(0, Math.floor(rect.width * node.ratio));
+      const firstLen = Math.floor(Math.max(0, rect.width - gap) * node.ratio);
       const dividerX = rect.x + firstLen + gap / 2;
       lines.push({ x1: dividerX, y1: rect.y, x2: dividerX, y2: rect.y + rect.height });
       walk(node.first, { ...rect, width: firstLen });
@@ -190,7 +190,7 @@ export function splitLinesForTree(
         width: Math.max(0, rect.width - firstLen - gap),
       });
     } else {
-      const firstLen = Math.max(0, Math.floor(rect.height * node.ratio));
+      const firstLen = Math.floor(Math.max(0, rect.height - gap) * node.ratio);
       const dividerY = rect.y + firstLen + gap / 2;
       lines.push({ x1: rect.x, y1: dividerY, x2: rect.x + rect.width, y2: dividerY });
       walk(node.first, { ...rect, height: firstLen });

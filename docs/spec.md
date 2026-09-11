@@ -313,6 +313,9 @@ Default insertion:
 - A square tile uses a vertical divider.
 - Existing window stays left/top; new window goes right/bottom.
 - Prefer a 50/50 split, adjusted as needed for size constraints.
+- Apply split ratios to the space left after subtracting the configured gap. The
+  first pane length is `floor((available - gap) * ratio)`; the second pane starts
+  after the first pane and gap.
 - Verify each new window's planned frame before inserting it, then resize the
   existing tiles immediately after successful insertion.
 
