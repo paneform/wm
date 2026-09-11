@@ -12,7 +12,16 @@ LEGACY_BRIDGE_IDENTITY="$LEGACY_LABEL.sketchybar"
 LEGACY_BRIDGE_IDENTITY_PLIST="$HOME/Library/LaunchAgents/$LEGACY_BRIDGE_IDENTITY.plist"
 LEGACY_BRIDGE_LABEL="$LABEL.sketchybar"
 LEGACY_BRIDGE_PLIST="$HOME/Library/LaunchAgents/$LEGACY_BRIDGE_LABEL.plist"
-CONFIG="${WM_CONFIG:-$HOME/.config/wm/config.jsonc}"
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+CANONICAL_CONFIG="$CONFIG_HOME/paneform/wm/config.jsonc"
+LEGACY_CONFIG="$CONFIG_HOME/wm/config.jsonc"
+if [[ -n "${WM_CONFIG:-}" ]]; then
+  CONFIG="$WM_CONFIG"
+elif [[ ! -e "$CANONICAL_CONFIG" && -e "$LEGACY_CONFIG" ]]; then
+  CONFIG="$LEGACY_CONFIG"
+else
+  CONFIG="$CANONICAL_CONFIG"
+fi
 SIDECAR="${WM_NATIVE_HOST:-$HOME/.local/libexec/wm/wm.app/Contents/MacOS/wm}"
 STATE="${XDG_STATE_HOME:-$HOME/.local/state}/wm"
 SERVICE_PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
