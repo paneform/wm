@@ -116,6 +116,7 @@ const parkedProbeHarness = async (
   );
   await Effect.runPromise(engine.start());
   await Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "1" }));
+  await Effect.runPromise(engine.reconcile());
   return { fake, engine, id };
 };
 
@@ -149,8 +150,11 @@ describe("engine pipeline (fake platform)", () => {
 
     fake.removeWindow(closed);
 
-    await waitFor(() => fake.frameOf(surviving)?.width === display.workArea.width);
+    await Effect.runPromise(engine.reconcile());
     expect(fake.frameOf(surviving)).toEqual(display.workArea);
+    expect(
+      (await Effect.runPromise(engine.state())).windows.find(({ id }) => id === surviving)?.frame,
+    ).toEqual(display.workArea);
     await Effect.runPromise(engine.stop());
   });
 
@@ -253,6 +257,7 @@ describe("engine pipeline (fake platform)", () => {
     await Effect.runPromise(engine.start());
     await Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "1" }));
     fake.focusWindowExternal(peer);
+    await Effect.runPromise(engine.reconcile());
     const before = await Effect.runPromise(engine.state());
     const durable = fake.frameOf(id)!;
     const writesBefore = fake.writes().length;
@@ -363,6 +368,7 @@ describe("engine pipeline (fake platform)", () => {
     const engine = await Effect.runPromise(createEngine({ adapter, configSource, clock: CLOCK }));
     await Effect.runPromise(engine.start());
     await Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "1" }));
+    await Effect.runPromise(engine.reconcile());
     clampPositions = true;
 
     const durable = fake.frameOf(id)!;
@@ -532,7 +538,7 @@ describe("engine pipeline (fake platform)", () => {
   ])("explicit limit probe rejects %s windows without writes", async (_label, state) => {
     const h = await bootstrap();
     const id = h.fake.addWindow(makeWindow(state));
-    await h.run({ type: "reconcile" });
+    await Effect.runPromise(h.engine.reconcile());
     const before = h.fake.writes().length;
 
     const exit = await Effect.runPromiseExit(
@@ -814,7 +820,7 @@ describe("engine pipeline (fake platform)", () => {
       makeWindow({ x: 10, y: 10, personality: { kind: "fixedSize" } }),
     );
     const normal = h.fake.addWindow(makeWindow({ x: 400, y: 400 }));
-    await h.run({ type: "reconcile" });
+    await Effect.runPromise(h.engine.reconcile());
     const snap = await h.snapshot();
     const snapFixed = snap.windows.find((w) => w.id === fixed);
     const snapNormal = snap.windows.find((w) => w.id === normal);

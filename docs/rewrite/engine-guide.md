@@ -34,6 +34,41 @@ Core loop stays simple: **apply deterministic rules that may or may not apply to
 window based on its observed capabilities and attributes.** Complexity lives in rules and
 probes, never in hidden global logic.
 
+### Settled Lifecycle
+
+The internal hooks in `packages/layout/src/lifecycle.ts` run in order:
+`observe -> membershipFocus -> plan -> apply -> refreshVerify -> publish`.
+One cycle holds the mutation gate until its layout and observed frames converge.
+Platform hints received during reads or writes are queued for the next batch;
+removal IDs coalesce and the latest focus hint wins. Explicit commands retain
+their ordering and compound transaction boundaries.
+
+Geometry writes, including nested workspace parking and reveal writes, receive
+live identity-checked readback. Verified frames survive a lagging inventory cache
+within the cycle. Only a converged cycle emits a `reconciliation` event. Failures
+and the 16-pass safety limit emit diagnostics instead of a false settled snapshot.
+The `reconcile` command reports those failures; the existing non-failing
+`engine.reconcile()` API reports them through health and diagnostic events.
+Removal outcomes include `removedWindowIds`, allowing clients to await the relevant
+settlement or failure instead of guessing how many reconciliation calls to make.
+
+### Initial Tiling
+
+Ordinary startup applies workspace affinity before inferring the initial BSP tree.
+For non-overlapping visible windows, full separating borders preserve the existing
+arrangement, including unequal splits. Existing divider centers stay in place where
+possible; outer panes fill unused display space and borders adjust for configured
+gaps and margins. Constraints remain authoritative. A fitting scene needs no writes.
+Group admission verifies every member before committing, and failed or interrupted
+writes restore original frames with identity checks. Incomplete restoration keeps
+health degraded for the engine lifetime rather than being cleared by an idle cycle.
+
+Explicit scenario hydration preserves supplied frames and membership without writes,
+but infers matching layout intent using the same border algorithm. Neither ordinary
+reconciliation nor later window additions re-infers an established tree. Overlapping
+desktop windows retain the existing admission path; non-slicing imported scenes use
+a deterministic fallback and cannot promise exact preservation under BSP tiling.
+
 ## Actions (engine → executor)
 
 `SetFrame{ windowId, frame }`, `SetPosition`, `FocusWindow`, `InsertWindow{ windowId,

@@ -23,5 +23,7 @@ export * from "./events.js";
 // Config / commands / transport / engine
 export * from "./config.js";
 export * from "./commands.js";
+export * from "./command-syntax.js";
+export type { EngineInitialLayout } from "./initial-layout.js";
 export * from "./transport.js";
 export * from "./engine.js";

@@ -5,11 +5,12 @@ import type { Clock, Random } from "./platform.js";
 // and the renderer simulation. The fake PlatformAdapter itself lives in
 // test/helpers (TEST agent); everything it needs to be deterministic is here.
 
-interface TestClock extends Clock {
+export interface TestClock extends Clock {
   /** Advance virtual time, firing due sleeps in scheduling order. */
   advance(millis: number): void;
   advanceTo(atMs: number): void;
   pendingCount(): number;
+  nextWake(): number | null;
 }
 
 export const createTestClock = (startMs = 0): TestClock => {
@@ -18,6 +19,7 @@ export const createTestClock = (startMs = 0): TestClock => {
     at: number;
     order: number;
     resume: (effect: Effect.Effect<void>) => void;
+    cancelled: boolean;
   }
   const wakes: Wake[] = [];
   let order = 0;
@@ -27,8 +29,14 @@ export const createTestClock = (startMs = 0): TestClock => {
     sleep(millis) {
       return Effect.async<void>((resume) => {
         order += 1;
-        wakes.push({ at: now + millis, order, resume });
+        const wake: Wake = { at: now + millis, order, resume, cancelled: false };
+        wakes.push(wake);
         wakes.sort((a, b) => a.at - b.at || a.order - b.order);
+        return Effect.sync(() => {
+          wake.cancelled = true;
+          const index = wakes.indexOf(wake);
+          if (index >= 0) wakes.splice(index, 1);
+        });
       });
     },
     advance(millis) {
@@ -38,10 +46,11 @@ export const createTestClock = (startMs = 0): TestClock => {
       now = target;
       while (wakes.length > 0 && wakes[0]!.at <= now) {
         const wake = wakes.shift()!;
-        wake.resume(Effect.void);
+        if (!wake.cancelled) wake.resume(Effect.void);
       }
     },
     pendingCount: () => wakes.length,
+    nextWake: () => wakes[0]?.at ?? null,
   };
 };
 

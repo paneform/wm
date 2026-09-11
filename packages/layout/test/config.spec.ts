@@ -38,6 +38,14 @@ describe("config parse validation", () => {
     expect(parseConfigSafe({ keybinds: { "shift s": "" } }).ok).toBe(false);
   });
 
+  test("directional move groups is an optional boolean experiment", () => {
+    expect(parseConfig({ experiments: { directionalMoveGroups: true } }).experiments).toEqual({
+      directionalMoveGroups: true,
+    });
+    expect(parseConfig({}).experiments?.directionalMoveGroups ?? false).toBe(false);
+    expect(parseConfigSafe({ experiments: { directionalMoveGroups: "yes" } }).ok).toBe(false);
+  });
+
   test("unknown fields are errors at every level", () => {
     const candidates: unknown[] = [
       { nope: true },
@@ -46,6 +54,7 @@ describe("config parse validation", () => {
       { workspaces: [{ name: "main", nope: 1 }] },
       { defaults: { margins: { top: 4, sideways: 1 } } },
       { workspaces: [{ name: "main", assign: [{ bundleId: "x", titleExtra: "y" }] }] },
+      { experiments: { unknownExperiment: true } },
     ];
     for (const candidate of candidates) {
       expect(() => parseConfig(candidate)).toThrow(ConfigInvalidError);
@@ -311,6 +320,15 @@ describe("delta reload atomicity", () => {
     expect(applyConfigDelta(prior, {})).toEqual(prior);
   });
 
+  test("delta preserves an absent experiment and applies explicit false", () => {
+    const prior: Config = { experiments: { directionalMoveGroups: true } };
+    expect(applyConfigDelta(prior, {})).toEqual(prior);
+    expect(applyConfigDelta(prior, { experiments: {} })).toEqual(prior);
+    expect(applyConfigDelta(prior, { experiments: { directionalMoveGroups: false } })).toEqual({
+      experiments: { directionalMoveGroups: false },
+    });
+  });
+
   test("merged delta feeds through to effective settings", () => {
     const merged = applyConfigDelta(baseConfig(), {
       defaults: { gap: 24 },
@@ -346,6 +364,11 @@ describe("full reload semantics", () => {
     const next = applyConfigFull(baseConfig(), {});
     expect(next).toEqual({});
     expect(effectiveSettings(next, "main").gap).toBe(BSP_DEFAULT_GAP);
+  });
+
+  test("an absent experiment resets on full reload", () => {
+    const prior: Config = { experiments: { directionalMoveGroups: true } };
+    expect(applyConfigFull(prior, {})).toEqual({});
   });
 
   test("invalid full-reload candidates throw before any swap happens", () => {

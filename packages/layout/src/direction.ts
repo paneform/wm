@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import type { Frame } from "./schema.js";
 
 // Directional neighbor resolution — pure geometry/ranking shared by the
 // focusDirection and moveDirection commands (bean wm-pmys). No platform or
@@ -30,6 +31,17 @@ export interface DirectionalNeighborInput {
    * coordinates are fine — only differences are used.
    */
   candidates: readonly DirectionalCandidate[];
+}
+
+export interface DirectionalFocusCandidate {
+  readonly id: string;
+  readonly frame: Frame;
+}
+
+export interface DirectionalFocusNeighborInput {
+  readonly direction: Direction;
+  readonly origin: Frame;
+  readonly candidates: readonly DirectionalFocusCandidate[];
 }
 
 const primaryAxisOf = (direction: Direction): "x" | "y" =>
@@ -77,4 +89,59 @@ export function directionalNeighbor(input: DirectionalNeighborInput): string | n
     (a, b) => b.gap - a.gap || a.ortho - b.ortho || a.index - b.index,
   );
   return wrapped[0]?.id ?? null;
+}
+
+const intervalGap = (aStart: number, aEnd: number, bStart: number, bEnd: number): number =>
+  Math.max(0, aStart - bEnd, bStart - aEnd);
+
+/** Selects the nearest window whose full frame is beyond the requested border. */
+export function directionalFocusNeighbor(input: DirectionalFocusNeighborInput): string | null {
+  const horizontal = input.direction === "left" || input.direction === "right";
+  const originPrimaryStart = horizontal ? input.origin.x : input.origin.y;
+  const originPrimaryEnd =
+    originPrimaryStart + (horizontal ? input.origin.width : input.origin.height);
+  const originOrthoStart = horizontal ? input.origin.y : input.origin.x;
+  const originOrthoEnd = originOrthoStart + (horizontal ? input.origin.height : input.origin.width);
+
+  const ranked = input.candidates.flatMap((candidate, index) => {
+    const frame = candidate.frame;
+    const candidatePrimaryStart = horizontal ? frame.x : frame.y;
+    const candidatePrimaryEnd = candidatePrimaryStart + (horizontal ? frame.width : frame.height);
+    const forward =
+      input.direction === "left" || input.direction === "up"
+        ? candidatePrimaryEnd <= originPrimaryStart
+        : candidatePrimaryStart >= originPrimaryEnd;
+    if (!forward) return [];
+
+    const candidateOrthoStart = horizontal ? frame.y : frame.x;
+    const candidateOrthoEnd = candidateOrthoStart + (horizontal ? frame.height : frame.width);
+    return [
+      {
+        id: candidate.id,
+        primaryGap:
+          input.direction === "left" || input.direction === "up"
+            ? originPrimaryStart - candidatePrimaryEnd
+            : candidatePrimaryStart - originPrimaryEnd,
+        orthoGap: intervalGap(
+          originOrthoStart,
+          originOrthoEnd,
+          candidateOrthoStart,
+          candidateOrthoEnd,
+        ),
+        orthoCenterGap: Math.abs(
+          (originOrthoStart + originOrthoEnd) / 2 - (candidateOrthoStart + candidateOrthoEnd) / 2,
+        ),
+        index,
+      },
+    ];
+  });
+
+  ranked.sort(
+    (a, b) =>
+      a.primaryGap - b.primaryGap ||
+      a.orthoGap - b.orthoGap ||
+      a.orthoCenterGap - b.orthoCenterGap ||
+      a.index - b.index,
+  );
+  return ranked[0]?.id ?? null;
 }

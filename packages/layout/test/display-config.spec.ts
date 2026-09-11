@@ -66,7 +66,12 @@ describe("display-scoped layout settings", () => {
 
     await Effect.runPromise(engine.start());
 
-    expect(fake.frameOf(id)).toMatchObject({ x: DELL.workArea.x, y: 32 });
+    expect(fake.writes()).toContainEqual(
+      expect.objectContaining({
+        windowId: id,
+        requested: expect.objectContaining({ x: DELL.workArea.x, y: 32 }),
+      }),
+    );
     expect(
       (await Effect.runPromise(engine.state())).workspaces.find((ws) => ws.name === "dell")
         ?.members,
@@ -87,7 +92,12 @@ describe("display-scoped layout settings", () => {
 
     await Effect.runPromise(engine.start());
 
-    expect(fake.frameOf(id)?.y).toBe(12);
+    expect(fake.writes()).toContainEqual(
+      expect.objectContaining({
+        windowId: id,
+        requested: expect.objectContaining({ x: DELL.workArea.x, y: 12 }),
+      }),
+    );
     await Effect.runPromise(engine.stop());
   });
 
