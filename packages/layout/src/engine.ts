@@ -16,18 +16,22 @@ import type {
 import type { DomainTopic } from "./events.js";
 import {
   classify,
+  recordFocusedMember,
   type BspNode,
   type ProfileKey,
   type ParkingCorner,
   type ParkingVisibility,
   type World,
+  type SplitAxis,
   type WorkspaceState,
 } from "./world.js";
 import {
   DEFAULT_TOLERANCE,
   EMPTY_TREE_LEAF,
   PARKING_ACCEPTANCE_PT,
+  POLICY_CHAIN,
   PROMOTION_SAMPLES,
+  type LayoutPolicy,
 } from "./constants.js";
 import {
   center,
@@ -71,11 +75,12 @@ import {
   isEmptyTree,
   planLayout,
   removeLeaf,
-  moveLeaf,
   tiledMembers,
 } from "./layout/bsp.js";
-import { directionalNeighbor, type DirectionalCandidate } from "./direction.js";
-import { insertionDisplay, insertionTargetFrame } from "./insertion-frame.js";
+import { moveGeometrically } from "./layout/geometric-move.js";
+import { directionalFocusNeighbor, type DirectionalFocusCandidate } from "./direction.js";
+import { insertionDisplay, planWindowInsertion } from "./insertion-frame.js";
+import { tileWorkspaces } from "./rules/tile-workspaces.js";
 import type { Action } from "./actions.js";
 import { dedupeActions } from "./actions.js";
 import {
@@ -246,7 +251,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
      * Signals arriving while a compound transaction holds the gate are
      * applied right after commit, before the rerun reconcile.
      */
-    let pendingFocusSignal: WindowId | null | undefined = undefined;
+    const pendingFocusSignals: (WindowId | null)[] = [];
 
     const applyFocusSignal = (id: WindowId | null): void => {
       // Deliberately does NOT touch lastObservedFocusId: the event is AHEAD
@@ -254,15 +259,15 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       // the very next refresh look like a competing "change".
       focusGeneration += 1;
       world = {
-        ...world,
+        ...recordFocusedMember(world, id),
         focusIntent: id === null ? null : { id, generation: focusGeneration },
       };
     };
 
     const consumeFocusSignal = (id: WindowId | null): void => {
       if (reconciling) {
-        // Coalesced: newest signal wins; applied pre-idle at release.
-        pendingFocusSignal = id;
+        // Keep intermediate tiled focus when the newest signal is a new window or dialog.
+        pendingFocusSignals.push(id);
       } else applyFocusSignal(id);
     };
 
@@ -286,9 +291,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       bus.publish("health", { state: next, issues: [...health.issues] });
     };
 
-    const setNativeHotkeySwallowing = (
-      enabled: boolean,
-    ): Effect.Effect<void, CommandError> =>
+    const setNativeHotkeySwallowing = (enabled: boolean): Effect.Effect<void, CommandError> =>
       adapter.setHotkeySwallowing === undefined
         ? Effect.void
         : Effect.mapError(
@@ -662,6 +665,8 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         floating,
         parkedFrames,
         lastFocusedMember: from.lastFocusedMember === windowId ? null : from.lastFocusedMember,
+        lastFocusedTiledMember:
+          from.lastFocusedTiledMember === windowId ? null : (from.lastFocusedTiledMember ?? null),
       };
     };
 
@@ -676,31 +681,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       workspaceName: string,
       windowId: WindowId,
       besideHint?: WindowId | null,
+      axis?: SplitAxis,
     ): void => {
-      const workspace = ensureWorkspace(workspaceName);
-      const members = tiledMembers(workspace.tree);
-      const beside =
-        besideHint !== undefined && besideHint !== null && members.includes(besideHint)
-          ? besideHint
-          : workspace.lastFocusedMember !== null && members.includes(workspace.lastFocusedMember)
-            ? workspace.lastFocusedMember
-            : members[0];
-      const observedBesideFrame =
-        beside === undefined ? undefined : world.windows.get(beside)?.frame;
-      const insertionHost = insertionDisplay(world, workspace, observedBesideFrame);
-      const besideFrame = insertionTargetFrame(
-        world,
-        workspace,
-        observedBesideFrame,
-        effectiveSettings(config, workspaceName, insertionHost?.id).margins,
-      );
-
-      const tree: BspNode =
-        beside === undefined || besideFrame === undefined || isEmptyTree(workspace.tree)
-          ? { kind: "leaf", windowId }
-          : (insertLeaf(workspace.tree, beside, windowId, besideFrame) ?? workspace.tree);
-
-      commitWorkspace({ ...workspace, tree, lastFocusedMember: windowId });
+      world = insertTiledIntoIn(world, workspaceName, windowId, world, besideHint, axis);
     };
 
     const doFloat = (windowId: WindowId): void => {
@@ -749,7 +732,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       diagnostic: JSON.stringify({ outcome: error.outcome, observed: error.observed ?? null }),
     });
 
-    const geometryContextFor = (observation: WindowObservation) => {
+    const geometryContextFor = (
+      observation: WindowObservation,
+      expectedIdentity?: ExpectedWindowIdentity,
+    ) => {
       const key = profileKeyOfObs(observation);
       return {
         constraints: constraintsFor(observation),
@@ -759,6 +745,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           key === null
             ? undefined
             : world.profiles.get(profileKeyString(key))?.correctiveAttemptCount,
+        expectedIdentity,
       };
     };
 
@@ -768,9 +755,12 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       tolerance?: number,
       parkingDisplayId?: DisplayId,
       parkingDisplays = world.topology.displays,
+      observationOverride?: WindowObservation,
+      expectedIdentity?: ExpectedWindowIdentity,
+      observeMovement?: (observation: WindowObservation) => void,
     ) =>
       Effect.gen(function* () {
-        const observation = world.windows.get(windowId);
+        const observation = observationOverride ?? world.windows.get(windowId);
         if (observation === undefined) {
           return yield* Effect.fail<StepFailure>({
             code: "window_not_found",
@@ -781,13 +771,65 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         if (tolerance !== undefined) request.tolerance = tolerance;
         if (parkingDisplayId !== undefined) request.acceptance = "parkingStablePositionClamp";
         const result = yield* Effect.either(
-          applyGeometryRequest({ adapter, clock }, request, geometryContextFor(observation)),
+          applyGeometryRequest(
+            { adapter, clock },
+            request,
+            geometryContextFor(observation, expectedIdentity),
+          ),
         );
         if (result._tag === "Left") {
           // Resistant behavior marks cooperation (profile-informed skip ahead).
           const key = profileKeyOfObs(observation);
-          if (key !== null) {
+          if (key !== null && result.left.code === "rejected") {
             setLearning(markCooperation(learning, key, true));
+          }
+          if (
+            result.left.code === "rejected" &&
+            result.left.observed !== undefined &&
+            result.left.stable === true &&
+            (result.left.stableReads ?? 0) >= 3 &&
+            observation.capabilities.resizable === "supported" &&
+            Math.abs(result.left.observed.x - frame.x) <= (tolerance ?? DEFAULT_TOLERANCE) &&
+            Math.abs(result.left.observed.y - frame.y) <= (tolerance ?? DEFAULT_TOLERANCE)
+          ) {
+            learnFrom(
+              observation,
+              frame,
+              "stableClamp",
+              result.left.observed,
+              result.left.stableReads,
+              true,
+            );
+          }
+          if (
+            result.left.code === "rejected" &&
+            result.left.observed !== undefined &&
+            result.left.stable === true &&
+            (result.left.stableReads ?? 0) >= 3
+          ) {
+            const observed = result.left.observed;
+            const failedAxes = (["x", "y"] as const).filter(
+              (axis) =>
+                Math.abs(frame[axis] - observation.frame[axis]) >
+                  (tolerance ?? DEFAULT_TOLERANCE) &&
+                Math.abs(observed[axis] - observation.frame[axis]) <=
+                  (tolerance ?? DEFAULT_TOLERANCE),
+            );
+            if (failedAxes.length > 0) {
+              observeMovement?.({
+                ...observation,
+                frame: observed,
+                capabilities: {
+                  ...observation.capabilities,
+                  movable: "inconclusive",
+                  movableEvidence: "geometry_operation",
+                },
+              });
+              bus.publish("diagnostic", {
+                code: "geometry_move_refused",
+                detail: `window ${windowId} failed ${failedAxes.join("/")}; request=${JSON.stringify(frame)}; readback=${JSON.stringify(observed)}`,
+              });
+            }
           }
           return yield* Effect.fail(stepFailure(result.left));
         }
@@ -816,6 +858,20 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           bus.publish("diagnostic", {
             code: "geometry_progressing",
             detail: `window ${windowId} still animating toward target`,
+          });
+        }
+        if (
+          Math.abs(result.right.frame.x - observation.frame.x) > (tolerance ?? DEFAULT_TOLERANCE) ||
+          Math.abs(result.right.frame.y - observation.frame.y) > (tolerance ?? DEFAULT_TOLERANCE)
+        ) {
+          observeMovement?.({
+            ...observation,
+            frame: result.right.frame,
+            capabilities: {
+              ...observation.capabilities,
+              movable: "supported",
+              movableEvidence: "geometry_operation",
+            },
           });
         }
         return result.right;
@@ -966,8 +1022,20 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     const applyAction = (action: Action): Effect.Effect<unknown, StepFailure> =>
       Effect.gen(function* () {
         switch (action.kind) {
-          case "setFrame":
-            return yield* writeFrame(action.windowId, action.frame);
+          case "setFrame": {
+            const result = yield* writeFrame(action.windowId, action.frame);
+            const observation = world.windows.get(action.windowId);
+            if (observation !== undefined) {
+              world = {
+                ...world,
+                windows: new Map(world.windows).set(action.windowId, {
+                  ...observation,
+                  frame: result.frame,
+                }),
+              };
+            }
+            return result;
+          }
           case "setPosition": {
             const observation = world.windows.get(action.windowId);
             if (observation === undefined) {
@@ -1039,7 +1107,6 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   commitWorkspace({
                     ...workspace,
                     tree: tombstone.tree,
-                    lastFocusedMember: action.windowId,
                     parkedFrames:
                       tombstone.parkedFrame === null
                         ? workspace.parkedFrames
@@ -1048,6 +1115,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                             tombstone.parkedFrame,
                           ),
                   });
+                  world = recordFocusedMember(world, world.focusIntent?.id ?? null);
                   tombstones.delete(action.windowId);
                   return;
                 }
@@ -1066,8 +1134,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 })(),
               });
             } else {
-              insertTiledInto(action.workspace, action.windowId, action.beside ?? null);
+              insertTiledInto(action.workspace, action.windowId, action.beside, action.axis);
             }
+            world = recordFocusedMember(world, world.focusIntent?.id ?? null);
             tombstones.delete(action.windowId);
             return;
           case "removeWindow":
@@ -1288,9 +1357,23 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         }
 
         world = { ...world, topology: topology.right, windows: windowsMap };
+        // Signals received during inventory are newer than its focus snapshot.
+        // Remember intermediate tiled focus before a newly focused window gains membership.
+        for (const signal of pendingFocusSignals.splice(0)) applyFocusSignal(signal);
+        world = recordFocusedMember(world, world.focusIntent?.id ?? null);
 
         const actions = runRules();
-        const outcome = yield* executePlan(actions);
+        let outcome = yield* executePlan(actions);
+        if (outcome.failure === null && actions.some((action) => action.kind === "insertWindow")) {
+          // Preflight verified only the new windows. Resize their existing peers now,
+          // using committed membership rather than waiting for another platform event.
+          const retile = world.paused ? [] : tileWorkspaces.run(world, makeCtx());
+          if (retile.length > 0) {
+            const tiled = yield* executePlan(retile);
+            actions.push(...retile);
+            outcome = { applied: outcome.applied + tiled.applied, failure: tiled.failure };
+          }
+        }
         const firstRemoval = actions.findIndex((action) => action.kind === "removeWindow");
         if (firstRemoval >= 0 && outcome.applied > firstRemoval) {
           // Rules plan from one snapshot. Removing a BSP leaf changes the
@@ -1329,11 +1412,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             // A focus signal that arrived while the gate was held applies
             // BEFORE idle/release so a waiting command observes the
             // authoritative intent (review round 3 final, issue 4).
-            if (pendingFocusSignal !== undefined) {
-              const signal = pendingFocusSignal;
-              pendingFocusSignal = undefined;
-              applyFocusSignal(signal);
-            }
+            for (const signal of pendingFocusSignals.splice(0)) applyFocusSignal(signal);
             reconciling = false;
             yield* reconcileGate.release(1);
             if (reconcileAgain) {
@@ -1440,47 +1519,45 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         (ws) => tiledMembers(ws.tree).includes(windowId) || ws.floating.has(windowId),
       );
 
-    /**
-     * Split-axis choice reads the COMMITTED generation's frames
-     * (`framesWorld`) — topology policy deliberately ignores same-pass
-     * geometry writes; plan deltas use fresh observations.
-     */
+    /** Shared logical insertion planning for automatic placement and command drafts. */
     const insertTiledIntoIn = (
       w: World,
       wsName: string,
       windowId: WindowId,
       framesWorld: World,
       besideHint?: WindowId | null,
+      axis?: SplitAxis,
     ): World => {
       const withWs = ensureWorkspaceIn(w, wsName);
       const ws = withWs.workspaces.get(wsName);
       if (ws === undefined) return withWs;
-      const members = tiledMembers(ws.tree);
-      const beside =
-        besideHint !== undefined && besideHint !== null && members.includes(besideHint)
-          ? besideHint
-          : ws.lastFocusedMember !== null && members.includes(ws.lastFocusedMember)
-            ? ws.lastFocusedMember
-            : members[0];
-      const observedBesideFrame =
-        beside === undefined ? undefined : framesWorld.windows.get(beside)?.frame;
-      const insertionHost = insertionDisplay(withWs, ws, observedBesideFrame);
-      const besideFrame = insertionTargetFrame(
-        withWs,
-        ws,
-        observedBesideFrame,
-        effectiveSettings(config, wsName, insertionHost?.id).margins,
-      );
-      const tree: BspNode =
-        beside === undefined || besideFrame === undefined || isEmptyTree(ws.tree)
-          ? { kind: "leaf", windowId }
-          : (insertLeaf(ws.tree, beside, windowId, besideFrame) ?? ws.tree);
+      const insertionHost = insertionDisplay(withWs, ws, undefined);
+      const settings = effectiveSettings(config, wsName, insertionHost?.id);
+      const plan = planWindowInsertion({
+        world: withWs,
+        workspace: ws,
+        newId: windowId,
+        margins: settings.margins,
+        gap: settings.gap,
+        resolve: constraintsResolver((id) => {
+          const obs = framesWorld.windows.get(id);
+          return obs === undefined ? {} : constraintsFor(obs);
+        }),
+        beside: besideHint,
+        axis,
+      });
+      // Commands must retain membership even without a display; their layout verification
+      // rejects infeasible geometry before committing the draft.
+      const tree =
+        plan?.tree ??
+        (isEmptyTree(ws.tree)
+          ? { kind: "leaf" as const, windowId }
+          : (insertLeaf(ws.tree, firstLeaf(ws.tree)!, windowId) ?? ws.tree));
       return {
         ...withWs,
         workspaces: new Map(withWs.workspaces).set(wsName, {
           ...ws,
           tree,
-          lastFocusedMember: windowId,
         }),
       };
     };
@@ -1574,16 +1651,25 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     }
 
     type BuiltPlan =
-      | { ok: true; writes: PlannedWrite[]; draft: World }
+      | {
+          ok: true;
+          writes: PlannedWrite[];
+          targets: PlannedWrite[];
+          draft: World;
+          policy: LayoutPolicy | null;
+        }
       | { ok: false; error: CommandError };
 
     const buildCompoundPlan = (
       start: World,
       intents: readonly CompoundIntent[],
       acc: PlanAccessors,
+      policies?: readonly LayoutPolicy[],
     ): BuiltPlan => {
       const writes: PlannedWrite[] = [];
+      const targets: PlannedWrite[] = [];
       let draft = start;
+      let selectedPolicy: LayoutPolicy | null = null;
 
       const planRetile = (wsName: WorkspaceName): CommandError | null => {
         const ws = draft.workspaces.get(wsName);
@@ -1603,18 +1689,22 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           const obs = acc.observationOf(id);
           return obs === undefined ? undefined : acc.constraintsFor(obs);
         });
-        const plan = planLayout({
-          tree: ws.tree,
-          content: contentRect(display, settings.margins),
-          gap: settings.gap,
-          resolve: resolver,
-        });
+        const plan = planLayout(
+          {
+            tree: ws.tree,
+            content: contentRect(display, settings.margins),
+            gap: settings.gap,
+            resolve: resolver,
+          },
+          policies,
+        );
         if (!plan.feasible) {
           return new CommandError({
             code: "geometry_rejected",
             message: `layout infeasible for workspace ${wsName}`,
           });
         }
+        selectedPolicy = plan.policy;
         if (ws.parkedFrames.size > 0) {
           draft = {
             ...draft,
@@ -1627,6 +1717,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         for (const [id, frame] of plan.frames) {
           const obs = acc.observationOf(id);
           if (obs === undefined || obs.minimized || obs.hidden) continue;
+          targets.push({ windowId: id, frame });
           if (!withinTolerance(obs.frame, frame, DEFAULT_TOLERANCE)) {
             writes.push({ windowId: id, frame });
           }
@@ -1699,6 +1790,13 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             parkingWorkspace: wsName,
             parkingDisplayId: display.id,
           });
+          targets.push({
+            windowId: id,
+            frame: target,
+            tolerance: PARKING_ACCEPTANCE_PT,
+            parkingWorkspace: wsName,
+            parkingDisplayId: display.id,
+          });
           draft = {
             ...draft,
             workspaces: new Map(draft.workspaces).set(wsName, {
@@ -1729,7 +1827,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             : planPark(intent.workspace, intent.displayId);
         if (error !== null) return { ok: false, error };
       }
-      return { ok: true, writes, draft };
+      return { ok: true, writes, targets, draft, policy: selectedPolicy };
     };
 
     interface CompoundCtx {
@@ -1749,17 +1847,21 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         readonly displayId: DisplayId;
       }>;
       committed: boolean;
+      noOp: boolean;
+      preserveLearning: boolean;
       appliedActions: number;
     }
 
     const rollbackCompound = (ctx: CompoundCtx): Effect.Effect<void> =>
       Effect.gen(function* () {
-        learning = ctx.learning;
-        persistedLearning = ctx.persistedLearning;
-        observationRevision = ctx.observationRevision;
-        observationStoreFailed = ctx.observationStoreFailed;
-        learningDirty = ctx.learningDirty;
-        syncProfiles();
+        if (!ctx.preserveLearning) {
+          learning = ctx.learning;
+          persistedLearning = ctx.persistedLearning;
+          observationRevision = ctx.observationRevision;
+          observationStoreFailed = ctx.observationStoreFailed;
+          learningDirty = ctx.learningDirty;
+          syncProfiles();
+        }
         let incomplete = false;
         for (const cap of [...ctx.preFrames].reverse()) {
           const observedNow = yield* Effect.either(adapter.getWindow(cap.id));
@@ -1792,6 +1894,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           }
         }
         if (incomplete) setHealth("degraded", "rollback_incomplete");
+        if (ctx.preserveLearning) yield* persistLearningBestEffort();
       });
 
     /**
@@ -1807,9 +1910,13 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       }) => (world0: World) => World,
       validateDraft?: (draft: World) => CommandError | null,
       focusAfter?: (draft: World) => WindowId | null,
+      retryLayoutPolicies = false,
+      prepare?: () => CommandError | null,
     ): Effect.Effect<void, CommandError> =>
       runExclusive(
         Effect.gen(function* () {
+          const prepareError = prepare?.() ?? null;
+          if (prepareError !== null) return yield* Effect.fail(prepareError);
           // ---- capture phase: INTERRUPTIBLE, before any mutation. A
           // required affected window that is missing/unreadable fails
           // inventory_stale with ZERO mutations performed.
@@ -1851,6 +1958,8 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             learningDirty,
             shutdownRestores: [],
             committed: false,
+            noOp: false,
+            preserveLearning: false,
             appliedActions: 0,
           };
 
@@ -1890,9 +1999,14 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               };
               const draftError = validateDraft?.(ctx.draft) ?? null;
               if (draftError !== null) return yield* Effect.fail(draftError);
+              const freshDraft = ctx.draft;
               ctx.draft = reduce({ intents: ctx.intents, buffer: ctx.events, base: world })(
-                ctx.draft,
+                freshDraft,
               );
+              if (ctx.draft === freshDraft && ctx.intents.length === 0 && ctx.events.length === 0) {
+                ctx.noOp = true;
+                return ctx.draft;
+              }
               const built = buildCompoundPlan(ctx.draft, ctx.intents, {
                 observationOf: (id) => ctx.draft.windows.get(id),
                 constraintsFor: (obs) => constraintsFor(obs),
@@ -1914,6 +2028,153 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               let applied = 0;
               let finalDraft = built.draft;
               const captured = new Map(ctx.preFrames.map((frame) => [frame.id, frame]));
+              const movementEvidence = new Map<WindowId, WindowObservation>();
+              const observeMovement = (observation: WindowObservation): void => {
+                movementEvidence.set(observation.id, observation);
+              };
+              const refreshCaptured = (start: World) =>
+                Effect.gen(function* () {
+                  const windows = new Map(start.windows);
+                  for (const cap of ctx.preFrames) {
+                    const current = yield* Effect.either(adapter.getWindow(cap.id));
+                    if (
+                      current._tag === "Left" ||
+                      current.right === null ||
+                      windowIdentityFingerprint(current.right) !== cap.identity
+                    ) {
+                      return yield* Effect.fail(
+                        new CommandError({
+                          code: "inventory_stale",
+                          message: `window ${cap.id} changed during layout fallback`,
+                        }),
+                      );
+                    }
+                    const retained = movementEvidence.get(cap.id);
+                    windows.set(
+                      cap.id,
+                      retained === undefined
+                        ? current.right
+                        : { ...current.right, capabilities: retained.capabilities },
+                    );
+                  }
+                  return { ...start, windows };
+                });
+              const retryPolicies = (start: World) =>
+                Effect.gen(function* () {
+                  ctx.preserveLearning = true;
+                  let retryDraft = start;
+                  let lastError = new CommandError({
+                    code: "geometry_rejected",
+                    message: "all layout policies failed physical verification",
+                  });
+                  const selectedIndex =
+                    built.policy === null
+                      ? -1
+                      : POLICY_CHAIN.findIndex((policy) => policy === built.policy);
+                  for (const policy of POLICY_CHAIN.slice(selectedIndex + 1)) {
+                    retryDraft = yield* refreshCaptured(retryDraft);
+                    const retryBuilt = buildCompoundPlan(
+                      retryDraft,
+                      ctx.intents,
+                      {
+                        observationOf: (id) => retryDraft.windows.get(id),
+                        constraintsFor: (obs) => constraintsFor(obs),
+                        settingsFor: (name, displayId) =>
+                          effectiveSettings(config, name, displayId),
+                        ignoredSurface: (obs) =>
+                          classify(obs) !== "normal" &&
+                          classify(obs) !== "transient" &&
+                          !overrides.managed.has(obs.id),
+                      },
+                      [policy],
+                    );
+                    if (!retryBuilt.ok) {
+                      lastError = retryBuilt.error;
+                      continue;
+                    }
+                    let attemptDraft = retryBuilt.draft;
+                    let verified = true;
+                    for (const wr of retryBuilt.writes) {
+                      const observation = attemptDraft.windows.get(wr.windowId);
+                      const cap = captured.get(wr.windowId);
+                      if (observation === undefined) {
+                        return yield* Effect.fail(
+                          new CommandError({
+                            code: "inventory_stale",
+                            message: `window ${wr.windowId} vanished during layout fallback`,
+                          }),
+                        );
+                      }
+                      const result = yield* Effect.either(
+                        writeFrame(
+                          wr.windowId,
+                          wr.frame,
+                          wr.tolerance,
+                          wr.parkingDisplayId,
+                          attemptDraft.topology.displays,
+                          observation,
+                          cap?.expected,
+                          observeMovement,
+                        ),
+                      );
+                      if (result._tag === "Left") {
+                        if (result.left.code === "inventory_stale") {
+                          return yield* Effect.fail(
+                            new CommandError({
+                              code: "inventory_stale",
+                              message: `window ${wr.windowId}: ${result.left.message}`,
+                            }),
+                          );
+                        }
+                        lastError = new CommandError({
+                          code: mapStepCode(result.left.code),
+                          message: `window ${wr.windowId}: ${result.left.message}`,
+                        });
+                        retryDraft = yield* refreshCaptured(attemptDraft);
+                        verified = false;
+                        break;
+                      }
+                      attemptDraft = {
+                        ...attemptDraft,
+                        windows: new Map(attemptDraft.windows).set(wr.windowId, {
+                          ...observation,
+                          frame: result.right.frame,
+                        }),
+                      };
+                      if (result.right.outcome === "progressing") {
+                        lastError = new CommandError({
+                          code: "geometry_rejected",
+                          message: `window ${wr.windowId} did not settle for ${policy} layout`,
+                        });
+                        retryDraft = yield* refreshCaptured(attemptDraft);
+                        verified = false;
+                        break;
+                      }
+                    }
+                    if (!verified) continue;
+                    attemptDraft = yield* refreshCaptured(attemptDraft);
+                    const targetsVerified = retryBuilt.targets.every((target) => {
+                      const observation = attemptDraft.windows.get(target.windowId);
+                      return (
+                        observation !== undefined &&
+                        withinTolerance(
+                          observation.frame,
+                          target.frame,
+                          target.tolerance ?? DEFAULT_TOLERANCE,
+                        )
+                      );
+                    });
+                    if (targetsVerified) {
+                      return { draft: attemptDraft, writes: retryBuilt.writes.length };
+                    }
+                    lastError = new CommandError({
+                      code: "geometry_rejected",
+                      message: `${policy} layout did not settle at every target`,
+                    });
+                    retryDraft = attemptDraft;
+                  }
+                  return yield* Effect.fail(lastError);
+                });
               const writeOperations: PlatformBatchOperation[] = built.writes.map((wr, index) => ({
                 operationId: `write:${index}:${wr.windowId}`,
                 kind: "setFrame",
@@ -1988,10 +2249,105 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                     message: error.detail ?? "native batch failed",
                   }),
               );
+              const fatalBatchResult = built.writes
+                .map((_, index) => batch.operations[index])
+                .find(
+                  (result) =>
+                    result?.error?.code === "stale" || result?.error?.code === "not_found",
+                );
+              if (fatalBatchResult?.error !== undefined) {
+                return yield* Effect.fail(
+                  new CommandError({
+                    code: "inventory_stale",
+                    message:
+                      fatalBatchResult.error.detail ?? "window identity changed during batch",
+                  }),
+                );
+              }
+              const batchObservations = new Map(finalDraft.windows);
+              const learnedBatchClamp = new Set<WindowId>();
+              for (let index = 0; index < built.writes.length; index += 1) {
+                const wr = built.writes[index]!;
+                const result = batch.operations[index]!;
+                const observation = batchObservations.get(wr.windowId);
+                if (observation === undefined || result.observed === undefined) continue;
+                const observed = result.observed;
+                finalDraft = {
+                  ...finalDraft,
+                  windows: new Map(finalDraft.windows).set(wr.windowId, {
+                    ...observation,
+                    frame: observed,
+                  }),
+                };
+                if (
+                  (result.error === undefined ||
+                    result.error.code === "rejected" ||
+                    result.error.code === "not_controllable") &&
+                  result.stable === true &&
+                  (result.stableReads ?? 0) >= 3
+                ) {
+                  const failedAxes = (["x", "y"] as const).filter(
+                    (axis) =>
+                      Math.abs(wr.frame[axis] - observation.frame[axis]) >
+                        (wr.tolerance ?? DEFAULT_TOLERANCE) &&
+                      Math.abs(observed[axis] - observation.frame[axis]) <=
+                        (wr.tolerance ?? DEFAULT_TOLERANCE),
+                  );
+                  if (failedAxes.length > 0) {
+                    observeMovement({
+                      ...observation,
+                      frame: observed,
+                      capabilities: {
+                        ...observation.capabilities,
+                        movable: "inconclusive",
+                        movableEvidence: "geometry_operation",
+                      },
+                    });
+                    bus.publish("diagnostic", {
+                      code: "geometry_move_refused",
+                      detail: `window ${wr.windowId} failed ${failedAxes.join("/")}; request=${JSON.stringify(wr.frame)}; readback=${JSON.stringify(observed)}`,
+                    });
+                  } else if (
+                    Math.abs(observed.x - observation.frame.x) >
+                      (wr.tolerance ?? DEFAULT_TOLERANCE) ||
+                    Math.abs(observed.y - observation.frame.y) > (wr.tolerance ?? DEFAULT_TOLERANCE)
+                  ) {
+                    observeMovement({
+                      ...observation,
+                      frame: observed,
+                      capabilities: {
+                        ...observation.capabilities,
+                        movable: "supported",
+                        movableEvidence: "geometry_operation",
+                      },
+                    });
+                  }
+                }
+                if (
+                  hasStableSizeClampEvidence(
+                    result,
+                    observation,
+                    wr.frame,
+                    observed,
+                    wr.tolerance ?? DEFAULT_TOLERANCE,
+                  )
+                ) {
+                  learnFrom(
+                    observation,
+                    wr.frame,
+                    "stableClamp",
+                    observed,
+                    result.stableReads,
+                    true,
+                  );
+                  learnedBatchClamp.add(wr.windowId);
+                }
+              }
+              let recoveredWithFallback = false;
               for (let index = 0; index < built.writes.length; index += 1) {
                 const wr = built.writes[index]!;
                 const batchResult = batch.operations[index]!;
-                const observation = finalDraft.windows.get(wr.windowId)!;
+                const observation = batchObservations.get(wr.windowId)!;
                 const observed = batchResult.observed ?? observation.frame;
                 const tolerance = wr.tolerance ?? DEFAULT_TOLERANCE;
                 const stableSizeClamp = hasStableSizeClampEvidence(
@@ -2006,6 +2362,27 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   (batchResult.error?.code === "rejected" ||
                     batchResult.error?.code === "not_controllable");
                 if (batchResult.error !== undefined && !rejectedClamp) {
+                  if (
+                    retryLayoutPolicies &&
+                    batchResult.error.code !== "stale" &&
+                    batchResult.error.code !== "not_found"
+                  ) {
+                    if (batchResult.observed !== undefined) {
+                      finalDraft = {
+                        ...finalDraft,
+                        windows: new Map(finalDraft.windows).set(wr.windowId, {
+                          ...observation,
+                          frame: batchResult.observed,
+                        }),
+                      };
+                    }
+                    const fallback = yield* Effect.either(retryPolicies(finalDraft));
+                    if (fallback._tag === "Left") return yield* Effect.fail(fallback.left);
+                    finalDraft = fallback.right.draft;
+                    applied += fallback.right.writes;
+                    recoveredWithFallback = true;
+                    break;
+                  }
                   return yield* Effect.fail(
                     new CommandError({
                       code: mapStepCode(batchResult.error.code),
@@ -2047,9 +2424,20 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                         wr.tolerance,
                         wr.parkingDisplayId,
                         finalDraft.topology.displays,
+                        observation,
+                        captured.get(wr.windowId)?.expected,
+                        observeMovement,
                       ),
                     );
                 if (result._tag === "Left") {
+                  if (retryLayoutPolicies && result.left.code !== "inventory_stale") {
+                    const fallback = yield* Effect.either(retryPolicies(finalDraft));
+                    if (fallback._tag === "Left") return yield* Effect.fail(fallback.left);
+                    finalDraft = fallback.right.draft;
+                    applied += fallback.right.writes;
+                    recoveredWithFallback = true;
+                    break;
+                  }
                   return yield* Effect.fail(
                     new CommandError({
                       code: mapStepCode(result.left.code),
@@ -2057,8 +2445,31 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                     }),
                   );
                 }
+                if (result.right.outcome === "progressing") {
+                  if (retryLayoutPolicies) {
+                    finalDraft = {
+                      ...finalDraft,
+                      windows: new Map(finalDraft.windows).set(wr.windowId, {
+                        ...observation,
+                        frame: result.right.frame,
+                      }),
+                    };
+                    const fallback = yield* Effect.either(retryPolicies(finalDraft));
+                    if (fallback._tag === "Left") return yield* Effect.fail(fallback.left);
+                    finalDraft = fallback.right.draft;
+                    applied += fallback.right.writes;
+                    recoveredWithFallback = true;
+                    break;
+                  }
+                  return yield* Effect.fail(
+                    new CommandError({
+                      code: "geometry_rejected",
+                      message: `window ${wr.windowId} did not settle at target`,
+                    }),
+                  );
+                }
                 if (observation !== undefined) {
-                  if (acceptedInitial) {
+                  if (acceptedInitial && !learnedBatchClamp.has(wr.windowId)) {
                     learnFrom(
                       observation,
                       wr.frame,
@@ -2101,6 +2512,31 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 }
                 applied += 1;
               }
+              if (recoveredWithFallback) {
+                // The initial native batch already attempted every write. The
+                // successful fallback draft is authoritative for finalization.
+                applied += built.writes.length;
+              }
+              if (retryLayoutPolicies && !recoveredWithFallback) {
+                finalDraft = yield* refreshCaptured(finalDraft);
+                const targetsVerified = built.targets.every((target) => {
+                  const observation = finalDraft.windows.get(target.windowId);
+                  return (
+                    observation !== undefined &&
+                    withinTolerance(
+                      observation.frame,
+                      target.frame,
+                      target.tolerance ?? DEFAULT_TOLERANCE,
+                    )
+                  );
+                });
+                if (!targetsVerified) {
+                  const fallback = yield* Effect.either(retryPolicies(finalDraft));
+                  if (fallback._tag === "Left") return yield* Effect.fail(fallback.left);
+                  finalDraft = fallback.right.draft;
+                  applied += fallback.right.writes;
+                }
+              }
               const focusResult = batch.operations[built.writes.length];
               const focusObservation =
                 focusId === null ? undefined : finalDraft.windows.get(focusId);
@@ -2122,19 +2558,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   ...finalDraft,
                   focusIntent: { id: focusId, generation: focusGeneration },
                 };
-                const focusedWorkspace =
-                  finalDraft.focusedWorkspace === null
-                    ? undefined
-                    : finalDraft.workspaces.get(finalDraft.focusedWorkspace);
-                if (focusedWorkspace !== undefined) {
-                  finalDraft = {
-                    ...finalDraft,
-                    workspaces: new Map(finalDraft.workspaces).set(focusedWorkspace.name, {
-                      ...focusedWorkspace,
-                      lastFocusedMember: focusId,
-                    }),
-                  };
-                }
+                finalDraft = recordFocusedMember(finalDraft, focusId);
                 applied += 1;
               }
               ctx.appliedActions = applied;
@@ -2156,6 +2580,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             }),
             (exit) =>
               Effect.gen(function* () {
+                if (ctx.noOp) return;
                 if (exit._tag === "Success" || ctx.committed) {
                   world = {
                     ...ctx.finalDraft,
@@ -2285,8 +2710,48 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       readonly workspaceName: WorkspaceName;
       readonly workspace: WorkspaceState;
       readonly originId: WindowId;
-      readonly candidates: readonly DirectionalCandidate[];
+      readonly focusCandidates: readonly DirectionalFocusCandidate[];
     }
+
+    const directionContextIn = (source: World): DirectionContext | CommandError => {
+      const wsName = source.focusedWorkspace;
+      const workspace = wsName === null ? undefined : source.workspaces.get(wsName);
+      if (wsName === null || workspace === undefined) {
+        return new CommandError({ code: "workspace_not_found", message: "no focused workspace" });
+      }
+      if (workspace.mode !== "bsp") {
+        return new CommandError({
+          code: "window_not_manageable",
+          message: `directional commands require a bsp-mode workspace (${wsName} is ${workspace.mode})`,
+        });
+      }
+      const intentId = source.focusIntent?.id;
+      const logical = intentId === undefined ? undefined : source.windows.get(intentId);
+      const observed = [...source.windows.values()].find((observation) => observation.focused);
+      const focusedNormal =
+        logical !== undefined && classify(logical) === "normal"
+          ? logical
+          : observed !== undefined && classify(observed) === "normal"
+            ? observed
+            : undefined;
+      const fallback =
+        workspace.lastFocusedMember !== null &&
+        source.windows.has(workspace.lastFocusedMember) &&
+        isMemberOf(workspace, workspace.lastFocusedMember)
+          ? workspace.lastFocusedMember
+          : null;
+      const originId =
+        focusedNormal !== undefined && isMemberOf(workspace, focusedNormal.id)
+          ? focusedNormal.id
+          : (fallback ?? tiledMembers(workspace.tree)[0] ?? [...workspace.floating][0]);
+      if (originId === undefined || originId === EMPTY_TREE_LEAF) {
+        return new CommandError({ code: "window_not_found", message: "workspace has no members" });
+      }
+      const focusCandidates = [...tiledMembers(workspace.tree), ...workspace.floating]
+        .filter((id) => id !== originId && id !== EMPTY_TREE_LEAF && source.windows.has(id))
+        .map((id) => ({ id, frame: source.windows.get(id)!.frame }));
+      return { workspaceName: wsName, workspace, originId, focusCandidates };
+    };
 
     /**
      * Resolve the focused workspace plus a deterministic origin for
@@ -2296,53 +2761,11 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
      * floating).
      */
     const resolveDirectionContext = (): Effect.Effect<DirectionContext, CommandError> =>
-      Effect.gen(function* () {
-        const wsName = world.focusedWorkspace;
-        const workspace = wsName === null ? undefined : world.workspaces.get(wsName);
-        if (wsName === null || workspace === undefined) {
-          return yield* Effect.fail(
-            new CommandError({ code: "workspace_not_found", message: "no focused workspace" }),
-          );
-        }
-        if (workspace.mode !== "bsp") {
-          return yield* Effect.fail(
-            new CommandError({
-              code: "window_not_manageable",
-              message: `directional commands require a bsp-mode workspace (${wsName} is ${workspace.mode})`,
-            }),
-          );
-        }
-        const logical = logicalFocusedObservation();
-        const observed = anyFocusedObservation();
-        const focusedNormal =
-          logical ?? (observed !== null && classify(observed) === "normal" ? observed : null);
-
-        const fallback =
-          workspace.lastFocusedMember !== null &&
-          world.windows.has(workspace.lastFocusedMember) &&
-          isMemberOf(workspace, workspace.lastFocusedMember)
-            ? workspace.lastFocusedMember
-            : null;
-        const originId =
-          focusedNormal !== null && isMemberOf(workspace, focusedNormal.id)
-            ? focusedNormal.id
-            : (fallback ?? tiledMembers(workspace.tree)[0] ?? [...workspace.floating][0]);
-        if (originId === undefined || originId === EMPTY_TREE_LEAF) {
-          return yield* Effect.fail(
-            new CommandError({ code: "window_not_found", message: "workspace has no members" }),
-          );
-        }
-        const candidates: DirectionalCandidate[] = [
-          ...tiledMembers(workspace.tree),
-          ...workspace.floating,
-        ]
-          .filter((id) => id !== originId && id !== EMPTY_TREE_LEAF && world.windows.has(id))
-          .map((id) => {
-            const frame = world.windows.get(id)!.frame;
-            return { id, x: center(frame).x, y: center(frame).y };
-          });
-        return { workspaceName: wsName, workspace, originId, candidates };
-      });
+      Effect.flatMap(
+        Effect.sync(() => directionContextIn(world)),
+        (context) =>
+          context instanceof CommandError ? Effect.fail(context) : Effect.succeed(context),
+      );
 
     // ------------------------------------------------------------------
     // Command layer wiring
@@ -3306,18 +3729,13 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                     }),
                   );
                 }
-                const neighborId = directionalNeighbor({
+                const neighborId = directionalFocusNeighbor({
                   direction: command.direction,
-                  origin: center(originObs.frame),
-                  candidates: ctx.candidates,
+                  origin: originObs.frame,
+                  candidates: ctx.focusCandidates,
                 });
                 if (neighborId === null) {
-                  return yield* Effect.fail(
-                    new CommandError({
-                      code: "window_not_found",
-                      message: `no other manageable window for direction ${command.direction}`,
-                    }),
-                  );
+                  return;
                 }
                 const applied = yield* Effect.either(
                   applyAction({ kind: "focusWindow", windowId: neighborId }),
@@ -3336,75 +3754,49 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   focusIntent: { id: neighborId, generation: focusGeneration },
                 };
                 const ws = world.workspaces.get(ctx.workspaceName);
-                if (ws !== undefined) commitWorkspace({ ...ws, lastFocusedMember: neighborId });
+                if (ws !== undefined) world = recordFocusedMember(world, neighborId);
               }),
             );
             break;
           }
           case "moveDirection": {
-            const ctx = yield* resolveDirectionContext();
-            const workspaceNow = world.workspaces.get(ctx.workspaceName)!;
-            const originObs = world.windows.get(ctx.originId);
-            if (originObs === undefined) {
-              return yield* Effect.fail(
-                new CommandError({ code: "window_not_found", message: "focused window vanished" }),
-              );
-            }
-            if (workspaceNow.floating.has(ctx.originId)) {
-              return yield* Effect.fail(
-                new CommandError({
-                  code: "window_not_manageable",
-                  message:
-                    "the focused window is floating; directional swaps require tiled windows",
-                }),
-              );
-            }
-            const neighborId = directionalNeighbor({
-              direction: command.direction,
-              origin: center(originObs.frame),
-              candidates: ctx.candidates,
-            });
-            if (neighborId === null) {
-              return yield* Effect.fail(
-                new CommandError({
-                  code: "window_not_found",
-                  message: `no other manageable window for direction ${command.direction}`,
-                }),
-              );
-            }
-            if (workspaceNow.floating.has(neighborId)) {
-              return yield* Effect.fail(
-                new CommandError({
-                  code: "window_not_manageable",
-                  message:
-                    "the directional swap target is floating; floating windows are not swapped",
-                }),
-              );
-            }
+            let ctx!: DirectionContext;
             // Transactional: the scoped plan (retile of THIS workspace only)
             // must verify before the tree commit becomes visible; on failure
             // or interruption nothing is committed and frames restore
             // identity-safely.
             yield* executeCompound(
-              { kind: "known", ids: memberIdsOf(ctx.workspaceName) },
+              {
+                kind: "deferred",
+                resolve: () => {
+                  const workspace = world.workspaces.get(ctx.workspaceName);
+                  return workspace === undefined
+                    ? null
+                    : tiledMembers(workspace.tree).filter((id) => id !== EMPTY_TREE_LEAF);
+                },
+              },
               ({ intents }) =>
                 (w0) => {
                   const wsNow = w0.workspaces.get(ctx.workspaceName)!;
-                  const observedTargetFrame = w0.windows.get(neighborId)?.frame;
-                  const insertionHost = insertionDisplay(w0, wsNow, observedTargetFrame);
-                  const targetFrame = insertionTargetFrame(
-                    w0,
-                    wsNow,
-                    observedTargetFrame,
-                    effectiveSettings(config, ctx.workspaceName, insertionHost?.id).margins,
-                  );
-                  const tree = moveLeaf(
-                    wsNow.tree,
-                    ctx.originId,
-                    neighborId,
-                    command.direction,
-                    targetFrame,
-                  );
+                  if (wsNow.floating.has(ctx.originId)) return w0;
+                  const frames = new Map<WindowId, Frame>();
+                  for (const id of tiledMembers(wsNow.tree)) {
+                    const observation = w0.windows.get(id);
+                    if (observation !== undefined) frames.set(id, observation.frame);
+                  }
+                  const tree = moveGeometrically({
+                    tree: wsNow.tree,
+                    movedId: ctx.originId,
+                    direction: command.direction,
+                    frames,
+                    gap: effectiveSettings(
+                      config,
+                      ctx.workspaceName,
+                      wsNow.visibleOnDisplay ?? undefined,
+                    ).gap,
+                    groups: config.experiments?.directionalMoveGroups ?? false,
+                  });
+                  if (tree === wsNow.tree) return w0;
                   intents.push({ kind: "retile", workspace: ctx.workspaceName });
                   return {
                     ...w0,
@@ -3415,6 +3807,22 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                     }),
                   };
                 },
+              undefined,
+              undefined,
+              true,
+              () => {
+                const resolved = directionContextIn(world);
+                if (resolved instanceof CommandError) return resolved;
+                if (resolved.workspace.floating.has(resolved.originId)) {
+                  return new CommandError({
+                    code: "window_not_manageable",
+                    message:
+                      "the focused window is floating; directional swaps require tiled windows",
+                  });
+                }
+                ctx = resolved;
+                return null;
+              },
             );
             break;
           }
@@ -3625,6 +4033,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                     ...world,
                     focusIntent: { id: command.windowId, generation: focusGeneration },
                   };
+                  world = recordFocusedMember(world, command.windowId);
                 } else if (applied.left.code !== "window_not_controllable") {
                   return yield* Effect.fail(
                     new CommandError({

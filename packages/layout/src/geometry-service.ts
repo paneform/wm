@@ -40,6 +40,8 @@ export interface GeometryCallContext {
   workArea: Frame;
   /** Profile-informed early skip when corrective fallbacks were needed before. */
   correctiveAttemptCount?: number | undefined;
+  /** Transaction-captured identity that every read and write must retain. */
+  expectedIdentity?: ExpectedWindowIdentity | undefined;
 }
 
 export interface GeometrySuccess {
@@ -67,6 +69,8 @@ export interface GeometryFailure {
   outcome: GeometryOutcome | "error";
   /** Last observed frame so callers can inspect/recover. */
   observed?: Frame | undefined;
+  stable?: boolean | undefined;
+  stableReads?: number | undefined;
   detail?: string | undefined;
 }
 
@@ -108,10 +112,14 @@ const settlePoll = (
   id: WindowId,
   target: Frame,
   tolerance: number,
+  expected?: ExpectedWindowIdentity,
 ): Effect.Effect<Readback, GeometryFailure> => {
   const distance = (frame: Frame): number => normalizedDistance(frame, target);
   return Effect.gen(function* () {
     let current = yield* readWindow(adapter, id);
+    if (expected !== undefined && windowIdentityFingerprint(current) !== expected.fingerprint) {
+      return yield* Effect.fail<GeometryFailure>({ code: "stale", outcome: "error" });
+    }
     let best: Readback = {
       observation: current,
       matchedTarget: withinTolerance(current.frame, target, tolerance),
@@ -120,6 +128,9 @@ const settlePoll = (
     for (let read = 1; read < SETTLE_MAX_READS && !best.matchedTarget; read++) {
       yield* clock.sleep(SETTLE_POLL_DELAY_MS);
       current = yield* readWindow(adapter, id);
+      if (expected !== undefined && windowIdentityFingerprint(current) !== expected.fingerprint) {
+        return yield* Effect.fail<GeometryFailure>({ code: "stale", outcome: "error" });
+      }
       const next: Readback = {
         observation: current,
         matchedTarget: withinTolerance(current.frame, target, tolerance),
@@ -179,6 +190,8 @@ const writeFramePart = (
             code: observation.errorKind === "stale" ? "stale" : "rejected",
             outcome: "error",
             observed: observation.observed,
+            stable: observation.stable,
+            stableReads: observation.stableReads,
             detail: `write refused (${observation.errorKind})`,
           }),
     ),
@@ -218,7 +231,10 @@ export function applyGeometryRequest(
       const strategy = strategyAt(ladderStartIndex(context.correctiveAttemptCount) + attemptIndex);
       const baseline = yield* readWindow(deps.adapter, request.windowId);
       const identity = windowIdentityFingerprint(baseline);
-      const expected = { fingerprint: identity };
+      const expected = context.expectedIdentity ?? { fingerprint: identity };
+      if (identity !== expected.fingerprint) {
+        return yield* Effect.fail<GeometryFailure>({ code: "stale", outcome: "error" });
+      }
 
       let observedFrame = baseline.frame;
       for (const part of strategyWrites(strategy)) {
@@ -249,6 +265,7 @@ export function applyGeometryRequest(
         request.windowId,
         target,
         tolerance,
+        expected,
       );
 
       const repeatedStableSizeClamp =

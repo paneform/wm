@@ -69,21 +69,21 @@ export function insertLeaf(
   targetId: WindowId,
   newId: WindowId,
   targetFrame?: Frame | undefined,
+  axis?: SplitAxis | undefined,
 ): BspNode | null {
   if (tree.kind === "leaf") {
     if (tree.windowId !== targetId) return null;
-    const axis = targetFrame !== undefined ? axisForFrame(targetFrame) : "vertical";
     return {
       kind: "split",
-      axis,
+      axis: axis ?? (targetFrame !== undefined ? axisForFrame(targetFrame) : "vertical"),
       ratio: 0.5,
       first: { kind: "leaf", windowId: targetId },
       second: { kind: "leaf", windowId: newId },
     };
   }
-  const first = insertLeaf(tree.first, targetId, newId, targetFrame);
+  const first = insertLeaf(tree.first, targetId, newId, targetFrame, axis);
   if (first) return { ...tree, first };
-  const second = insertLeaf(tree.second, targetId, newId, targetFrame);
+  const second = insertLeaf(tree.second, targetId, newId, targetFrame, axis);
   return second ? { ...tree, second } : null;
 }
 

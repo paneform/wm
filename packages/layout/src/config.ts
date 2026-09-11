@@ -63,11 +63,17 @@ export const KeybindsSchema = Schema.Record({
 });
 export interface Keybinds extends Schema.Schema.Type<typeof KeybindsSchema> {}
 
+export const ExperimentsSchema = Schema.Struct({
+  directionalMoveGroups: Schema.optional(Schema.Boolean),
+});
+export interface Experiments extends Schema.Schema.Type<typeof ExperimentsSchema> {}
+
 export const ConfigSchema = Schema.Struct({
   defaults: Schema.optional(GlobalDefaultsSchema),
   displays: Schema.optional(Schema.Array(DisplayConfigSchema)),
   workspaces: Schema.optional(Schema.Array(WorkspaceConfigSchema)),
   keybinds: Schema.optional(KeybindsSchema),
+  experiments: Schema.optional(ExperimentsSchema),
 });
 export interface Config extends Schema.Schema.Type<typeof ConfigSchema> {}
 export type ConfigInput = Schema.Schema.Encoded<typeof ConfigSchema>;
@@ -277,6 +283,13 @@ export function applyConfigDelta<Input>(current: Config, rawCandidate: Input): C
   if (workspaces !== undefined) merged.workspaces = workspaces;
   const keybinds = candidate.keybinds ?? current.keybinds;
   if (keybinds !== undefined) merged.keybinds = keybinds;
+  const experiments: Experiments | undefined =
+    candidate.experiments === undefined
+      ? current.experiments
+      : candidate.experiments.directionalMoveGroups === undefined
+        ? (current.experiments ?? candidate.experiments)
+        : { directionalMoveGroups: candidate.experiments.directionalMoveGroups };
+  if (experiments !== undefined) merged.experiments = experiments;
   return merged;
 }
 

@@ -1,13 +1,18 @@
 import { describe, expect, test } from "vitest";
-import { Cause, Effect, Exit, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, Stream } from "effect";
 import { createEngine } from "../src/engine.ts";
 import type { Engine } from "../src/engine.ts";
 import type { Command, CommandResult, StateSnapshot } from "../src/commands.ts";
 import type { DomainEvent } from "../src/events.ts";
 import type { Clock, ConfigSource } from "../src/platform.ts";
+import {
+  emptyObservationDocument,
+  type ObservationSnapshot,
+  type ObservationStore,
+} from "../src/observation-store.ts";
 import type { Frame, WindowId } from "../src/schema.ts";
 import type { PlatformAdapter } from "../src/platform.ts";
-import type { PlatformError, PlatformEvent, WriteObservation } from "../src/schema.ts";
+import { PlatformError, type PlatformEvent, type WriteObservation } from "../src/schema.ts";
 import type { WindowId as WId } from "../src/schema.ts";
 import {
   createFakePlatform,
@@ -56,6 +61,8 @@ interface EngineRefs {
 const bootstrap = async (
   displays?: ReadonlyArray<Partial<FakeDisplaySpec>>,
   wrap?: (inner: PlatformAdapter, refs: EngineRefs) => PlatformAdapter,
+  observationStore?: ObservationStore,
+  retainWrappedBatch = false,
 ): Promise<Harness> => {
   const fake = createFakePlatform({
     clock: CLOCK,
@@ -75,12 +82,16 @@ const bootstrap = async (
   const refs: EngineRefs = { engine: null };
   const adapter = (() => {
     if (wrap === undefined) return fake.adapter;
-    const { executeBatch: _batch, ...legacyAdapter } = wrap(fake.adapter, refs);
+    const wrapped = wrap(fake.adapter, refs);
+    if (retainWrappedBatch) return wrapped;
+    const { executeBatch: _batch, ...legacyAdapter } = wrapped;
     void _batch;
     return legacyAdapter;
   })();
   const engine = await Effect.runPromise(
-    createEngine({ adapter, configSource: CONFIG_SOURCE, clock: CLOCK }),
+    observationStore === undefined
+      ? createEngine({ adapter, configSource: CONFIG_SOURCE, clock: CLOCK })
+      : createEngine({ adapter, configSource: CONFIG_SOURCE, clock: CLOCK, observationStore }),
   );
   refs.engine = engine;
   await Effect.runPromise(engine.start());
@@ -99,12 +110,7 @@ const bootstrap = async (
   };
 };
 
-/** Ingest observations, then ensure every given window is tiled into
- * workspace "1" in order. Insertion goes through whichever path wins
- * (auto-assign preflight or explicit move) — both read identical committed
- * observations and the same lastFocusedMember, so the resulting tree and
- * axes are deterministic either way. The membership guard prevents a
- * double insert (remove/re-add would reset lastFocusedMember). */
+/** Ingest observations and ensure every given window is tiled in workspace "1". */
 const seedWorkspace = async (h: Harness, ids: readonly WindowId[]): Promise<void> => {
   await h.run({ type: "reconcile" });
   for (const id of ids) {
@@ -156,24 +162,24 @@ describe("togglePause", () => {
 });
 
 describe("moveFocusedWindowToWorkspace", () => {
-  test("focused observation takes precedence over lastFocusedMember; focus follows", async () => {
+  test("focused observation updates lastFocusedMember; focus follows", async () => {
     const h = await bootstrap();
     const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     const w2 = h.fake.addWindow(makeWindow({ x: 400, y: 400 }));
     await seedWorkspace(h, [w1, w2]);
 
-    // w1 holds OS focus (first added); w2 is the tree's lastFocusedMember.
+    // Adding w2 does not replace w1's actual focus history.
     let snap = await h.snapshot();
     const ws1 = workspaceOf(snap, "1");
     expect(sorted(ws1?.members ?? [])).toEqual(sorted([w1, w2]));
-    expect(ws1?.lastFocusedMember).toBe(w2);
+    expect(ws1?.lastFocusedMember).toBe(w1);
     expect(h.fake.focusedWindowId()).toBe(w1);
 
     await h.run({ type: "moveFocusedWindowToWorkspace", workspace: "scratch" });
     snap = await h.snapshot();
 
     const scratch = workspaceOf(snap, "scratch");
-    expect(scratch?.members).toEqual([w1]); // focused wins over lastFocusedMember
+    expect(scratch?.members).toEqual([w1]);
     expect(workspaceOf(snap, "1")?.members).toEqual([w2]);
     expect(snap.focusedWorkspace).toBe("scratch"); // skhdrc: "…and follow it"
     expect(workspaceOf(snap, "1")?.visibleOnDisplay).toBeNull(); // vacated parks
@@ -185,6 +191,7 @@ describe("moveFocusedWindowToWorkspace", () => {
     const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     const w2 = h.fake.addWindow(makeWindow({ x: 400, y: 400 }));
     await seedWorkspace(h, [w1, w2]);
+    await h.run({ type: "focusWindow", windowId: w2 });
 
     h.fake.focusWindowExternal(null);
     await h.run({ type: "reconcile" });
@@ -238,6 +245,7 @@ describe("moveFocusedWorkspaceToNextDisplay", () => {
     const h = await bootstrap([{ id: "display:solo", primary: true }]);
     h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     await h.run({ type: "reconcile" });
+    await waitFor(() => !h.engine.gateState().busy);
     const before = await h.snapshot();
     const wsBefore = workspaceOf(before, "1");
 
@@ -302,7 +310,7 @@ describe("moveFocusedWorkspaceToNextDisplay", () => {
 });
 
 describe("focusDirection", () => {
-  test("focuses the directional neighbor, wraps at edges, updates lastFocusedMember on success only", async () => {
+  test("focuses the directional neighbor and no-ops at edges", async () => {
     const h = await bootstrap();
     const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     const w2 = h.fake.addWindow(makeWindow({ x: 900, y: 300 }));
@@ -316,56 +324,48 @@ describe("focusDirection", () => {
     let snap = await h.snapshot();
     expect(workspaceOf(snap, "1")?.lastFocusedMember).toBe(w2);
 
-    // At the right edge: wrap within the workspace.
+    // At the right edge: keep focus and focus history unchanged.
     await h.run({ type: "focusDirection", direction: "right" });
-    expect(h.fake.focusedWindowId()).toBe(w1);
+    expect(h.fake.focusedWindowId()).toBe(w2);
     snap = await h.snapshot();
-    expect(workspaceOf(snap, "1")?.lastFocusedMember).toBe(w1);
+    expect(workspaceOf(snap, "1")?.lastFocusedMember).toBe(w2);
   });
 
   test("adapter focus refusal leaves lastFocusedMember untouched; retry succeeds", async () => {
     const h = await bootstrap();
     const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     const w2 = h.fake.addWindow(makeWindow({ x: 900, y: 300 }));
-    const w3 = h.fake.addWindow(makeWindow({ x: 1200, y: 600 }));
-    await seedWorkspace(h, [w1, w2, w3]);
+    await seedWorkspace(h, [w1, w2]);
 
-    // Arm every OTHER member: whichever neighbor UP resolves to aborts.
-    h.fake.focusWindowExternal(w3);
+    h.fake.focusWindowExternal(w1);
     await h.run({ type: "reconcile" });
     let snap = await h.snapshot();
-    expect(workspaceOf(snap, "1")?.lastFocusedMember).toBe(w3);
+    expect(workspaceOf(snap, "1")?.lastFocusedMember).toBe(w1);
 
-    h.fake.swapBackingElement(w1);
     h.fake.swapBackingElement(w2);
-    const error = await h.failure({ type: "focusDirection", direction: "up" });
+    const error = await h.failure({ type: "focusDirection", direction: "right" });
     expect(error.code).toBe("inventory_stale");
     snap = await h.snapshot();
-    expect(workspaceOf(snap, "1")?.lastFocusedMember).toBe(w3); // unchanged
-    expect(h.fake.focusedWindowId()).toBe(w3);
+    expect(workspaceOf(snap, "1")?.lastFocusedMember).toBe(w1); // unchanged
+    expect(h.fake.focusedWindowId()).toBe(w1);
 
-    // Retry: one replacement was consumed by the failed attempt; re-arm the
-    // remaining candidate handles so the retry itself is also exercised.
-    const retryNeighbor = h.fake.focusedWindowId();
-    void retryNeighbor;
-    await h.run({ type: "focusDirection", direction: "up" });
+    await h.run({ type: "focusDirection", direction: "right" });
     snap = await h.snapshot();
-    const newFocus = h.fake.focusedWindowId();
-    expect(newFocus === w1 || newFocus === w2).toBe(true);
-    expect(workspaceOf(snap, "1")?.lastFocusedMember).toBe(newFocus ?? null);
+    expect(h.fake.focusedWindowId()).toBe(w2);
+    expect(workspaceOf(snap, "1")?.lastFocusedMember).toBe(w2);
   });
 
-  test("a single-window workspace has no neighbor: structured error", async () => {
+  test("a single-window workspace has no neighbor and no-ops", async () => {
     const h = await bootstrap();
     const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     await seedWorkspace(h, [w1]);
-    const error = await h.failure({ type: "focusDirection", direction: "right" });
-    expect(error.code).toBe("window_not_found");
+    await h.run({ type: "focusDirection", direction: "right" });
+    expect(h.fake.focusedWindowId()).toBe(w1);
   });
 });
 
 describe("moveDirection", () => {
-  test("edge wrap swaps the two leaves, retiles exact frames, keeps focus", async () => {
+  test("an edge move no-ops; an effective move swaps leaves and keeps focus", async () => {
     const h = await bootstrap();
     const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     const w2 = h.fake.addWindow(makeWindow({ x: 900, y: 300 }));
@@ -382,8 +382,13 @@ describe("moveDirection", () => {
     });
     const writesBefore = h.fake.writes().length;
 
-    // w1 sits in the LEFT pane; pressing LEFT wraps to w2.
+    // w1 is the only window on the left edge, so moving farther left is a no-op.
     await h.run({ type: "moveDirection", direction: "left" });
+
+    expect(workspaceOf(await h.snapshot(), "1")!.tree).toEqual(treeBefore);
+    expect(h.fake.writes().length).toBe(writesBefore);
+
+    await h.run({ type: "moveDirection", direction: "right" });
 
     const after = await h.snapshot();
     const ws1 = workspaceOf(after, "1")!;
@@ -391,7 +396,7 @@ describe("moveDirection", () => {
     expect(ws1.tree).toEqual({
       kind: "split",
       axis: "vertical",
-      ratio: 0.5,
+      ratio: 748 / 1512,
       first: { kind: "leaf", windowId: w2 },
       second: { kind: "leaf", windowId: w1 },
     });
@@ -400,8 +405,8 @@ describe("moveDirection", () => {
     expect(h.fake.focusedWindowId()).toBe(w1);
     expect(ws1.lastFocusedMember).toBe(w1);
     // Retile produced verified SetFrames through the adapter.
-    expect(await frameOf(h, w1)).toEqual(frame(764, 38, 748, 944));
-    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 756, 944));
+    expect(await frameOf(h, w1)).toEqual(frame(756, 38, 756, 944));
+    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 748, 944));
     expect(h.fake.writes().length).toBeGreaterThan(writesBefore);
   });
 
@@ -431,6 +436,7 @@ describe("moveDirection", () => {
     const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     const w2 = h.fake.addWindow(makeWindow({ x: 900, y: 200 }));
     await seedWorkspace(h, [w1, w2]); // tiles w1|w2 so w2's pane is tall
+    await h.run({ type: "focusWindow", windowId: w2 });
     const w3 = h.fake.addWindow(makeWindow({ x: 1100, y: 700 }));
     await h.run({ type: "reconcile" });
     await h.run({ type: "moveWindowToWorkspace", windowId: w3, workspace: "1" });
@@ -464,18 +470,18 @@ describe("moveDirection", () => {
       kind: "split",
       axis: "vertical",
       ratio: 0.5,
-      first: {
+      first: { kind: "leaf", windowId: w1 },
+      second: {
         kind: "split",
         axis: "horizontal",
-        ratio: 0.5,
-        first: { kind: "leaf", windowId: w1 },
+        ratio: 232 / 472,
+        first: { kind: "leaf", windowId: w3 },
         second: { kind: "leaf", windowId: w2 },
       },
-      second: { kind: "leaf", windowId: w3 },
     });
-    expect(await frameOf(h, w1)).toEqual(frame(0, 38, 756, 472));
-    expect(await frameOf(h, w2)).toEqual(frame(0, 518, 756, 464));
-    expect(await frameOf(h, w3)).toEqual(frame(764, 38, 748, 944));
+    expect(await frameOf(h, w1)).toEqual(frame(0, 38, 756, 944));
+    expect(await frameOf(h, w2)).toEqual(frame(764, 510, 748, 472));
+    expect(await frameOf(h, w3)).toEqual(frame(764, 38, 748, 464));
     expect(h.fake.focusedWindowId()).toBe(w2);
     expect(ws1.lastFocusedMember).toBe(w2);
   });
@@ -497,7 +503,7 @@ describe("moveDirection", () => {
     expect(workspaceOf(snap, "1")?.floating).toEqual([w2]);
   });
 
-  test("floating swap target rejects instead of guessing another pair", async () => {
+  test("floating windows are excluded from geometric targets", async () => {
     const h = await bootstrap();
     const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     const w2 = h.fake.addWindow(makeWindow({ x: 900, y: 300 }));
@@ -506,10 +512,330 @@ describe("moveDirection", () => {
     await h.run({ type: "reconcile" });
 
     // w1 (tiled, focused) has only the floating w2 as spatial candidate.
-    const error = await h.failure({ type: "moveDirection", direction: "right" });
-    expect(error.code).toBe("window_not_manageable");
+    const writesBefore = h.fake.writes().length;
+    await h.run({ type: "moveDirection", direction: "right" });
     const snap = await h.snapshot();
     expect(workspaceOf(snap, "1")?.members).toEqual([w1]); // tree untouched
+    expect(h.fake.writes().length).toBe(writesBefore);
+  });
+
+  test("retries a physically rejected greedy move with the next layout policy", async () => {
+    const h = await bootstrap();
+    const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const w2 = h.fake.addWindow(makeWindow({ x: 900, y: 300 }));
+    await seedWorkspace(h, [w1, w2]);
+    h.fake.focusWindowExternal(w1);
+    await h.run({ type: "reconcile" });
+
+    const batchesBefore = h.fake.batchCalls();
+    h.fake.rejectNextBatchWrite(w2);
+    await h.run({ type: "moveDirection", direction: "right" });
+
+    expect(h.fake.batchCalls()).toBe(batchesBefore + 1);
+    expect(workspaceOf(await h.snapshot(), "1")!.tree).toEqual({
+      kind: "split",
+      axis: "vertical",
+      ratio: 748 / 1512,
+      first: { kind: "leaf", windowId: w2 },
+      second: { kind: "leaf", windowId: w1 },
+    });
+    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 748, 944));
+    expect(await frameOf(h, w1)).toEqual(frame(756, 38, 756, 944));
+  });
+
+  test("a later stale native result aborts before an earlier failure can retry", async () => {
+    const h = await bootstrap();
+    const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const w2 = h.fake.addWindow(makeWindow({ x: 900, y: 300 }));
+    await seedWorkspace(h, [w1, w2]);
+    h.fake.focusWindowExternal(w1);
+    await h.run({ type: "reconcile" });
+    const treeBefore = workspaceOf(await h.snapshot(), "1")!.tree;
+
+    h.fake.rejectNextBatchWrite(w2);
+    h.fake.swapBackingElement(w1);
+    const error = await h.failure({ type: "moveDirection", direction: "right" });
+
+    expect(error.code).toBe("inventory_stale");
+    expect(workspaceOf(await h.snapshot(), "1")!.tree).toEqual(treeBefore);
+  });
+
+  test("exhausting move layout policies rolls back tree and original frames", async () => {
+    let rejectWrites = false;
+    const h = await bootstrap(undefined, (inner) => ({
+      ...inner,
+      setWindowFrame: (id, requested, expected) =>
+        rejectWrites
+          ? Effect.fail(
+              new PlatformError({ code: "rejected", detail: "scripted persistent refusal" }),
+            )
+          : inner.setWindowFrame(id, requested, expected),
+      setWindowPosition: (id, requested, expected) =>
+        rejectWrites
+          ? Effect.fail(
+              new PlatformError({ code: "rejected", detail: "scripted persistent refusal" }),
+            )
+          : inner.setWindowPosition(id, requested, expected),
+      setWindowSize: (id, requested, expected) =>
+        rejectWrites
+          ? Effect.fail(
+              new PlatformError({ code: "rejected", detail: "scripted persistent refusal" }),
+            )
+          : inner.setWindowSize(id, requested, expected),
+    }));
+    const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const w2 = h.fake.addWindow(makeWindow({ x: 900, y: 300 }));
+    await seedWorkspace(h, [w1, w2]);
+    h.fake.focusWindowExternal(w1);
+    await h.run({ type: "reconcile" });
+    const before = await h.snapshot();
+    const framesBefore = { w1: await frameOf(h, w1), w2: await frameOf(h, w2) };
+    rejectWrites = true;
+    DEADLINE.deadlineMs = 4000;
+
+    const error = await h.failure({ type: "moveDirection", direction: "right" });
+    DEADLINE.deadlineMs = 3;
+
+    expect(error.code).toBe("geometry_rejected");
+    expect(workspaceOf(await h.snapshot(), "1")!.tree).toEqual(workspaceOf(before, "1")!.tree);
+    expect(await frameOf(h, w1)).toEqual(framesBefore.w1);
+    expect(await frameOf(h, w2)).toEqual(framesBefore.w2);
+  });
+
+  test("learns a later confirmed native clamp before an earlier failure triggers fallback", async () => {
+    let snapshot: ObservationSnapshot = {
+      revision: "0",
+      document: emptyObservationDocument(),
+    };
+    const store: ObservationStore = {
+      load: () => Effect.succeed(snapshot),
+      changes: () => Stream.empty,
+      save: (_expected, document) =>
+        Effect.sync(() => {
+          snapshot = { revision: String(Number(snapshot.revision) + 1), document };
+          return snapshot;
+        }),
+    };
+    let fallbackWrites = false;
+    const refusal = new PlatformError({ code: "rejected", detail: "scripted refusal" });
+    const h = await bootstrap(
+      undefined,
+      (inner) => ({
+        ...inner,
+        executeBatch: (request) =>
+          Effect.map(inner.executeBatch!(request), (result) => {
+            fallbackWrites = true;
+            return {
+              ...result,
+              operations: result.operations.map((operation, index) =>
+                index === 0
+                  ? { ...operation, error: refusal }
+                  : operation.observed === undefined
+                    ? operation
+                    : { ...operation, error: refusal, stable: true, stableReads: 3 },
+              ),
+            };
+          }),
+        setWindowFrame: (id, requested, expected) =>
+          fallbackWrites ? Effect.fail(refusal) : inner.setWindowFrame(id, requested, expected),
+        setWindowPosition: (id, requested, expected) =>
+          fallbackWrites ? Effect.fail(refusal) : inner.setWindowPosition(id, requested, expected),
+        setWindowSize: (id, requested, expected) =>
+          fallbackWrites ? Effect.fail(refusal) : inner.setWindowSize(id, requested, expected),
+      }),
+      store,
+      true,
+    );
+    const constrained = h.fake.addWindow(
+      makeWindow({
+        x: 100,
+        y: 100,
+        bundleId: "test.confirmed-clamp",
+        personality: { kind: "minMaxClamp", constraints: { minHeight: 700 } },
+      }),
+    );
+    const origin = h.fake.addWindow(makeWindow({ x: 900, y: 300, bundleId: "test.retry-origin" }));
+    await seedWorkspace(h, [constrained, origin]);
+    fallbackWrites = false;
+    h.fake.focusWindowExternal(origin);
+    await h.run({ type: "reconcile" });
+
+    await h.failure({ type: "moveDirection", direction: "up" });
+
+    expect(
+      snapshot.document.profiles.find(
+        (profile) => profile.key.application === "test.confirmed-clamp",
+      )?.constraints.minHeight,
+    ).toBe(700);
+  });
+
+  test("records stable native movement refusal and replaces it with demonstrated fallback movement", async () => {
+    const diagnostics: DomainEvent[] = [];
+    const refusal = new PlatformError({ code: "rejected", detail: "scripted movement refusal" });
+    let refusedWindow: WindowId | null = null;
+    let originalFrame: Frame | null = null;
+    let refuseNative = false;
+    const h = await bootstrap(
+      undefined,
+      (inner) => ({
+        ...inner,
+        executeBatch: (request) =>
+          Effect.gen(function* () {
+            const result = yield* inner.executeBatch!(request);
+            if (!refuseNative || refusedWindow === null || originalFrame === null) return result;
+            refuseNative = false;
+            yield* inner.setWindowFrame(refusedWindow, originalFrame);
+            return {
+              ...result,
+              operations: result.operations.map((operation, index) =>
+                request.operations[index]?.windowId === refusedWindow &&
+                operation.observed !== undefined
+                  ? {
+                      ...operation,
+                      observed: originalFrame!,
+                      error: refusal,
+                      stable: true,
+                      stableReads: 3,
+                    }
+                  : operation,
+              ),
+            };
+          }),
+      }),
+      undefined,
+      true,
+    );
+    const left = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const right = h.fake.addWindow(makeWindow({ x: 900, y: 300 }));
+    await seedWorkspace(h, [left, right]);
+    h.fake.focusWindowExternal(left);
+    await h.run({ type: "reconcile" });
+    refusedWindow = right;
+    originalFrame = await frameOf(h, right);
+    refuseNative = true;
+    const collector = Effect.runFork(
+      Stream.runForEach(
+        Stream.filter(h.engine.events(), (event) => event.topic === "diagnostic"),
+        (event) => Effect.sync(() => diagnostics.push(event)),
+      ),
+    );
+
+    await h.run({ type: "moveDirection", direction: "right" });
+
+    expect(diagnostics.some((event) => event.payload.code === "geometry_move_refused")).toBe(true);
+    expect(
+      (await h.snapshot()).windows.find((window) => window.id === right)?.capabilities,
+    ).toMatchObject({
+      movable: "supported",
+      movableEvidence: "geometry_operation",
+    });
+    await Effect.runPromise(Fiber.interrupt(collector));
+  });
+
+  test("stale stable fallback metadata preserves original capture and learns no profile evidence", async () => {
+    let snapshot: ObservationSnapshot = {
+      revision: "0",
+      document: emptyObservationDocument(),
+    };
+    const store: ObservationStore = {
+      load: () => Effect.succeed(snapshot),
+      changes: () => Stream.empty,
+      save: (_expected, document) =>
+        Effect.sync(() => {
+          snapshot = { revision: String(Number(snapshot.revision) + 1), document };
+          return snapshot;
+        }),
+    };
+    let staleWindow: WindowId | null = null;
+    let originalFrame: Frame | null = null;
+    let rejectNative = false;
+    let staleWrites = 0;
+    const h = await bootstrap(
+      undefined,
+      (inner) => ({
+        ...inner,
+        executeBatch: (request) =>
+          Effect.gen(function* () {
+            const result = yield* inner.executeBatch!(request);
+            if (!rejectNative || staleWindow === null || originalFrame === null) return result;
+            yield* inner.setWindowFrame(staleWindow, originalFrame);
+            return {
+              ...result,
+              operations: result.operations.map((operation, index) =>
+                request.operations[index]?.windowId === staleWindow
+                  ? {
+                      ...operation,
+                      observed: originalFrame!,
+                      error: undefined,
+                      stable: true,
+                      stableReads: 3,
+                    }
+                  : operation,
+              ),
+            };
+          }),
+        setWindowFrame: (id, requested, expected) =>
+          rejectNative && id === staleWindow && originalFrame !== null
+            ? Effect.sync(() => {
+                staleWrites += 1;
+                return {
+                  requested,
+                  observed: { ...originalFrame!, width: requested.width },
+                  stable: true,
+                  stableReads: 3,
+                  errorKind: "stale" as const,
+                };
+              })
+            : inner.setWindowFrame(id, requested, expected),
+      }),
+      store,
+      true,
+    );
+    const guarded = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const peer = h.fake.addWindow(
+      makeWindow({ x: 900, y: 300, bundleId: "test.stale-learning-guard" }),
+    );
+    await seedWorkspace(h, [guarded, peer]);
+    h.fake.focusWindowExternal(guarded);
+    await h.run({ type: "reconcile" });
+    staleWindow = peer;
+    originalFrame = await frameOf(h, peer);
+    rejectNative = true;
+
+    const error = await h.failure({ type: "moveDirection", direction: "right" });
+
+    expect(error.code).toBe("inventory_stale");
+    expect(staleWrites).toBeGreaterThan(0);
+    expect(await frameOf(h, peer)).toEqual(originalFrame);
+    expect(
+      snapshot.document.profiles.find(
+        (profile) => profile.key.application === "test.stale-learning-guard",
+      ),
+    ).toBeUndefined();
+    expect(
+      snapshot.document.pending.find(
+        (pending) => pending.key.application === "test.stale-learning-guard",
+      ),
+    ).toBeUndefined();
+  });
+
+  test("an unreadable floating window does not block a tiled edge no-op", async () => {
+    let unreadable: WindowId | null = null;
+    const h = await bootstrap(undefined, (inner) => ({
+      ...inner,
+      getWindow: (id) => (id === unreadable ? Effect.succeed(null) : inner.getWindow(id)),
+    }));
+    const tiled = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const floating = h.fake.addWindow(makeWindow({ x: 900, y: 300 }));
+    await seedWorkspace(h, [tiled, floating]);
+    await h.run({ type: "floatWindow", windowId: floating });
+    h.fake.focusWindowExternal(tiled);
+    await h.run({ type: "reconcile" });
+    unreadable = floating;
+
+    await h.run({ type: "moveDirection", direction: "left" });
+
+    expect(h.fake.focusedWindowId()).toBe(tiled);
   });
 });
 
@@ -600,13 +926,13 @@ describe("transactional compound commands (review issue 1)", () => {
     const h = await bootstrap();
     const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     const w2 = h.fake.addWindow(makeWindow({ x: 900, y: 200 }));
+    await seedWorkspace(h, [w1, w2]);
+    await h.run({ type: "focusWindow", windowId: w2 });
     const w3 = h.fake.addWindow(makeWindow({ x: 1200, y: 600 }));
     await seedWorkspace(h, [w1, w2, w3]);
-    h.fake.focusWindowExternal(w2);
     await h.run({ type: "reconcile" });
 
-    // Row panes w1|w2|w3. RIGHT from w2 swaps with w3; retile then writes
-    // w3 into the middle slot (SUCCEEDS) before failing on w2.
+    // w2 is above w3. DOWN swaps them, writing w3 before failing on w2.
     const before = await h.snapshot();
     const wsBefore = workspaceOf(before, "1")!;
     const frameBefore = {
@@ -616,7 +942,7 @@ describe("transactional compound commands (review issue 1)", () => {
     };
 
     h.fake.swapBackingElement(w2);
-    const error = await h.failure({ type: "moveDirection", direction: "right" });
+    const error = await h.failure({ type: "moveDirection", direction: "down" });
     expect(error.code).toBe("inventory_stale");
 
     const after = await h.snapshot();
@@ -728,13 +1054,13 @@ describe("engine-side logical focus across queued commands (review issue 3)", ()
 
     // Three presses back-to-back; NO reconcile between them, so observed
     // snapshots lag behind. Engine logical focus must carry the chain:
-    // right → w2, right wraps → w1, left wraps → w2.
+    // right → w2, right no-ops, left → w1.
     await h.run({ type: "focusDirection", direction: "right" });
     expect(h.fake.focusedWindowId()).toBe(w2);
     await h.run({ type: "focusDirection", direction: "right" });
-    expect(h.fake.focusedWindowId()).toBe(w1);
+    expect(h.fake.focusedWindowId()).toBe(w2);
     await h.run({ type: "focusDirection", direction: "left" });
-    expect(h.fake.focusedWindowId()).toBe(w2);
+    expect(h.fake.focusedWindowId()).toBe(w1);
   });
 });
 
@@ -762,7 +1088,7 @@ describe("observed unmanageable focus blocks fallback (review issue 5)", () => {
     const w2 = h.fake.addWindow(makeWindow({ x: 900, y: 300 }));
     await seedWorkspace(h, [w1, w2]);
     let snap = await h.snapshot();
-    expect(workspaceOf(snap, "1")?.lastFocusedMember).toBe(w2); // valid fallback exists
+    expect(workspaceOf(snap, "1")?.lastFocusedMember).toBe(w1); // valid fallback exists
 
     // Externally focus a transient dialog; reconcile adopts that observation.
     const dialog = h.fake.addWindow(makeWindow({ subrole: "AXDialog", x: 60, y: 60 }));
@@ -1153,8 +1479,8 @@ describe("focus generation survives stale observations (round 2 issue 6)", () =>
     snap = await h.snapshot();
     expect(snap.focusedWindow).toBe(w2);
 
-    // Second press resolves origin from the INTENT (w2) and wraps to w1.
-    await h.run({ type: "focusDirection", direction: "right" });
+    // Second press resolves origin from the INTENT (w2), not the stale observation.
+    await h.run({ type: "focusDirection", direction: "left" });
     snap = await h.snapshot();
     expect(snap.focusedWindow).toBe(w1);
 
@@ -1489,6 +1815,8 @@ describe("command waits behind blocked reconciliation (round 3 issue 6)", () => 
     await seedWorkspace(h, [w1, w2]);
     h.fake.focusWindowExternal(w1);
     await h.run({ type: "reconcile" });
+    const treeBefore = workspaceOf(await h.snapshot(), "1")!.tree;
+    const writesBefore = h.fake.writes().length;
 
     // Start a background reconcile that hangs inside its exclusive section.
     suspendGetWindows = true;
@@ -1499,17 +1827,19 @@ describe("command waits behind blocked reconciliation (round 3 issue 6)", () => 
     const pending = h.run({ type: "moveDirection", direction: "right" });
     await new Promise((r) => setTimeout(r, 30));
 
+    // The newer focus is observed by the reconcile holding the gate. Once the
+    // move acquires that gate, w2 is already at the right edge and must no-op.
+    h.fake.focusWindowExternal(w2);
+
     suspendGetWindows = false;
     for (const resume of resumers.splice(0)) resume();
     const result = await pending;
     expect(result.type).toBe("ok");
     DEADLINE.deadlineMs = 3;
-    // The swap genuinely committed afterwards (origin stays focused/lfm).
     const after = await h.snapshot();
-    const treeAfterSwap = workspaceOf(after, "1")!.tree;
-    expect(treeAfterSwap.kind === "split").toBe(true);
-    expect(workspaceOf(after, "1")?.lastFocusedMember).toBe(w1);
-    expect(h.fake.focusedWindowId()).toBe(w1);
+    expect(workspaceOf(after, "1")!.tree).toEqual(treeBefore);
+    expect(h.fake.writes().length).toBe(writesBefore);
+    expect(h.fake.focusedWindowId()).toBe(w2);
   });
 });
 
@@ -1663,8 +1993,8 @@ describe("busy-event coalesced rerun guarantees convergence (final issue 2)", ()
     // Post-release rerun converged tiles onto the NEW work area (the swap
     // put w2 in the LEFT pane and w1 in the RIGHT).
     await waitFor(() => (h.fake.frameOf(w1)?.height ?? 0) === 500);
-    expect(await frameOf(h, w1)).toEqual(frame(764, 38, 748, 500));
-    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 756, 500));
+    expect(await frameOf(h, w1)).toEqual(frame(756, 38, 756, 500));
+    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 748, 500));
   });
 });
 
@@ -1833,7 +2163,7 @@ describe("required-nullable subrole in identity fingerprint (final fix 2)", () =
     // replacement is the live window (engine re-captures a FRESH identity
     // each attempt). Leaves after this second swap: [w2, w1].
     await h.run({ type: "moveDirection", direction: "left" });
-    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 756, 944));
-    expect(await frameOf(h, w1)).toEqual(frame(764, 38, 748, 944));
+    expect(await frameOf(h, w2)).toEqual(frame(0, 38, 748, 944));
+    expect(await frameOf(h, w1)).toEqual(frame(756, 38, 756, 944));
   });
 });

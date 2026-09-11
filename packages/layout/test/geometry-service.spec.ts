@@ -116,6 +116,51 @@ const runPositionClamp = (adapter: PlatformAdapter, parking: boolean) =>
   );
 
 describe("geometry-service guarded writes", () => {
+  test("preserves stable refusal evidence for transaction-level learning", async () => {
+    const clamped = { ...TARGET, width: 700 };
+    const adapter = adapterWith(() => ({
+      requested: TARGET,
+      observed: clamped,
+      stable: true,
+      stableReads: 3,
+      errorKind: "rejected",
+    }));
+
+    const exit = await run(adapter);
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const failure = Cause.failureOption(exit.cause);
+      expect(failure).toMatchObject({
+        _tag: "Some",
+        value: { observed: clamped, stable: true, stableReads: 3 },
+      });
+    }
+  });
+
+  test("rejects a replacement baseline against the transaction-captured identity", async () => {
+    let writes = 0;
+    const adapter = adapterWith((_part, _expected, current) => {
+      writes += 1;
+      return writeResult(TARGET, current.frame);
+    });
+
+    const exit = await Effect.runPromiseExit(
+      applyGeometryRequest(
+        { adapter, clock: CLOCK },
+        { windowId: "window:1", frame: TARGET, attempts: 1 },
+        { ...context, expectedIdentity: { fingerprint: '[9999,"AXWindow",null]' } },
+      ),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const failure = Cause.failureOption(exit.cause);
+      if (failure._tag === "Some") expect(failure.value.code).toBe("stale");
+    }
+    expect(writes).toBe(0);
+  });
+
   test("accepts stable exact-size position drift only for parking requests", async () => {
     const clamped = { ...TARGET, x: TARGET.x + 12 };
     const makeAdapter = () => adapterWith(() => writeResult(TARGET, clamped));

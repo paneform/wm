@@ -709,13 +709,21 @@ describe("engine boot integration", () => {
     expect(snapshot.windows).toHaveLength(3);
     for (const w of snapshot.windows) {
       expect(w.managed).toBe(true);
-      expect(w.frame.y).toBe(38);
+      expect(w.frame.y).toBeGreaterThanOrEqual(38);
+      expect(w.frame.y + w.frame.height).toBeLessThanOrEqual(982);
       expect(w.frame.x).toBeGreaterThanOrEqual(0);
       expect(w.frame.x + w.frame.width).toBeLessThanOrEqual(1512);
     }
-    const frames = snapshot.windows.map((w) => w.frame).sort((p, q) => p.x - q.x);
-    for (let i = 1; i < frames.length; i++) {
-      expect(frames[i]!.x).toBeGreaterThanOrEqual(frames[i - 1]!.x + frames[i - 1]!.width);
+    const frames = snapshot.windows.map((w) => w.frame);
+    for (const [index, a] of frames.entries()) {
+      for (const b of frames.slice(index + 1)) {
+        expect(
+          a.x + a.width <= b.x ||
+            b.x + b.width <= a.x ||
+            a.y + a.height <= b.y ||
+            b.y + b.height <= a.y,
+        ).toBe(true);
+      }
     }
     await Effect.runPromise(engine.stop()).catch(() => {});
   }, 20000);

@@ -1280,7 +1280,8 @@ describe("engine pipeline (fake platform)", () => {
     expect(tree).toMatchObject({
       kind: "split",
       axis: "vertical",
-      second: { kind: "split", axis: "vertical" },
+      first: { kind: "split", axis: "horizontal" },
+      second: { kind: "leaf", windowId: docker },
     });
 
     await Effect.runPromise(engine.execute({ type: "focusWorkspace", name: "1" }));
@@ -1289,9 +1290,9 @@ describe("engine pipeline (fake platform)", () => {
     const content = { x: 0, y: 32, width: 1512, height: 950 };
     const frames = [fake.frameOf(spotify), fake.frameOf(docker), fake.frameOf(chatgpt)];
     expect(frames).toEqual([
-      { x: 0, y: 32, width: 800, height: 950 },
+      { x: 0, y: 32, width: 800, height: 475 },
       { x: 572, y: 32, width: 940, height: 950 },
-      { x: 1032, y: 32, width: 480, height: 950 },
+      { x: 0, y: 507, width: 756, height: 475 },
     ]);
     for (const frame of frames) {
       expect(frame).not.toBeNull();

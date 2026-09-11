@@ -297,13 +297,21 @@ V1 ships only BSP, behind an extensible layout interface.
 Default insertion:
 
 - Split the workspace's most recently focused leaf.
+- Opening a window does not replace focus history. Focus on a floating window,
+  dialog, or unmanaged surface preserves the last focused tiled insertion target.
 - Preserve most-recent focus per workspace even when another workspace becomes
   globally focused, so cross-workspace moves split the intended destination
   window.
-- Split along the tile's longest dimension.
+- Prefer the shortest divider (split along the tile's longest dimension) that
+  satisfies both windows' size constraints and the configured gap. Try the other
+  orientation before using the existing layout fallback policies.
+- Use the target tile's logical frame, including when its workspace is parked.
+  Preserve existing dividers outside the target when a split fits inside it.
 - A square tile uses a vertical divider.
 - Existing window stays left/top; new window goes right/bottom.
-- New split ratio is 50/50.
+- Prefer a 50/50 split, adjusted as needed for size constraints.
+- Verify each new window's planned frame before inserting it, then resize the
+  existing tiles immediately after successful insertion.
 
 Removing a leaf promotes its sibling subtree while preserving all nested
 structure and ratios.

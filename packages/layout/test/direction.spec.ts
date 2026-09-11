@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { directionalNeighbor, type DirectionalCandidate } from "../src/direction.ts";
+import {
+  directionalFocusNeighbor,
+  directionalNeighbor,
+  type DirectionalCandidate,
+} from "../src/direction.ts";
 
 // Pure directional neighbor ranking — bean wm-pmys. Deterministic rules:
 // strict half-plane, primary-axis gap → orthogonal distance → stable order;
@@ -96,5 +100,40 @@ describe("directionalNeighbor — edge wrap", () => {
 describe("directionalNeighbor — degenerate inputs", () => {
   test("no candidates returns null (single-window workspace)", () => {
     expect(neighborOf("left", { x: 0, y: 0 }, [])).toBeNull();
+  });
+});
+
+describe("directionalFocusNeighbor — frame borders", () => {
+  const frame = (x: number, y: number, width: number, height: number) => ({ x, y, width, height });
+  const a = { id: "A", frame: frame(0, 0, 100, 100) };
+  const b = { id: "B", frame: frame(0, 100, 100, 100) };
+  const c = { id: "C", frame: frame(100, 0, 100, 200) };
+
+  test("uses visible borders for a stacked column beside a spanning window", () => {
+    expect(directionalFocusNeighbor({ direction: "right", origin: c.frame, candidates: [a, b] })).toBeNull();
+    expect(directionalFocusNeighbor({ direction: "up", origin: c.frame, candidates: [a, b] })).toBeNull();
+    expect(directionalFocusNeighbor({ direction: "down", origin: c.frame, candidates: [a, b] })).toBeNull();
+
+    expect(
+      directionalFocusNeighbor({
+        direction: "right",
+        origin: a.frame,
+        candidates: [c],
+      }),
+    ).toBe("C");
+    expect(
+      directionalFocusNeighbor({
+        direction: "left",
+        origin: b.frame,
+        candidates: [c],
+      }),
+    ).toBeNull();
+    expect(
+      directionalFocusNeighbor({
+        direction: "up",
+        origin: b.frame,
+        candidates: [a, c],
+      }),
+    ).toBe("A");
   });
 });

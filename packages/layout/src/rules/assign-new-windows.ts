@@ -1,16 +1,7 @@
-import {
-  insertLeaf,
-  firstLeaf,
-  planLayout,
-  contentRect,
-  tiledMembers,
-  constraintsResolver,
-  isEmptyTree,
-} from "../layout/bsp.js";
+import { constraintsResolver } from "../layout/bsp.js";
 import type { Action } from "../actions.js";
-import type { Frame } from "../schema.js";
-import type { World } from "../world.js";
-import { insertionTargetFrame } from "../insertion-frame.js";
+import { recordFocusedMember, type World } from "../world.js";
+import { planWindowInsertion } from "../insertion-frame.js";
 import {
   constraintsForWindow,
   displayById,
@@ -54,6 +45,7 @@ export const assignNewWindows: Rule = {
   },
   run: (world: World, ctx: RuleContext): Action[] => {
     const actions: Action[] = [];
+    let prospective = world;
     for (const observation of world.windows.values()) {
       if (isIgnoredSurface(world, ctx, observation)) continue;
       if (findMembership(world, observation.id) !== null) continue;
@@ -69,7 +61,7 @@ export const assignNewWindows: Rule = {
 
       const target = pickWorkspace(world, ctx, observation);
       if (target === null) continue;
-      const workspace = world.workspaces.get(target);
+      const workspace = prospective.workspaces.get(target);
       if (workspace === undefined) continue;
 
       const display =
@@ -86,8 +78,8 @@ export const assignNewWindows: Rule = {
         continue;
       }
 
-      const frame = preflightFrame(world, ctx, workspace.name, observation.id, display.id);
-      if (frame === null) {
+      const plan = preflightInsertion(prospective, ctx, workspace.name, observation.id, display.id);
+      if (plan === null) {
         // No feasible intended frame — quarantine (emit nothing) for retry.
         actions.push({
           kind: "emitDiagnostic",
@@ -97,8 +89,21 @@ export const assignNewWindows: Rule = {
         continue;
       }
 
-      actions.push({ kind: "setFrame", windowId: observation.id, frame });
-      actions.push({ kind: "insertWindow", windowId: observation.id, workspace: target });
+      actions.push({ kind: "setFrame", windowId: observation.id, frame: plan.frame });
+      const insertion = {
+        kind: "insertWindow",
+        windowId: observation.id,
+        workspace: target,
+      } as const;
+      if (plan.beside === null) actions.push(insertion);
+      else if (plan.axis === undefined) actions.push({ ...insertion, beside: plan.beside });
+      else actions.push({ ...insertion, beside: plan.beside, axis: plan.axis });
+      // Later discoveries must split the tree that earlier verified insertions will commit.
+      prospective = {
+        ...prospective,
+        workspaces: new Map(prospective.workspaces).set(target, { ...workspace, tree: plan.tree }),
+      };
+      prospective = recordFocusedMember(prospective, prospective.focusIntent?.id ?? null);
     }
     return actions;
   },
@@ -122,32 +127,18 @@ function pickWorkspace(
 }
 
 /** Hypothetical insert + solve WITHOUT mutating committed state. */
-function preflightFrame(
+function preflightInsertion(
   world: World,
   ctx: RuleContext,
   workspaceName: string,
   newId: string,
   displayId: string,
-): Frame | null {
+) {
   const workspace = world.workspaces.get(workspaceName);
   if (workspace === undefined) return null;
   const display = displayById(world, displayId);
   if (display === undefined) return null;
   const settings = ctx.settings(workspaceName, display.id);
-
-  const members = tiledMembers(workspace.tree);
-  const beside =
-    (workspace.lastFocusedMember !== null && members.includes(workspace.lastFocusedMember)
-      ? workspace.lastFocusedMember
-      : members[0]) ?? null;
-  const observedBesideFrame = beside === null ? undefined : world.windows.get(beside)?.frame;
-  const besideFrame = insertionTargetFrame(world, workspace, observedBesideFrame, settings.margins);
-  const hypothetical = isEmptyTree(workspace.tree)
-    ? ({ kind: "leaf", windowId: newId } as const)
-    : beside !== null && besideFrame !== undefined
-      ? insertLeaf(workspace.tree, beside, newId, besideFrame)
-      : null;
-  if (hypothetical === null) return null;
 
   const resolver = constraintsResolver((id) => {
     if (id === newId) return constraintsForWindow(world, ctx, observation0(world, newId));
@@ -155,14 +146,14 @@ function preflightFrame(
     return obs === undefined ? {} : constraintsForWindow(world, ctx, obs);
   });
 
-  const plan = planLayout({
-    tree: hypothetical,
-    content: contentRect(display, settings.margins),
+  return planWindowInsertion({
+    world,
+    workspace,
+    newId,
+    margins: settings.margins,
     gap: settings.gap,
     resolve: resolver,
   });
-  if (!plan.feasible) return null;
-  return plan.frames.get(newId) ?? null;
 }
 
 function observation0(world: World, id: string) {
