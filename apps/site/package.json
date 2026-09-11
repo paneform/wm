@@ -1,0 +1,42 @@
+{
+  "name": "@paneform/site",
+  "version": "0.1.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "generate:hero-snapshot": "tsx scripts/generate-hero-snapshot.ts",
+    "render:wm-corners": "tsx scripts/render-wm-corners.ts",
+    "prebuild": "pnpm generate:hero-snapshot",
+    "build": "vite build",
+    "preview": "vite preview",
+    "pretypecheck": "pnpm generate:hero-snapshot",
+    "typecheck": "PUBLIC_WAITLIST_URL=https://example.test/waitlist PUBLIC_PRIVACY_URL=https://example.test/privacy svelte-kit sync && PUBLIC_WAITLIST_URL=https://example.test/waitlist PUBLIC_PRIVACY_URL=https://example.test/privacy svelte-check --tsconfig ./tsconfig.json",
+    "pretest": "pnpm generate:hero-snapshot",
+    "test": "vitest run",
+    "lint": "oxlint src scripts test vite.config.ts svelte.config.js",
+    "lint:fix": "oxlint --fix src scripts test vite.config.ts svelte.config.js",
+    "format": "oxfmt src scripts test vite.config.ts svelte.config.js package.json tsconfig.json",
+    "format:check": "oxfmt --check src scripts test vite.config.ts svelte.config.js package.json tsconfig.json"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "5.3.0",
+    "@paneform/layout": "workspace:*",
+    "@paneform/layout-browser": "workspace:*",
+    "effect": "3.22.1",
+    "jsonc-parser": "3.3.1"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-static": "^3.0.10",
+    "@sveltejs/kit": "^2.70.3",
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "oxfmt": "0.65.0",
+    "oxlint": "1.80.0",
+    "svelte": "^5.57.0",
+    "svelte-check": "^4.7.6",
+    "tsx": "^4.20.5",
+    "typescript": "^6.0.3",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
+  }
+}

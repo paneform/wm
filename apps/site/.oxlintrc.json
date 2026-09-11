@@ -1,0 +1,11 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "extends": ["../../anti-slop.oxlintrc.json"],
+  "categories": {
+    "correctness": "error"
+  },
+  "plugins": [],
+  "rules": {
+    "no-unused-vars": "off"
+  }
+}

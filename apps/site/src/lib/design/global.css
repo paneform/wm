@@ -1,0 +1,295 @@
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("@fontsource-variable/inter/files/inter-latin-wght-normal.woff2")
+    format("woff2-variations");
+}
+
+:root {
+  color-scheme: light dark;
+  --rp-base: #191724;
+  --rp-surface: #1f1d2e;
+  --rp-overlay: #26233a;
+  --rp-muted: #6e6a86;
+  --rp-subtle: #908caa;
+  --rp-text: #e0def4;
+  --rp-love: #eb6f92;
+  --rp-gold: #f6c177;
+  --rp-rose: #ebbcba;
+  --rp-pine: #31748f;
+  --rp-foam: #9ccfd8;
+  --rp-iris: #c4a7e7;
+
+  --color-page-background: var(--rp-base);
+  --color-page-foreground: var(--rp-text);
+  --color-page-secondary: var(--rp-subtle);
+  --color-page-quiet: var(--rp-subtle);
+  --color-surface-base: var(--rp-surface);
+  --color-surface-raised: var(--rp-overlay);
+  --color-line-default: color-mix(in srgb, var(--rp-muted) 40%, transparent);
+  --color-line-strong: var(--rp-subtle);
+  --color-device-shell: color-mix(in srgb, var(--rp-overlay) 75%, var(--rp-subtle));
+  --color-screen-background: var(--rp-overlay);
+  --color-screen-off: color-mix(in srgb, var(--rp-base) 82%, var(--rp-surface));
+  --color-window-background: var(--rp-surface);
+  --color-window-focus: var(--rp-iris);
+  --color-window-unfocused: var(--rp-subtle);
+  --color-state-connected: var(--rp-foam);
+  --color-control-close: var(--rp-love);
+  --color-control-minimize: var(--rp-gold);
+  --color-control-maximize: var(--rp-pine);
+  --color-key-background: var(--rp-overlay);
+  --color-key-label: var(--rp-text);
+  --color-key-depth: color-mix(in srgb, var(--rp-base) 88%, black);
+  --color-device-highlight: color-mix(in srgb, var(--rp-subtle) 22%, transparent);
+  --color-device-rim: color-mix(in srgb, var(--rp-text) 12%, var(--color-device-shell));
+  --color-device-shade: color-mix(in srgb, var(--rp-base) 35%, var(--color-device-shell));
+  --color-display-bezel: #191724;
+  --color-display-bezel-raised: #26233a;
+  --color-display-bezel-shadow: #6e6a86;
+  --color-key-highlight: color-mix(in srgb, var(--rp-text) 10%, var(--color-key-background));
+  --color-action-background: var(--rp-foam);
+  --color-action-foreground: var(--rp-base);
+  --color-focus-ring: var(--rp-foam);
+  --color-cable: var(--rp-subtle);
+
+  --type-family-product: "Commit Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --type-family-system: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --type-family-keyboard: "Inter Variable", var(--type-family-system);
+  --type-size-hero: clamp(2rem, 1.25rem + 3vw, 4.5rem);
+  --type-size-body: clamp(0.875rem, 0.82rem + 0.25vw, 1.0625rem);
+  --type-size-control: 0.8125rem;
+  --type-size-label: 0.6875rem;
+  --type-screen-label: clamp(0.24rem, 0.75vw, 0.6875rem);
+  --type-app-glyph: clamp(0.8rem, 4vw, 4rem);
+  --type-weight-regular: 400;
+  --type-weight-medium: 550;
+  --type-weight-strong: 650;
+  --type-leading-hero: 1.02;
+  --type-leading-body: 1.55;
+  --type-tracking-label: 0.12em;
+  --type-tracking-hero: -0.055em;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --page-gutter: clamp(1rem, 4vw, 4rem);
+  --copy-measure: 34rem;
+  --copy-wide-top: 46%;
+  --copy-wide-width: 42%;
+  --hero-min-height: 100svh;
+  --stage-min-height: clamp(31rem, 66svh, 51rem);
+  --stage-control-height: 4.5rem;
+  --control-target: 2.75rem;
+
+  --stroke-hairline: 1px;
+  --stroke-strong: 2px;
+  --radius-small: 4px;
+  --radius-control: 8px;
+  --radius-monitor-screen: 2px;
+  --radius-monitor-shell: 4px;
+  --radius-laptop-screen: 10px;
+  --radius-laptop-base: 12px;
+  --radius-laptop-lid: 18px;
+  --radius-screen-window: var(--radius-laptop-screen);
+  --opacity-64: 0.64;
+  --opacity-88: 88%;
+  --layer-cable: 1;
+  --layer-monitor: 2;
+  --layer-laptop: 3;
+  --layer-readout: 5;
+  --layer-controls: 6;
+  --layer-shortcut-readout: 7;
+  --layer-screen-dock: 8;
+
+  --scene-perspective: 1800px;
+  --scene-stacked-aspect: 1100 / 1550;
+  --scene-wide-aspect: 1760 / 1100;
+  --studio-total-aspect: 640 / 475;
+  --studio-shell-aspect: 640 / 368;
+  --studio-stacked-width: 90.9%;
+  --studio-stacked-top: 2.6%;
+  --studio-stacked-left: 4.5%;
+  --studio-wide-width: 36%;
+  --studio-wide-top: 1%;
+  --studio-wide-left: 2%;
+  --studio-bezel: 1.25%;
+  --studio-stand-width: 23.75%;
+  --studio-stand-height: 21.473684%;
+  --studio-base-height: 1.263158%;
+  --studio-power-stand-height: 94.444444%;
+  --studio-power-base-height: 5.555556%;
+  --studio-feet-width: 4.6875%;
+  --studio-feet-height: 0.210526%;
+  --studio-feet-radius: 10%;
+  --studio-left-foot-left: 38.125%;
+  --studio-right-foot-left: 57.1875%;
+  --studio-stand-gradient: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--color-device-shade) 55%, var(--color-device-shell)) 0,
+    var(--color-device-shell) 40%,
+    var(--color-device-shell) 85%,
+    color-mix(in srgb, var(--color-device-rim) 55%, var(--color-device-shell)) 90%,
+    color-mix(in srgb, var(--color-device-shade) 65%, var(--color-device-shell)) 100%
+  );
+  --studio-base-gradient: radial-gradient(
+    circle at center,
+    var(--color-device-rim) 85%,
+    var(--color-device-shade) 100%
+  );
+  --laptop-solo-width: min(66%, 42rem);
+  --laptop-solo-top: 34%;
+  --laptop-intro-wide-width: 50%;
+  --laptop-intro-wide-top: 38%;
+  --laptop-intro-wide-left: 44.5%;
+  --laptop-stacked-width: 45.6%;
+  --laptop-stacked-top: 68%;
+  --laptop-stacked-left: 27.2%;
+  --laptop-wide-width: 50%;
+  --laptop-wide-top: 38%;
+  --laptop-wide-left: 44.5%;
+  --macbook-deck-aspect: 502 / 355;
+  --macbook-lid-height: 95.2%;
+  --macbook-bezel-top: 1.7%;
+  --macbook-bezel-inline: 1.7%;
+  --macbook-bezel-bottom: 3.4%;
+  --laptop-base-pitch: 45deg;
+  --laptop-lid-open: 45deg;
+  --camera-width: 11.3%;
+  --camera-height: 4.48%;
+  --camera-join-size: clamp(0.12rem, 0.45vw, 0.45rem);
+  --device-enter-distance: 2rem;
+  --base-edge-size: 1rem;
+  --deck-padding: 2%;
+  --deck-gap: 1%;
+  --deck-content-depth: 0.2rem;
+  --speaker-width: 4%;
+  --keyboard-row-height: 64%;
+  --trackpad-width: 55%;
+  --speaker-pattern: radial-gradient(circle, var(--color-line-strong) 0 12%, transparent 14%) 0 0 /
+    0.25rem 0.25rem;
+  --device-shell-gradient: linear-gradient(
+    145deg,
+    var(--color-device-rim),
+    var(--color-device-shell) 38%,
+    var(--color-device-shade)
+  );
+  --key-face-gradient: linear-gradient(
+    to bottom,
+    var(--color-key-highlight),
+    var(--color-key-background) 42%
+  );
+  --shadow-device: 0 1.5rem 3rem color-mix(in srgb, var(--rp-base) 40%, transparent);
+  --cable-stroke: 3;
+  --window-titlebar-height: 1.75rem;
+  --window-titlebar-padding: var(--window-control-size);
+  --window-control-size: clamp(0.15rem, 0.55vw, 0.5rem);
+  --window-control-gap: clamp(0.08rem, 0.25vw, 0.25rem);
+  --fallback-window-x: 4%;
+  --fallback-window-y: 12%;
+  --fallback-window-width: 92%;
+  --fallback-window-height: 80%;
+  --dock-gap: clamp(0.12rem, 0.35vw, 0.35rem);
+  --dock-padding: clamp(0.15rem, 0.4vw, 0.4rem);
+  --dock-screen-bottom: 2%;
+  --dock-icon-size: clamp(0.9rem, 2.9vw, 2.9rem);
+  --dock-glyph-size: calc(80% + 1.6px);
+  --dock-indicator-offset: 0.2rem;
+
+  --motion-feedback: 160ms;
+  --motion-cursor-slot: 1060ms;
+  --motion-window: 320ms;
+  --motion-monitor: 1200ms;
+  --motion-scene: 1200ms;
+  --motion-lid: 2200ms;
+  --motion-wire: 2500ms;
+  --motion-power: 2300ms;
+  --motion-reduced: 120ms;
+  --easing-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --easing-mechanical: cubic-bezier(0.16, 1, 0.3, 1);
+  --easing-layout: cubic-bezier(0.22, 1, 0.36, 1);
+  --key-depth: clamp(2px, 0.3vw, 5px);
+  --key-radius: clamp(1.5px, 0.32vw, 5px);
+  --key-inset-depth: clamp(1px, 0.1vw, 2px);
+  --key-inset-blur: clamp(2px, 0.2vw, 4px);
+  --key-legend-padding: clamp(0.12rem, 0.24vw, 0.26rem);
+  --keyboard-well-padding: 0.6%;
+  --keyboard-well-depth: 0.12rem;
+  --keyboard-well-shadow: 0.25rem;
+  --cursor-size: 1.1rem;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --rp-base: #faf4ed;
+    --rp-surface: #fffaf3;
+    --rp-overlay: #f2e9e1;
+    --rp-muted: #9893a5;
+    --rp-subtle: #797593;
+    --rp-text: #464261;
+    --rp-love: #b4637a;
+    --rp-gold: #ea9d34;
+    --rp-rose: #d7827e;
+    --rp-pine: #286983;
+    --rp-foam: #56949f;
+    --rp-iris: #907aa9;
+    --color-page-secondary: var(--rp-text);
+    --color-page-quiet: var(--rp-text);
+    --color-device-shell: color-mix(in srgb, var(--rp-overlay) 75%, var(--rp-muted));
+    --color-screen-background: var(--rp-base);
+    --color-screen-off: color-mix(in srgb, var(--rp-overlay) 82%, var(--rp-base));
+    --color-key-depth: color-mix(in srgb, var(--rp-muted) 72%, var(--rp-base));
+    --color-device-rim: color-mix(in srgb, var(--rp-surface) 65%, var(--color-device-shell));
+    --color-device-shade: color-mix(in srgb, var(--rp-muted) 30%, var(--color-device-shell));
+    --color-display-bezel: var(--rp-subtle);
+    --color-display-bezel-raised: var(--rp-muted);
+    --color-display-bezel-shadow: var(--rp-subtle);
+    --color-key-highlight: color-mix(in srgb, var(--rp-surface) 58%, var(--color-key-background));
+    --color-state-connected: var(--rp-pine);
+    --color-action-background: var(--rp-pine);
+    --color-action-foreground: var(--rp-surface);
+    --color-focus-ring: var(--rp-pine);
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 20rem;
+  background: var(--color-page-background);
+}
+
+body {
+  min-width: 20rem;
+  margin: 0;
+  overflow-x: hidden;
+  background: var(--color-page-background);
+  color: var(--color-page-foreground);
+  font-family: var(--type-family-product);
+  font-weight: var(--type-weight-regular);
+  text-rendering: geometricPrecision;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (forced-colors: active) {
+  :root {
+    --color-window-focus: Highlight;
+    --color-focus-ring: Highlight;
+    --color-state-connected: Highlight;
+  }
+}

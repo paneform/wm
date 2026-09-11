@@ -6,6 +6,8 @@
 node_modules/
 dist/
 packages/layout-browser/playground-dist/
+apps/site/.svelte-kit/
+apps/site/build/
 *.tsbuildinfo
 xcuserdata/
 DerivedData/
