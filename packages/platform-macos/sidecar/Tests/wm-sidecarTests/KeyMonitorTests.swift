@@ -44,4 +44,16 @@ import Testing
       code: 11, isRepeat: true, candidates: [(chord, "workspace focus B")], pressed: [.rshift]
     ) == nil)
   }
+
+  @Test func pausedSwallowingKeepsOnlyConfiguredExceptionsSuppressed() {
+    let regular = KeyChord(modifiers: [.rshift], keyCode: 11)
+    let unpause = KeyChord(modifiers: [.rshift], keyCode: 12)
+
+    #expect(KeyMonitor.shouldSwallow(
+      chord: regular, swallowHotkeys: false, alwaysSwallowed: [unpause]) == false)
+    #expect(KeyMonitor.shouldSwallow(
+      chord: unpause, swallowHotkeys: false, alwaysSwallowed: [unpause]) == true)
+    #expect(KeyMonitor.shouldSwallow(
+      chord: regular, swallowHotkeys: true, alwaysSwallowed: [unpause]) == true)
+  }
 }

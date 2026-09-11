@@ -97,14 +97,14 @@
       "expect": { "focusedWindow": "editor" }
     },
     {
-      "command": "window move left",
-      "caption": "Editor, stage left. No window-wrangling required.",
+      "command": "window move right",
+      "caption": "Editor, stage right. No window-wrangling required.",
       "duration": 1500,
       "expect": { "focusedWindow": "editor" }
     },
     {
-      "command": "window focus left",
-      "caption": "A little left. A lot more focus.",
+      "command": "focus-window terminal",
+      "caption": "Terminal takes focus for the workspace move.",
       "duration": 1100,
       "expect": { "focusedWindow": "terminal" }
     },

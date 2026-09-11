@@ -91,6 +91,47 @@ describe("initial layout hydration", () => {
     );
   });
 
+  test.each([
+    [37, 90],
+    [15, 22],
+    [115, 900],
+  ])("round-trips a %s-pixel divider in %s usable points", (first, space) => {
+    const content = { x: -17, y: 23, width: space + 11, height: 79 };
+    const windows = [
+      { id: "A", frame: { x: -17, y: 23, width: first, height: 79 } },
+      { id: "B", frame: { x: first - 6, y: 23, width: space - first, height: 79 } },
+    ];
+
+    const tree = inferInitialTree(windows, content, 11)!;
+    const plan = planLayout({ tree, content, gap: 11, resolve: () => undefined });
+
+    expect(tree).toMatchObject({ kind: "split", axis: "vertical" });
+    expect(plan.feasible && Object.fromEntries(plan.frames)).toEqual(
+      Object.fromEntries(windows.map(({ id, frame }) => [id, frame])),
+    );
+  });
+
+  test("splits overlap fallback across half of usable space", () => {
+    const tree = inferInitialTree(
+      [
+        { id: "A", frame: { x: 0, y: 0, width: 70, height: 80 } },
+        { id: "B", frame: { x: 30, y: 0, width: 70, height: 80 } },
+      ],
+      { x: 0, y: 0, width: 101, height: 80 },
+      11,
+    )!;
+    const plan = planLayout({
+      tree,
+      content: { x: 0, y: 0, width: 101, height: 80 },
+      gap: 11,
+      resolve: () => undefined,
+    });
+
+    expect(tree).toMatchObject({ kind: "split", axis: "vertical", ratio: 0.5 });
+    expect(plan.feasible && plan.frames.get("A")).toEqual({ x: 0, y: 0, width: 45, height: 80 });
+    expect(plan.feasible && plan.frames.get("B")).toEqual({ x: 56, y: 0, width: 45, height: 80 });
+  });
+
   test("transfers an affine layout to a disjoint display without collapsing its first pane", () => {
     const windows = [
       { id: "A", frame: { x: 0, y: 0, width: 400, height: 800 } },

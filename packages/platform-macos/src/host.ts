@@ -24,6 +24,7 @@ import {
   BatchResult,
   ErrorEnvelope,
   FocusResult,
+  HotkeySwallowingResult,
   mapErrorCode,
   OpenedResult,
   KeybindActionEvent,
@@ -132,6 +133,10 @@ export interface MacOsSidecarAdapter extends PlatformAdapter {
   readonly requestPermissions: () => Effect.Effect<PermissionStatus, PlatformError>;
   readonly configureKeybinds: (
     keybinds: Readonly<Record<string, string>>,
+    alwaysSwallow?: readonly string[],
+  ) => Effect.Effect<void, PlatformError>;
+  readonly setHotkeySwallowing: (
+    swallow: boolean,
   ) => Effect.Effect<void, PlatformError>;
   /** Deep link into a System Settings privacy pane via the sidecar. */
   readonly openPermissionsSettings: (
@@ -453,8 +458,17 @@ export const createMacOsSidecarAdapter = (
           guarded(request("requestPermissions", PermissionsResult)),
           ({ permissions }) => permissions,
         ),
-      configureKeybinds: (keybinds) =>
-        Effect.asVoid(guarded(request("configureKeybinds", KeybindsConfiguredResult, { keybinds }))),
+      configureKeybinds: (keybinds, alwaysSwallow = []) =>
+        Effect.asVoid(
+          guarded(request("configureKeybinds", KeybindsConfiguredResult, {
+            keybinds,
+            alwaysSwallow,
+          })),
+        ),
+      setHotkeySwallowing: (swallow) =>
+        Effect.asVoid(
+          guarded(request("setHotkeySwallowing", HotkeySwallowingResult, { swallow })),
+        ),
       openPermissionsSettings: (target: SettingsTarget) =>
         Effect.asVoid(guarded(request("openPermissionsSettings", OpenedResult, { target }))),
       sidecarPath: path,

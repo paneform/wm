@@ -34,6 +34,74 @@ const addNestedScene = (fake: ReturnType<typeof createFakePlatform>) => {
 };
 
 describe("ordinary startup layout preservation", () => {
+  test.each(["fresh", "stale"] as const)(
+    "replays startup focus before admitting windows with a %s follow-up inventory",
+    async (inventory) => {
+      const fake = createFakePlatform({ clock: CLOCK, displays: [DISPLAY] });
+      fake.addWindow(makeWindow({ id: "A", x: 0, y: 0, width: 500, height: 800 }));
+      fake.addWindow(makeWindow({ id: "B", x: 500, y: 0, width: 500, height: 800 }));
+      const verificationEntered = await Effect.runPromise(Deferred.make<void>());
+      const releaseVerification = await Effect.runPromise(Deferred.make<void>());
+      const newFocusConsumed = await Effect.runPromise(Deferred.make<void>());
+      let blockVerification = true;
+      let inventoryReads = 0;
+      const adapter: PlatformAdapter = {
+        ...fake.adapter,
+        events: fake.adapter.events.pipe(
+          Stream.tap((event) =>
+            event.kind === "focus_changed" && event.windowId === "N"
+              ? Deferred.succeed(newFocusConsumed, undefined)
+              : Effect.void,
+          ),
+        ),
+        getWindows: () =>
+          Effect.map(fake.adapter.getWindows(), (windows) => {
+            inventoryReads += 1;
+            if (inventory !== "stale" || inventoryReads === 1) return windows;
+            return windows.map((window) => ({ ...window, focused: window.id === "A" }));
+          }),
+        getWindow: (id) =>
+          blockVerification
+            ? Effect.zipRight(
+                Deferred.succeed(verificationEntered, undefined),
+                Effect.zipRight(Deferred.await(releaseVerification), fake.adapter.getWindow(id)),
+              )
+            : fake.adapter.getWindow(id),
+      };
+      const engine = await Effect.runPromise(
+        createEngine({ adapter, configSource: source({ defaults: { gap: 0 } }), clock: CLOCK }),
+      );
+      const startup = Effect.runFork(engine.start());
+      await Effect.runPromise(Deferred.await(verificationEntered));
+
+      fake.focusWindowExternal("B");
+      fake.addWindow(makeWindow({ id: "N", x: 100, y: 100, width: 300, height: 300 }));
+      fake.focusWindowExternal("N");
+      await Effect.runPromise(Deferred.await(newFocusConsumed));
+      blockVerification = false;
+      await Effect.runPromise(Deferred.succeed(releaseVerification, undefined));
+      await Effect.runPromise(Fiber.join(startup));
+
+      const state = await Effect.runPromise(engine.state());
+      const workspace = state.workspaces.find((candidate) => candidate.name === "1");
+      expect(fake.focusedWindowId()).toBe("N");
+      expect(state.focusedWindow).toBe("N");
+      expect(workspace?.tree).toEqual({
+        kind: "split",
+        axis: "vertical",
+        ratio: 0.5,
+        first: { kind: "leaf", windowId: "A" },
+        second: {
+          kind: "split",
+          axis: "horizontal",
+          ratio: 0.5,
+          first: { kind: "leaf", windowId: "B" },
+          second: { kind: "leaf", windowId: "N" },
+        },
+      });
+    },
+  );
+
   test("unresolved startup compensation stays degraded across later observation cycles", async () => {
     const fake = createFakePlatform({ clock: CLOCK, displays: [DISPLAY] });
     const first = fake.addWindow(

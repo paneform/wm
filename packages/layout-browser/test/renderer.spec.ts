@@ -515,8 +515,8 @@ describe("scene building", () => {
     expect(scene.badges[0]).toMatchObject({ workspace: "1", mode: "bsp", focused: true });
     expect(scene.splitLines).toHaveLength(1);
     const line = scene.splitLines[0]!;
-    // floor(1512 · 0.5)=756; divider sits at 756 + gap/2.
-    expect(line.x1).toBe(756 + 4);
+    // floor((1512 - 8) · 0.5)=752; divider sits at 752 + gap/2.
+    expect(line.x1).toBe(752 + 4);
     expect(line.y1).toBe(38);
     expect(line.y2).toBe(982);
     expect(scene.focusedWindowId).toBe("w1");
@@ -541,8 +541,25 @@ describe("scene building", () => {
       8,
     );
     expect(lines).toHaveLength(2);
-    expect(lines[0]!.x1).toBe(404);
-    expect(lines[1]!.y1).toBe(304);
+    expect(lines[0]!.x1).toBe(400);
+    expect(lines[1]!.y1).toBe(300);
+  });
+
+  it("matches gap-exclusive solver rounding for an odd split", () => {
+    const [line] = splitLinesForTree(
+      {
+        kind: "split",
+        axis: "vertical",
+        ratio: 0.5,
+        first: { kind: "leaf", windowId: "a" },
+        second: { kind: "leaf", windowId: "b" },
+      },
+      { x: 10, y: 20, width: 101, height: 60 },
+      8,
+    );
+
+    // floor((101 - 8) · 0.5)=46, leaving 47 points after the 8-point gap.
+    expect(line).toEqual({ x1: 60, y1: 20, x2: 60, y2: 80 });
   });
 });
 
@@ -709,13 +726,21 @@ describe("engine boot integration", () => {
     expect(snapshot.windows).toHaveLength(3);
     for (const w of snapshot.windows) {
       expect(w.managed).toBe(true);
-      expect(w.frame.y).toBe(38);
+      expect(w.frame.y).toBeGreaterThanOrEqual(38);
+      expect(w.frame.y + w.frame.height).toBeLessThanOrEqual(982);
       expect(w.frame.x).toBeGreaterThanOrEqual(0);
       expect(w.frame.x + w.frame.width).toBeLessThanOrEqual(1512);
     }
-    const frames = snapshot.windows.map((w) => w.frame).sort((p, q) => p.x - q.x);
-    for (let i = 1; i < frames.length; i++) {
-      expect(frames[i]!.x).toBeGreaterThanOrEqual(frames[i - 1]!.x + frames[i - 1]!.width);
+    const frames = snapshot.windows.map((w) => w.frame);
+    for (const [index, a] of frames.entries()) {
+      for (const b of frames.slice(index + 1)) {
+        expect(
+          a.x + a.width <= b.x ||
+            b.x + b.width <= a.x ||
+            a.y + a.height <= b.y ||
+            b.y + b.height <= a.y,
+        ).toBe(true);
+      }
     }
     await Effect.runPromise(engine.stop()).catch(() => {});
   }, 20000);

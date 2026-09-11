@@ -130,6 +130,7 @@ enum ResultPayload: Encodable {
   case permissions(PermissionsValue)
   case opened
   case keybindsConfigured(Int)
+  case hotkeySwallowing(Bool)
 
   func encode(to encoder: Encoder) throws {
     var container = encoder.singleValueContainer()
@@ -156,6 +157,8 @@ enum ResultPayload: Encodable {
       try container.encode(OpenedPayload(opened: true))
     case .keybindsConfigured(let count):
       try container.encode(KeybindsConfiguredPayload(configured: count))
+    case .hotkeySwallowing(let swallowing):
+      try container.encode(HotkeySwallowingPayload(swallowing: swallowing))
     }
   }
 
@@ -203,6 +206,10 @@ enum ResultPayload: Encodable {
 
   private struct KeybindsConfiguredPayload: Encodable {
     let configured: Int
+  }
+
+  private struct HotkeySwallowingPayload: Encodable {
+    let swallowing: Bool
   }
 }
 
@@ -306,6 +313,8 @@ struct RequestMessage: Decodable, Sendable {
   var expectedIdentity: ExpectedIdentityValue?
   var operations: [BatchOperationValue]?
   var keybinds: [String: String]?
+  var alwaysSwallow: [String]?
+  var swallow: Bool?
 }
 
 // MARK: - Codec helpers

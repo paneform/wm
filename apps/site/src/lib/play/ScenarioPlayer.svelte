@@ -363,7 +363,11 @@
   }
 
   function returnToStart() {
-    void replaceSession(scenario, "Returned to the starting layout. New actions will be recorded before the first step.");
+    void replaceSession(
+      scenario,
+      "Returned to the starting layout. New actions will be recorded before the first step.",
+      true,
+    );
   }
 
   function rebase() {
@@ -385,7 +389,7 @@
         notice = "Steps updated. Continue from the current layout.";
         return true;
       }
-      return await replaceSession(next, "Steps changed. Playback reset to the starting layout.");
+      return await replaceSession(next, "Steps changed. Playback reset to the starting layout.", true);
     } catch (cause) {
       error = messageFor(cause);
       return false;

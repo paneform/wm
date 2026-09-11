@@ -177,9 +177,9 @@ describe("BSP tree shape", () => {
 });
 
 describe("BSP two-pane solve", () => {
-  test("preferred length = floor(available · ratio); second pane offset += gap; shared edge rounded once", () => {
+  test("ratios divide gap-exclusive space; the second pane receives the rounding remainder", () => {
     const result = partitionLengths(1005, BSP_DEFAULT_GAP, 0.5, {}, {});
-    expect(result).toEqual({ first: 502, second: 495, feasible: true });
+    expect(result).toEqual({ first: 498, second: 499, feasible: true });
 
     const plan = planLayout({
       tree: split("vertical", 0.5, leaf("a"), leaf("b")),
@@ -190,10 +190,39 @@ describe("BSP two-pane solve", () => {
     if (!plan.feasible) return;
     const a = plan.frames.get("a")!;
     const b = plan.frames.get("b")!;
-    expect(a.width).toBe(502);
+    expect(a.width).toBe(498);
     expect(b.x).toBe(a.x + a.width + BSP_DEFAULT_GAP);
     expect(b.x - (a.x + a.width)).toBe(BSP_DEFAULT_GAP);
     expect(a.width + BSP_DEFAULT_GAP + b.width).toBe(1005);
+  });
+
+  test("half splits give equal frames on both axes in the reported T layout", () => {
+    const plan = planLayout({
+      tree: split("vertical", 0.5, leaf("A"), split("horizontal", 0.5, leaf("B"), leaf("C"))),
+      content: frame(0, 44, 1512, 780),
+      gap: 8,
+      resolve: () => undefined,
+    });
+    expect(plan.feasible).toBe(true);
+    if (!plan.feasible) return;
+    expect(Object.fromEntries(plan.frames)).toEqual({
+      A: frame(0, 44, 752, 780),
+      B: frame(760, 44, 752, 386),
+      C: frame(760, 438, 752, 386),
+    });
+  });
+
+  test("unequal ratios divide usable space and zero-gap sizing is unchanged", () => {
+    expect(partitionLengths(1008, 8, 0.25, {}, {})).toEqual({
+      first: 250,
+      second: 750,
+      feasible: true,
+    });
+    expect(partitionLengths(1000, 0, 0.25, {}, {})).toEqual({
+      first: 250,
+      second: 750,
+      feasible: true,
+    });
   });
 
   test("min-size-aware solve: 1512-wide content, gap 8, ratio 0.5, one window minWidth 800 ⇒ constrained pane 800, peer 704, boundary at x=808", () => {
@@ -367,8 +396,8 @@ describe("tree validation", () => {
     expect(plan.feasible).toBe(true);
     if (!plan.feasible) return;
     expect(plan.frames.size).toBe(2);
-    expect(plan.frames.get("dup")).toEqual(frame(0, 0, 756, 944));
-    expect(plan.frames.get("other")).toEqual(frame(764, 480, 748, 464));
+    expect(plan.frames.get("dup")).toEqual(frame(0, 0, 752, 944));
+    expect(plan.frames.get("other")).toEqual(frame(760, 476, 752, 468));
   });
 
   test("NaN and out-of-range ratios are rejected by validation", () => {
@@ -382,8 +411,8 @@ describe("tree validation", () => {
 
   test("an invalid ratio falls back to 0.5 during the solve instead of corrupting panes", () => {
     expect(partitionLengths(1000, BSP_DEFAULT_GAP, Number.NaN, {}, {})).toEqual({
-      first: 500,
-      second: 492,
+      first: 496,
+      second: 496,
       feasible: true,
     });
     expect(axisForFrame(frame(0, 0, 600, 600))).toBe("vertical");

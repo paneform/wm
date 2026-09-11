@@ -37,6 +37,41 @@ native layer provides event capture and transport rather than layout policy.
 - External hotkey daemons must be disabled when equivalent native bindings are
   active, otherwise commands can be delivered twice.
 
+## 2026-09-02: Engine Controls Hotkey Swallowing During Pause
+
+**Status:** Accepted
+
+### Context
+
+The native event tap must swallow configured hotkeys during normal operation so
+the application underneath does not also act on a window-management shortcut.
+When the engine is paused, layout-affecting hotkeys must remain visible to the
+application underneath. The pause toggle must still be usable, and it must not
+leak through to that application.
+
+### Decision
+
+The layout engine remains the source of truth for pause state. The platform
+adapter exposes an optional `setHotkeySwallowing` control, and the engine sends
+the desired state to the native host during startup and every pause transition.
+
+Keybind configuration also sends the native host the chord strings that must
+remain swallowed while paused. The node host derives this list from configured
+actions: `togglePause` and `resume` are exceptions; `pause` and every other
+action are not. The Swift sidecar only matches chords, forwards every matched
+action to the engine, and applies the swallow setting. It does not parse command
+strings or make pause-policy decisions.
+
+### Consequences
+
+- Paused hotkeys still reach the engine, so command validation and pause gating
+  remain centralized.
+- Non-exception hotkeys are visible to the focused application while paused.
+- The configured unpause binding remains swallowed and can always reach the
+  engine.
+- Adapters without native hotkey capture can omit the control and remain
+  portable.
+
 ## 2026-08-26: Native Host Owns the Engine Process
 
 **Status:** Accepted

@@ -109,6 +109,7 @@ own storage I/O.
 - `docs/rewrite/platform-contract.md` — PlatformAdapter interface, sidecar wire protocol,
   and the catalog of documented macOS behaviors that fakes must emulate and the real
   adapter must survive.
+- `docs/rewrite/pause.md` — pause state, command gating, and native hotkey swallowing.
 - `docs/rewrite/engine-guide.md` — pipeline, rule catalog, probe algorithms, learning,
   transactions.
 - `docs/rewrite/testing-guide.md` — headless test strategy and the edge-case matrix

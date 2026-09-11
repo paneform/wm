@@ -13,6 +13,10 @@ interface PlatformAdapter {
   // events as hints that trigger reconciliation, never as authoritative mutations.
   events(): Stream<PlatformEvent>
 
+  // Optional native-host control. The engine calls this when pause state
+  // changes; adapters without native hotkey capture may omit it.
+  setHotkeySwallowing?(enabled: boolean): Effect<void, PlatformError>
+
   // Snapshot queries. Must be safe to call any time; return last-known state.
   getTopology(): Effect<TopologyObservation, PlatformError>
   getWindows(): Effect<WindowObservation[], PlatformError>
@@ -83,6 +87,8 @@ Engine → sidecar:
 { "op": "permissionsStatus" }
 { "op": "requestPermissions" }   // TCC prompts MUST be invoked by the sidecar executable
 { "op": "openPermissionsSettings", "target": "accessibility" | "screenRecording" }
+{ "op": "configureKeybinds", "keybinds": {...}, "alwaysSwallow": ["rshift p"] }
+{ "op": "setHotkeySwallowing", "swallow": true | false }
 ```
 
 `executeBatch` has one aggregate response. Intermediate streaming is intentionally
@@ -134,8 +140,12 @@ Sidecar implementation requirements:
    degraded screen recording reduces CG metadata but does not kill the source. TCC
    requests (`requestPermissions`) are invoked by the sidecar process itself so the
    system attributes the prompt to it; status queries never prompt.
-10. **Bounded calls:** every AX call must be bounded (async with timeout); one hung app
+10. **Hotkeys:** forward every matched non-repeat keydown to the engine. Return the
+    event to other applications when swallowing is disabled, except for chords listed
+    by `alwaysSwallow`. The sidecar does not parse actions or decide whether a command
+    is valid while paused.
+11. **Bounded calls:** every AX call must be bounded (async with timeout); one hung app
     must never block the sidecar loop. Isolate per-app failures.
-11. **Topology events:** poll CGGetOnlineDisplayList (AppKit notifications are
+12. **Topology events:** poll CGGetOnlineDisplayList (AppKit notifications are
     insufficient without an event loop — see bean wm-dm8l); emit `topology_changed` on
     change. Also emit on wake/sleep notifications.

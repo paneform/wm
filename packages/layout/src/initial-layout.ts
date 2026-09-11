@@ -1,5 +1,6 @@
 import type { DisplayId, Frame, WindowId, WorkspaceName } from "./schema.js";
 import type { BspNode, SplitAxis } from "./world.js";
+import { ratioForLength } from "./layout/bsp.js";
 
 export type EngineInitialLayout = {
   windows: readonly {
@@ -118,12 +119,13 @@ export function inferInitialTree(
   }
   // Preserve the divider center when changing gaps, and grow outer panes into
   // unused display space instead of needlessly moving every internal border.
+  const usable = Math.max(0, target[size] - gap);
   const firstSize =
     border === null
-      ? target[size] / 2
-      : Math.max(1, Math.min(target[size] - gap - 1, border - target[start] - gap / 2));
-  const ratio = target[size] > gap + 2 ? firstSize / target[size] : 0.5;
-  const realizedFirst = Math.floor(target[size] * ratio);
+      ? usable / 2
+      : Math.max(1, Math.min(usable - 1, border - target[start] - gap / 2));
+  const ratio = usable > 2 ? ratioForLength(firstSize, usable) : 0.5;
+  const realizedFirst = Math.floor(usable * ratio);
   const firstFrame = { ...target, [size]: realizedFirst };
   const secondFrame = {
     ...target,

@@ -8,7 +8,7 @@ Source of truth for all types. Implemented with Effect Schema (`effect/Schema`) 
 One canonical OS space: **top-left origin of the primary display, y-axis down**.
 Windows and displays are both observed and commanded in this space. Displays above or
 left of the primary legitimately have negative origins. All math is integer points
-(round once, at shared boundaries, deterministically: `Math.floor(available * ratio)`).
+(round once, at shared boundaries, deterministically: `Math.floor((available - gap) * ratio)`).
 
 Engine-local layout space is optional sugar: origin = work-area top-left of a specific
 display. Projection = translate by that origin. Multi-display is encoded entirely in
@@ -108,30 +108,30 @@ frame so callers can inspect/recover.
 
 ## Numeric constants (port these exactly)
 
-| Constant | Value |
-|---|---|
-| Default geometry tolerance | 1 pt |
-| Default attempts | 3 (range 1–5) |
-| Tolerance range | 0–20 |
-| Retry ladder | [positionSize, sizeOnly, sizePositionSize, convergedSizePositionSize] |
-| Settle polling (engine default) | ≤11 reads, delay between non-matching reads |
-| Position-only verify | Δpos ≤1, Δsize ≤1 |
-| Probe delta | ±1 pt per dimension (floored at ≥1) |
-| Probe match threshold | ≤0.25 pt per component |
-| Work-area flush guard | observation edge within 2 pt of work-area edge ⇒ NOT learnable |
-| Constraint promotion | 3 consistent samples within ±1 pt of each other |
-| Confidence tiers | samples ≥8 strong, ≥3 learned, else tentative |
-| Viability margins | learned min usable iff observed+1 < bound; max iff observed−1 > bound |
-| Tiling containment acceptance | within content ±1 pt OR center inside content |
-| Replan bound per layout pass | memberCount + 1 |
-| Parking acceptance tolerance | 1 pt |
-| Typical measured parking visibility | ~1 pt horizontal, ~52 pt vertical (per corner, probed) |
-| BSP preferred split length | floor(available · ratio); second pane offset += gap |
-| Default gap / resize increment | 8 pt / 0.05 |
-| Default policy chain | [greedy, overlap, stack, overflow] |
-| Transaction queue | pendingLimit 256, historyLimit 512, timeout 15 s |
-| Suspicious-repeat escalation threshold | 3 |
-| Batch cap | 64 commands, stop on first failure |
+| Constant                               | Value                                                                 |
+| -------------------------------------- | --------------------------------------------------------------------- |
+| Default geometry tolerance             | 1 pt                                                                  |
+| Default attempts                       | 3 (range 1–5)                                                         |
+| Tolerance range                        | 0–20                                                                  |
+| Retry ladder                           | [positionSize, sizeOnly, sizePositionSize, convergedSizePositionSize] |
+| Settle polling (engine default)        | ≤11 reads, delay between non-matching reads                           |
+| Position-only verify                   | Δpos ≤1, Δsize ≤1                                                     |
+| Probe delta                            | ±1 pt per dimension (floored at ≥1)                                   |
+| Probe match threshold                  | ≤0.25 pt per component                                                |
+| Work-area flush guard                  | observation edge within 2 pt of work-area edge ⇒ NOT learnable        |
+| Constraint promotion                   | 3 consistent samples within ±1 pt of each other                       |
+| Confidence tiers                       | samples ≥8 strong, ≥3 learned, else tentative                         |
+| Viability margins                      | learned min usable iff observed+1 < bound; max iff observed−1 > bound |
+| Tiling containment acceptance          | within content ±1 pt OR center inside content                         |
+| Replan bound per layout pass           | memberCount + 1                                                       |
+| Parking acceptance tolerance           | 1 pt                                                                  |
+| Typical measured parking visibility    | ~1 pt horizontal, ~52 pt vertical (per corner, probed)                |
+| BSP preferred split length             | floor((available − gap) · ratio); second pane offset += gap           |
+| Default gap / resize increment         | 8 pt / 0.05                                                           |
+| Default policy chain                   | [greedy, overlap, stack, overflow]                                    |
+| Transaction queue                      | pendingLimit 256, historyLimit 512, timeout 15 s                      |
+| Suspicious-repeat escalation threshold | 3                                                                     |
+| Batch cap                              | 64 commands, stop on first failure                                    |
 
 ## Wire protocol messages (CLI/WebSocket)
 
@@ -152,6 +152,7 @@ Error codes (closed union): `invalid_request, window_not_found, workspace_not_fo
 window_not_manageable, window_not_controllable, inventory_stale, geometry_rejected,
 geometry_verification_failed, topology_unstable, paused, queue_full, timeout,
 config_invalid, internal_error`.
+
 ### Window dimension-limit probe
 
 The command `{ type: "probeWindowLimits", windowId }` returns

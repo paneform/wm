@@ -51,8 +51,8 @@ describe("hero demo runner", () => {
       "app:Browser",
       "move:right",
       "app:Text Editor",
-      "move:left",
-      "select:left",
+      "move:right",
+      "app:Terminal",
       "window:T",
     ]);
     expect(calls.indexOf("execute:launch-paneform")).toBe(calls.indexOf("app:Paneform") - 1);

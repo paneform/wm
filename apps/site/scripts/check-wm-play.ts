@@ -182,9 +182,10 @@ async function navigate(client: CdpClient, url: URL, viewport?: Viewport): Promi
     10_000,
   );
   if (url.pathname.startsWith("/wm/play")) {
-    const expected = url.hash.startsWith("#scenario=")
-      ? JSON.stringify(await decodeScenarioFragment(url.hash))
+    const decoded = url.hash.startsWith("#scenario=")
+      ? await decodeScenarioFragment(url.hash)
       : null;
+    const expected = decoded ? JSON.stringify({ ...decoded, steps: decoded.steps ?? [] }) : null;
     await waitFor(
       client,
       "scenario worker readiness",
@@ -541,6 +542,14 @@ async function checkServicesPresentationAndDisplays(client: CdpClient): Promise<
     changedFrame(paused, physicallyMoved),
     "Paused WM did not permit physical window movement",
   );
+  await waitFor(
+    client,
+    "paused movement recorded",
+    `(() => {
+      const root = document.querySelector('.advanced');
+      return [...root.querySelectorAll('button')].some((button) => button.textContent?.trim() === 'Resume' && !button.disabled);
+    })()`,
+  );
   await clickButton(client, "Resume", "document.querySelector('.advanced')");
   await waitFor(
     client,
@@ -628,7 +637,7 @@ async function checkServicesPresentationAndDisplays(client: CdpClient): Promise<
 }
 
 async function checkAuthoringAndSharing(client: CdpClient): Promise<void> {
-  await clickButton(client, "Create scenario");
+  await clickButton(client, "Use current layout as new start");
   await waitFor(
     client,
     "authoring mode",
@@ -695,12 +704,28 @@ async function checkAuthoringAndSharing(client: CdpClient): Promise<void> {
   await waitFor(
     client,
     "saved constraints",
-    "JSON.parse(document.querySelector('#scenario-json').value).state.windows[0]?.constraints?.minWidth === 320",
+    `JSON.parse(document.querySelector('#scenario-json').value).steps.at(-1)?.event?.window?.id === ${JSON.stringify(firstWindow)} && JSON.parse(document.querySelector('#scenario-json').value).steps.at(-1)?.event?.window?.constraints?.minWidth === 320`,
   );
   const constrained = await scenarioDocument(client);
+  const constraintStep = constrained.steps?.at(-1);
   assert(
-    constrained.state.windows[0]?.constraints?.maxWidth === 900,
+    constraintStep !== undefined &&
+      "event" in constraintStep &&
+      constraintStep.event.kind === "window_changed" &&
+      constraintStep.event.window.constraints?.maxWidth === 900,
     "Window maximum width was not saved",
+  );
+  await clickButton(client, "Start", "document.querySelector('.advanced')");
+  await waitFor(
+    client,
+    "authoring WM running",
+    "document.querySelector('.advanced .state')?.textContent?.trim() === 'Running'",
+  );
+  await clickButton(client, "Use current layout as new start");
+  await waitFor(
+    client,
+    "configured authoring baseline",
+    "document.querySelector('.caption > span')?.textContent?.trim() === 'Start' && JSON.parse(document.querySelector('#scenario-json').value).steps.length === 0",
   );
 
   await clickButton(client, "Add command", "document.querySelector('.step-editor')");
@@ -768,11 +793,16 @@ async function checkAuthoringAndSharing(client: CdpClient): Promise<void> {
   await assertNoAlert(client, "invalid builder value");
   await clickButton(client, "Clear", "document.querySelector('.new-command')");
   for (const token of ["window", "move"]) await typeBuilderToken(client, token);
-  await typeBuilderToken(client, "left", "Enter");
+  const moveDirection = (await builderOptions(client)).find((option) =>
+    ["left", "right", "up", "down"].includes(option),
+  );
+  assert(moveDirection, "No executable directional window move is available");
+  const moveCommand = `window move ${moveDirection}`;
+  await typeBuilderToken(client, moveDirection, "Enter");
   await waitFor(
     client,
     "locally inserted command",
-    "document.querySelector('.step-editor code')?.textContent === 'window move left'",
+    `[...document.querySelectorAll('.step-editor .command code')].some((code) => [...code.querySelectorAll('span')].map((token) => token.textContent).join(' ') === ${JSON.stringify(moveCommand)})`,
   );
   assert(
     await evaluate<boolean>(
@@ -785,7 +815,7 @@ async function checkAuthoringAndSharing(client: CdpClient): Promise<void> {
   await waitFor(
     client,
     "applied step",
-    "JSON.parse(document.querySelector('#scenario-json').value).steps?.[0]?.command === 'window move left'",
+    `JSON.parse(document.querySelector('#scenario-json').value).steps?.[0]?.command === ${JSON.stringify(moveCommand)}`,
   );
 
   const additionalCommands = [
@@ -810,12 +840,14 @@ async function checkAuthoringAndSharing(client: CdpClient): Promise<void> {
     );
   }
 
-  await setValue(client, ".step-editor li:first-child .presentation input[type=text]", "Keep me");
+  await setValue(client, ".step-editor li:first-child .step-title input[type=text]", "Keep me");
   await setValue(client, ".step-editor li:first-child .presentation input[type=number]", "275");
-  await clickButton(client, "Edit command", "document.querySelector('.step-editor')");
+  await click(client, ".step-editor li:first-child button.command");
   assert(
-    (await evaluate<string>(client, "document.querySelector('.step-editor code')?.textContent")) ===
-      "window move left",
+    (await evaluate<string>(
+      client,
+      "[...document.querySelector('.step-editor .command code').querySelectorAll('span')].map((token) => token.textContent).join(' ')",
+    )) === moveCommand,
     "Existing command row does not preserve its code while editing",
   );
   await client.command("Input.insertText", { text: "partial" });
@@ -841,14 +873,27 @@ async function checkAuthoringAndSharing(client: CdpClient): Promise<void> {
     ),
     "Editing a command discarded its caption or duration draft",
   );
-  await clickButton(client, "Edit command", "document.querySelector('.step-editor')");
+  await clickButton(client, "Apply steps", "document.querySelector('.step-editor')");
+  await waitFor(
+    client,
+    "caption and duration commit",
+    `JSON.parse(document.querySelector('#scenario-json').value).steps[0]?.caption === 'Keep me' && JSON.parse(document.querySelector('#scenario-json').value).steps[0]?.duration === 275 && JSON.parse(document.querySelector('#scenario-json').value).steps[0]?.command === ${JSON.stringify(moveCommand)}`,
+  );
+  await clickButton(client, "Step", "document.querySelector('.controls')");
+  await waitFor(
+    client,
+    "first authored step executed",
+    "document.querySelector('.caption > span')?.textContent?.trim().startsWith('1 /') && document.querySelector('.player').getAttribute('aria-busy') === 'false'",
+  );
+  await click(client, ".step-editor li:first-child button.command");
   await key(client, "Backspace");
   await clearBuilder(client);
-  assert(
-    (await builderOptions(client)).includes("right"),
-    "Editing a saved direction retained only its old branch",
+  const replacementDirection = (await builderOptions(client)).find(
+    (option) => ["left", "right", "up", "down"].includes(option) && option !== moveDirection,
   );
-  await typeBuilderToken(client, "right", "Enter");
+  assert(replacementDirection, "Editing a saved move did not offer another executable direction");
+  const replacementCommand = `window move ${replacementDirection}`;
+  await typeBuilderToken(client, replacementDirection, "Enter");
   const beforeFailedSave = JSON.stringify(await scenarioDocument(client));
   await evaluate(
     client,
@@ -878,20 +923,26 @@ async function checkAuthoringAndSharing(client: CdpClient): Promise<void> {
   await clickButton(client, "Apply steps", "document.querySelector('.step-editor')");
   await waitFor(
     client,
-    "caption and duration commit",
-    "JSON.parse(document.querySelector('#scenario-json').value).steps[0]?.caption === 'Keep me' && JSON.parse(document.querySelector('#scenario-json').value).steps[0]?.duration === 275 && JSON.parse(document.querySelector('#scenario-json').value).steps[0]?.command === 'window move right'",
+    "executed step replacement recovered",
+    `JSON.parse(document.querySelector('#scenario-json').value).steps[0]?.command === ${JSON.stringify(replacementCommand)} && document.querySelector('.player').getAttribute('aria-busy') === 'false'`,
+  );
+  await clickButton(client, "Step", "document.querySelector('.controls')");
+  await waitFor(
+    client,
+    "replacement step executed",
+    "document.querySelector('.caption > span')?.textContent?.trim().startsWith('1 /') && document.querySelector('.player').getAttribute('aria-busy') === 'false'",
   );
 
   await setValue(
     client,
-    ".step-editor li:first-child .presentation input[type=text]",
+    ".step-editor li:first-child .step-title input[type=text]",
     "Pending draft",
   );
   await evaluate(
     client,
     `(() => {
     document.querySelector('.step-editor .commit button').click();
-    [...document.querySelectorAll('.controls button')].find((button) => button.textContent.trim() === 'Edit starting layout').click();
+    [...document.querySelectorAll('.controls button')].find((button) => button.textContent.trim() === 'Return to start').click();
     return true;
   })()`,
   );
@@ -911,7 +962,7 @@ async function checkAuthoringAndSharing(client: CdpClient): Promise<void> {
     ),
     "A superseded save discarded pending step changes",
   );
-  await setValue(client, ".step-editor li:first-child .presentation input[type=text]", "Keep me");
+  await setValue(client, ".step-editor li:first-child .step-title input[type=text]", "Keep me");
   await clickButton(client, "Apply steps", "document.querySelector('.step-editor')");
   await waitFor(
     client,
@@ -1070,7 +1121,7 @@ async function checkWorkerTimeout(client: CdpClient): Promise<void> {
     "document.querySelector('[role=alert]')?.textContent.includes('timed out')",
     7_000,
   );
-  await clickButton(client, "Edit starting layout");
+  await clickButton(client, "Return to start");
   await waitFor(
     client,
     "responsive reset after timeout",
@@ -1161,7 +1212,7 @@ async function checkAuthoringRegressions(client: CdpClient): Promise<void> {
     client,
     `(() => {
     const button = (text) => [...document.querySelectorAll('.controls button')].find((e) => e.textContent.trim() === text);
-    button('Step').click(); button('Edit starting layout').click(); return true;
+    button('Step').click(); button('Return to start').click(); return true;
   })()`,
   );
   await waitFor(
@@ -1221,7 +1272,7 @@ async function checkAuthoringRegressions(client: CdpClient): Promise<void> {
   await waitFor(
     client,
     "authoring workspace switch",
-    "JSON.parse(document.querySelector('#scenario-json').value).state.topology[0].workspace === 'T' && document.querySelector('.player').getAttribute('aria-busy') === 'false'",
+    "JSON.parse(document.querySelector('#scenario-json').value).steps.at(-1)?.command === 'workspace focus \"T\"' && document.querySelector('.player').getAttribute('aria-busy') === 'false'",
   );
   const switched = await scenarioDocument(client);
   assert(
@@ -1233,7 +1284,7 @@ async function checkAuthoringRegressions(client: CdpClient): Promise<void> {
   await waitFor(
     client,
     "new authored window on T",
-    "JSON.parse(document.querySelector('#scenario-json').value).state.windows.some((w) => w.bundleId === 'com.paneform.hero.browser' && w.workspace === 'T')",
+    "JSON.parse(document.querySelector('#scenario-json').value).steps.at(-1)?.event?.kind === 'window_added' && JSON.parse(document.querySelector('#scenario-json').value).steps.at(-1)?.event?.window?.bundleId === 'com.paneform.hero.browser' && document.querySelector('.workspace-bar button[aria-current=true]')?.getAttribute('aria-label')?.startsWith('Focus workspace T')",
   );
 
   const { steps: _steps, ...withoutSteps } = setup;
@@ -1332,19 +1383,25 @@ async function checkFocusAuthoring(client: CdpClient): Promise<void> {
   await waitFor(
     client,
     "last rapid starting-focus intent",
-    "document.querySelector('.player').getAttribute('aria-busy') === 'false' && JSON.parse(document.querySelector('#scenario-json').value).state.focusedWindow === 'A'",
+    "document.querySelector('.player').getAttribute('aria-busy') === 'false' && JSON.parse(document.querySelector('#scenario-json').value).steps.filter((step) => step.event?.kind === 'focus_changed').at(-1)?.event?.windowId === 'A'",
   );
   await sleep(200);
+  const rapidFocus = (await scenarioDocument(client)).steps
+    ?.filter((step) => "event" in step && step.event.kind === "focus_changed")
+    .at(-1);
   assert(
-    (await scenarioDocument(client)).state.focusedWindow === "A",
+    rapidFocus !== undefined &&
+      "event" in rapidFocus &&
+      rapidFocus.event.kind === "focus_changed" &&
+      rapidFocus.event.windowId === "A",
     "A rapid B then A selection lost the last focus intent",
   );
 
   await click(client, '[data-window-id="B"] .window-titlebar');
   await waitFor(
     client,
-    "starting focus B rebase",
-    "JSON.parse(document.querySelector('#scenario-json').value).state.focusedWindow === 'B' && document.querySelector('.player').getAttribute('aria-busy') === 'false'",
+    "starting focus B recording",
+    "JSON.parse(document.querySelector('#scenario-json').value).steps.filter((step) => step.event?.kind === 'focus_changed').at(-1)?.event?.windowId === 'B' && document.querySelector('.player').getAttribute('aria-busy') === 'false'",
   );
   assert(
     JSON.stringify((await scenarioDocument(client)).state.windows.map(({ frame }) => frame)) ===
@@ -1382,8 +1439,8 @@ async function checkFocusAuthoring(client: CdpClient): Promise<void> {
   await click(client, '[data-window-id="A"] .window-titlebar');
   await waitFor(
     client,
-    "starting focus A rebase",
-    "JSON.parse(document.querySelector('#scenario-json').value).state.focusedWindow === 'A' && document.querySelector('.player').getAttribute('aria-busy') === 'false'",
+    "starting focus A recording",
+    "JSON.parse(document.querySelector('#scenario-json').value).steps.filter((step) => step.event?.kind === 'focus_changed').at(-1)?.event?.windowId === 'A' && document.querySelector('.player').getAttribute('aria-busy') === 'false'",
   );
   assert(
     JSON.stringify((await scenarioDocument(client)).state.windows.map(({ frame }) => frame)) ===
@@ -1398,6 +1455,7 @@ async function checkFocusAuthoring(client: CdpClient): Promise<void> {
     "The window picker moved away from the display toolbar",
   );
 
+  await navigate(client, url, { width: 1440, height: 900 });
   const baselineState = (await scenarioDocument(client)).state;
   await clickButton(client, "Step");
   await waitFor(
@@ -1429,9 +1487,9 @@ async function checkFocusAuthoring(client: CdpClient): Promise<void> {
   assert(
     await evaluate<boolean>(
       client,
-      "document.querySelector('[data-floating-inspector] fieldset')?.disabled === true",
+      "document.querySelector('[data-floating-inspector] fieldset')?.disabled === false",
     ),
-    "Mid-scenario inspector constraints are editable",
+    "Mid-scenario inspector constraints are not editable",
   );
   await clickButton(client, "Close", "document.querySelector('[data-floating-inspector]')");
 }

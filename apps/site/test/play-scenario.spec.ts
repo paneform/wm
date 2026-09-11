@@ -11,8 +11,8 @@ describe("hero play scenario", () => {
     expect(source.steps.map((step: { command?: string }) => step.command).filter(Boolean)).toEqual([
       "service start",
       "window move right",
-      "window move left",
-      "window focus left",
+      "window move right",
+      "focus-window terminal",
       "workspace move-window T",
     ]);
   });
@@ -22,13 +22,21 @@ describe("hero play scenario", () => {
     try {
       let state = await session.snapshot();
       for (let result = await session.step(); result !== null; result = await session.step()) {
-        if ("command" in result.step && result.step.command === "window move right") {
+        if (
+          "command" in result.step &&
+          result.step.command === "window move right" &&
+          result.state.focusedWindow === "browser"
+        ) {
           expect(result.state.windows.find(({ id }) => id === "browser")!.frame.x).toBeGreaterThan(
             state.windows.find(({ id }) => id === "browser")!.frame.x,
           );
         }
-        if ("command" in result.step && result.step.command === "window move left") {
-          expect(result.state.windows.find(({ id }) => id === "editor")!.frame.x).toBeLessThan(
+        if (
+          "command" in result.step &&
+          result.step.command === "window move right" &&
+          result.state.focusedWindow === "editor"
+        ) {
+          expect(result.state.windows.find(({ id }) => id === "editor")!.frame.x).toBeGreaterThan(
             state.windows.find(({ id }) => id === "editor")!.frame.x,
           );
         }

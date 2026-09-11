@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Paneform Bar</title>
+  <desc id="desc">A Paneform window with an accent menu bar and three modular panes.</desc>
+  <style>:root{--pf-black:#26233a;--pf-white:#e0def4;--pf-cyan:#ebbcba;--pf-bright-black:#6e6a86}@media(prefers-color-scheme:light){:root{--pf-black:#f2e9e1;--pf-white:#575279;--pf-cyan:#d7827e;--pf-bright-black:#9893a5}}</style>
+  <defs><clipPath id="icon-clip"><rect width="64" height="64" rx="8"/></clipPath></defs>
+  <rect width="64" height="64" rx="8" fill="var(--ansi-black, var(--pf-black))"/>
+  <rect width="64" height="8" fill="var(--ansi-cyan, var(--pf-cyan))" clip-path="url(#icon-clip)"/>
+  <rect x="6" y="14" width="25" height="44" rx="5" fill="var(--ansi-white, var(--pf-white))"/>
+  <rect x="33" y="14" width="25" height="25" rx="5" fill="var(--ansi-white, var(--pf-white))"/>
+  <rect x="33" y="41" width="25" height="17" rx="5" fill="var(--ansi-white, var(--pf-white))"/>
+</svg>

@@ -1,0 +1,89 @@
+{
+  "fill" : {
+    "automatic-gradient" : "extended-srgb:0.00000,0.53333,1.00000,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "blend-mode-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : "normal"
+            }
+          ],
+          "fill-specializations" : [
+            {
+              "value" : "none"
+            },
+            {
+              "appearance" : "dark",
+              "value" : "none"
+            }
+          ],
+          "glass-specializations" : [
+            {
+              "value" : false
+            },
+            {
+              "appearance" : "light",
+              "value" : false
+            }
+          ],
+          "image-name-specializations" : [
+            {
+              "value" : "paneform-wm-app-icon-default 2.svg"
+            },
+            {
+              "appearance" : "dark",
+              "value" : "paneform-wm-app-icon-dark.svg"
+            }
+          ],
+          "name" : "paneform-wm-app-icon-dark"
+        }
+      ],
+      "name" : "light",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    },
+    {
+      "layers" : [
+        {
+          "glass" : false,
+          "hidden" : true,
+          "image-name-specializations" : [
+            {
+              "value" : "paneform-wm-app-icon-dark 2.svg"
+            },
+            {
+              "appearance" : "dark",
+              "value" : "paneform-wm-app-icon-dark 2.svg"
+            }
+          ],
+          "name" : "paneform-wm-app-icon-dark 2"
+        }
+      ],
+      "lighting" : "individual",
+      "shadow" : {
+        "kind" : "none",
+        "opacity" : 0.5
+      },
+      "specular" : false,
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [
+      "macOS"
+    ]
+  }
+}

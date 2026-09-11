@@ -31,6 +31,8 @@ struct KeyChord: Hashable {
 final class KeyMonitor {
   private let onAction: @Sendable (String) -> Void
   private var bindings: [Int64: [(KeyChord, String)]] = [:]
+  private var alwaysSwallowed = Set<KeyChord>()
+  private var swallowHotkeys = true
   private var tap: CFMachPort?
   private var source: CFRunLoopSource?
   private var pressedModifiers: Set<KeyModifier> = []
@@ -39,7 +41,7 @@ final class KeyMonitor {
     self.onAction = onAction
   }
 
-  func configure(_ values: [String: String]) throws {
+  func configure(_ values: [String: String], alwaysSwallowing: [String] = []) throws {
     var parsed: [(KeyChord, String)] = []
     var chords = Set<KeyChord>()
     for (source, action) in values.sorted(by: { $0.key < $1.key }) {
@@ -47,9 +49,15 @@ final class KeyMonitor {
       guard chords.insert(chord).inserted else { throw KeyMonitorError.duplicateChord(source) }
       parsed.append((chord, action))
     }
+    let parsedAlwaysSwallowed = try alwaysSwallowing.map(Self.parse)
     if !parsed.isEmpty && tap == nil { try start() }
     bindings = Dictionary(grouping: parsed, by: { $0.0.keyCode })
+    alwaysSwallowed = Set(parsedAlwaysSwallowed)
     if parsed.isEmpty { stop() }
+  }
+
+  func setHotkeySwallowing(_ enabled: Bool) {
+    swallowHotkeys = enabled
   }
 
   deinit { stop() }
@@ -95,14 +103,15 @@ final class KeyMonitor {
       return false
     }
     guard type == .keyDown else { return false }
-    guard let action = Self.matchingAction(
+    guard let binding = Self.matchingBinding(
       code: code,
       isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0,
       candidates: bindings[code] ?? [],
       pressed: pressedModifiers
     ) else { return false }
-    onAction(action)
-    return true
+    onAction(binding.1)
+    return Self.shouldSwallow(
+      chord: binding.0, swallowHotkeys: swallowHotkeys, alwaysSwallowed: alwaysSwallowed)
   }
 
   private func updateModifier(code: Int64, flags: CGEventFlags) {
@@ -130,10 +139,27 @@ final class KeyMonitor {
     candidates: [(KeyChord, String)],
     pressed: Set<KeyModifier>
   ) -> String? {
+    matchingBinding(code: code, isRepeat: isRepeat, candidates: candidates, pressed: pressed)?.1
+  }
+
+  static func matchingBinding(
+    code: Int64,
+    isRepeat: Bool,
+    candidates: [(KeyChord, String)],
+    pressed: Set<KeyModifier>
+  ) -> (KeyChord, String)? {
     guard !isRepeat else { return nil }
     return candidates.first {
       $0.0.keyCode == code && matches(expected: $0.0.modifiers, pressed: pressed)
-    }?.1
+    }
+  }
+
+  static func shouldSwallow(
+    chord: KeyChord,
+    swallowHotkeys: Bool,
+    alwaysSwallowed: Set<KeyChord>
+  ) -> Bool {
+    swallowHotkeys || alwaysSwallowed.contains(chord)
   }
 
   private static func parse(_ source: String) throws -> KeyChord {

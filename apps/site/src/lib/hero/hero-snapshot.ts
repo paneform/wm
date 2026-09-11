@@ -57,8 +57,8 @@ export async function fastForwardHeroSimulation(
   await requireSuccess(simulation.activateApp("Browser"));
   await requireSuccess(simulation.moveDirection("right"));
   await requireSuccess(simulation.activateApp("Text Editor"));
-  await requireSuccess(simulation.moveDirection("left"));
-  await requireSuccess(simulation.focusDirection("left"));
+  await requireSuccess(simulation.moveDirection("right"));
+  await requireSuccess(simulation.activateApp("Terminal"));
   await requireSuccess(simulation.moveFocusedWindowToWorkspace("T"));
   return simulation.snapshot();
 }

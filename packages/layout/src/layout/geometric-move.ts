@@ -2,7 +2,7 @@ import type { Direction } from "../direction.js";
 import type { Frame, WindowId } from "../schema.js";
 import type { BspNode, SplitAxis } from "../world.js";
 import { isFiniteFrame, withinTolerance } from "../geometry.js";
-import { planLayout, removeLeaf } from "./bsp.js";
+import { planLayout, ratioForLength, removeLeaf } from "./bsp.js";
 
 type Split = Extract<BspNode, { kind: "split" }>;
 type Dimension = "x" | "y";
@@ -190,14 +190,19 @@ function swapAlongAxis(
     const second = rebuild(node.second);
     const size = first.size + gap + second.size;
     return {
-      node: { ...node, ratio: first.size / size, first: first.node, second: second.node },
+      node: {
+        ...node,
+        ratio: ratioForLength(first.size, size - gap),
+        first: first.node,
+        second: second.node,
+      },
       size,
     };
   };
   return replaceNode(tree, ancestor, rebuild(ancestor).node);
 }
 
-function sliceFrames(regions: Region[], dimensions: Dimension[]): BspNode | undefined {
+function sliceFrames(regions: Region[], dimensions: Dimension[], gap: number): BspNode | undefined {
   if (regions.length === 1) return regions[0]!.node;
   const bounds = regions.map(({ frame }) => frame).reduce(union);
   for (const dimension of dimensions) {
@@ -205,9 +210,9 @@ function sliceFrames(regions: Region[], dimensions: Dimension[]): BspNode | unde
     let border = end(ordered[0]!.frame, dimension);
     for (let i = 1; i < ordered.length; i += 1) {
       if (border <= ordered[i]!.frame[dimension] + BORDER_TOLERANCE) {
-        const first = sliceFrames(ordered.slice(0, i), dimensions);
-        const second = sliceFrames(ordered.slice(i), dimensions);
-        const ratio = (border - bounds[dimension]) / length(bounds, dimension);
+        const first = sliceFrames(ordered.slice(0, i), dimensions, gap);
+        const second = sliceFrames(ordered.slice(i), dimensions, gap);
+        const ratio = ratioForLength(border - bounds[dimension], length(bounds, dimension) - gap);
         if (first !== undefined && second !== undefined && ratio > 0 && ratio < 1) {
           return { kind: "split", axis: axisOf(dimension), ratio, first, second };
         }
@@ -245,7 +250,7 @@ function swapAlignedFrames(
         };
       return region;
     });
-  const tree = sliceFrames(desired, [otherDimension(dimension), dimension]);
+  const tree = sliceFrames(desired, [otherDimension(dimension), dimension], input.gap ?? 0);
   if (tree === undefined) return input.tree;
   const content = desired.map(({ frame }) => frame).reduce(union);
   const plan = planLayout({ tree, content, gap: input.gap ?? 0, resolve: () => undefined }, [
@@ -385,7 +390,9 @@ function removeForEdge(input: GeometricMoveInput, dimension: Dimension): BspNode
     if (second === null) return first;
     if (first === node.first && second === node.second) return node;
     const ratio =
-      node.axis === axis ? extent(first) / (extent(first) + gap + extent(second)) : node.ratio;
+      node.axis === axis
+        ? ratioForLength(extent(first), extent(first) + extent(second))
+        : node.ratio;
     return { ...node, ratio, first, second };
   };
   return remove(input.tree)!;
@@ -449,7 +456,7 @@ function pairAdjacentRegions(
       : {
           kind: "split" as const,
           axis,
-          ratio: sizes.get(first)! / pairSize,
+          ratio: ratioForLength(sizes.get(first)!, pairSize - gap),
           first,
           second,
         };
@@ -463,7 +470,13 @@ function joinPanes(panes: SizedPane[], axis: SplitAxis, gap: number): SizedPane 
   return panes.reduceRight((right, left) => {
     const size = left.size + gap + right.size;
     return {
-      node: { kind: "split", axis, ratio: left.size / size, first: left.node, second: right.node },
+      node: {
+        kind: "split",
+        axis,
+        ratio: ratioForLength(left.size, size - gap),
+        first: left.node,
+        second: right.node,
+      },
       size,
     } satisfies SizedPane;
   });
@@ -500,7 +513,9 @@ function rotateOuterEdge(
   const gap = input.gap ?? 0;
   const size = sizes.get(outerPane)! + gap + sizes.get(ancestor)!;
   const ratio =
-    panes.length === 2 ? parent.ratio : sizes.get(panes[Math.min(index, outerIndex)]!)! / size;
+    panes.length === 2
+      ? parent.ratio
+      : ratioForLength(sizes.get(panes[Math.min(index, outerIndex)]!)!, size - gap);
   const pair = splitToward(axis, ancestor.ratio, origin.node, outerPane, before);
   const rotated = splitToward(axis, ratio, pair, target.node, before);
   const ordered = panes.map((node) => ({ node, size: sizes.get(node)! }));

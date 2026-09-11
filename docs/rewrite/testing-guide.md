@@ -40,6 +40,7 @@ The fake is deterministic: seeded RNG only, time via injected Clock, no real tim
 The current suites cover these behaviors:
 
 ### Geometry (`test/geometry.spec.ts`)
+
 - Exact write within tolerance succeeds; beyond tolerance fails with observed frame.
 - Position-only write preserves size; verifies Δpos ≤1, Δsize ≤1; cross-component drift
   fails verification.
@@ -52,6 +53,7 @@ The current suites cover these behaviors:
 - Fit-to-bounds: anchor fallback accepts contained-but-clamped results (tolerance 20).
 
 ### Constraint learning (`test/learning.spec.ts`)
+
 - 3 consistent clamp samples promote to bound; 2 don't.
 - Work-area-flushing clamps never learn (the wm-45sa bug): observation flush with any
   work-area edge ±2 pt is recorded but not promoted.
@@ -62,11 +64,12 @@ The current suites cover these behaviors:
 - Viability margins: stale bounds ignored when live window contradicts them.
 
 ### BSP layout (`test/bsp.spec.ts`)
+
 - Insertion splits most-recent-focused leaf along longest dimension (square ⇒ vertical);
   existing stays left/top; new goes right/bottom; ratio 0.5.
 - Removal promotes sibling subtree wholesale preserving nested ratios.
-- Preferred length = floor(available · ratio); second pane offset += gap; shared edges
-  rounded once deterministically (no cumulative seams).
+- Ratios apply to gap-exclusive space: preferred length = floor((available − gap) · ratio);
+  second pane offset += gap; shared edges round once deterministically (no cumulative seams).
 - Min-size-aware solve: 1512-wide content, gap 8, ratio 0.5, one window minWidth 800 ⇒
   exactly [704, 800] split at x=808.
 - Surplus above a maximum flows to the peer (723/781 case).
@@ -79,6 +82,7 @@ The current suites cover these behaviors:
   floating membership.
 
 ### Parking (`test/parking.spec.ts`)
+
 - Corner target math for all four corners incl. negative-coordinate displays (display
   above/left of primary).
 - Feasibility: zero-area intersection rule — edge touch OK, ≥1 pt overlap rejected;
@@ -95,6 +99,7 @@ The current suites cover these behaviors:
   original retry.
 
 ### Transactions (`test/transactions.spec.ts`)
+
 - Serialized FIFO execution; idempotent coalescing shares one execution+receipt.
 - Suspicious repeat ≥3 escalates to reconciliation hook before executing.
 - Recovery mode queues submissions FIFO, releases on success/fails structured.
@@ -104,6 +109,7 @@ The current suites cover these behaviors:
 - Internal errors sanitized to generic message; detail routed to diagnostics.
 
 ### Engine pipeline (`test/engine.spec.ts`)
+
 - New-window placement precedence: affinity matcher > focused workspace > workspace 1;
   detection never changes focus.
 - Preflight quarantine: fixed-size new window is NOT inserted into tree (verified-first
@@ -119,15 +125,18 @@ The current suites cover these behaviors:
 - Drift reconciliation repairs unattributed divergence with bounded retries.
 
 ### Schema validation (`test/schema.spec.ts`)
+
 - Every boundary type rejects invalid data: non-finite numbers, negative dims, unknown
   discriminators, malformed ids. Wire messages round-trip encode/decode.
 
 ### Config (`test/config.spec.ts`)
+
 - JSONC parse, schema validation, unknown-field errors, field-by-field inheritance,
   delta hotload atomicity (invalid candidate keeps prior), full reload preserving runtime
   overlay, populated-workspace removal preserves runtime state.
 
 ### Command bus / wire (`test/commands.spec.ts`, `test/wire.spec.ts`)
+
 - CLI verbs ↔ CommandBus parity; queries served from committed snapshots without I/O.
 - WebSocket message schemas validate; snapshot-on-subscribe; replay buffer semantics.
 

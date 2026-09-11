@@ -136,6 +136,7 @@ const expectInvalidMoveDestination = async (mode: "bsp" | "floating"): Promise<v
   if (mode === "floating") {
     await Effect.runPromise(engine.execute({ type: "setWorkspaceMode", workspace: "1", mode }));
   }
+  await expect.poll(() => engine.gateState().busy).toBe(false);
 
   const before = await Effect.runPromise(engine.state());
   const beforeWorkspace = before.workspaces.find((workspace) => workspace.name === "1");

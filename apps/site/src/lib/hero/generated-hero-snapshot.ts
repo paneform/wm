@@ -240,10 +240,10 @@ export const generatedHeroSnapshot = {
       app: "Text Editor",
       workspace: "1",
       frame: {
-        x: -353,
+        x: -739,
         y: 930,
-        width: 354,
-        height: 780,
+        width: 740,
+        height: 374,
       },
       managed: true,
       floating: false,

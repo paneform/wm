@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Paneform Relay</title>
+  <desc id="desc">Two Paneform modules connected by an accent relay path.</desc>
+  <style>:root{--pf-black:#26233a;--pf-white:#e0def4;--pf-cyan:#ebbcba;--pf-bright-black:#6e6a86}@media(prefers-color-scheme:light){:root{--pf-black:#f2e9e1;--pf-white:#575279;--pf-cyan:#d7827e;--pf-bright-black:#9893a5}}</style>
+  <rect width="64" height="64" rx="8" fill="var(--ansi-black, var(--pf-black))"/>
+  <rect x="6" y="7" width="52" height="20" rx="5" fill="var(--ansi-white, var(--pf-white))"/>
+  <rect x="6" y="37" width="52" height="20" rx="5" fill="var(--ansi-white, var(--pf-white))"/>
+  <path d="M32 27v10" stroke="var(--ansi-cyan, var(--pf-cyan))" stroke-width="6" stroke-linecap="butt"/>
+  <circle cx="32" cy="27" r="4" fill="var(--ansi-cyan, var(--pf-cyan))"/>
+  <circle cx="32" cy="37" r="4" fill="var(--ansi-cyan, var(--pf-cyan))"/>
+</svg>

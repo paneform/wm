@@ -46,8 +46,10 @@ export interface WorkspaceState {
   pinnedDisplayOverride: DisplayId | null;
   /** Durable parked intent per window — never inferred from coordinates. */
   parkedFrames: ReadonlyMap<WindowId, Frame>;
-  /** Most-recently focused member, for split-target selection. */
+  /** Most-recently focused member, for focus restoration. */
   lastFocusedMember: WindowId | null;
+  /** Most-recently focused tiled member; floating focus does not replace it. */
+  lastFocusedTiledMember?: WindowId | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +109,20 @@ export interface World {
    * newer platform focus event supersedes it or the window dies.
    */
   focusIntent: { id: WindowId; generation: number } | null;
+}
+
+/** Remember managed focus without letting a dialog or an unassigned window replace it. */
+export function recordFocusedMember(world: World, id: WindowId | null): World {
+  const observation = id === null ? undefined : world.windows.get(id);
+  if (id === null || observation === undefined || classify(observation) !== "normal") return world;
+  for (const workspace of world.workspaces.values()) {
+    const tiled = bspLeaves(workspace.tree).includes(id);
+    if (!tiled && !workspace.floating.has(id)) continue;
+    const updated = { ...workspace, lastFocusedMember: id };
+    if (tiled && workspace.mode === "bsp") updated.lastFocusedTiledMember = id;
+    return { ...world, workspaces: new Map(world.workspaces).set(workspace.name, updated) };
+  }
+  return world;
 }
 
 /** Engine classification of a window from its observation attributes. */

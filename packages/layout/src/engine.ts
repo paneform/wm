@@ -16,11 +16,13 @@ import type {
 import type { DomainTopic } from "./events.js";
 import {
   classify,
+  recordFocusedMember,
   type BspNode,
   type ProfileKey,
   type ParkingCorner,
   type ParkingVisibility,
   type World,
+  type SplitAxis,
   type WorkspaceState,
 } from "./world.js";
 import {
@@ -77,7 +79,7 @@ import {
 } from "./layout/bsp.js";
 import { moveGeometrically } from "./layout/geometric-move.js";
 import { directionalFocusNeighbor, type DirectionalFocusCandidate } from "./direction.js";
-import { insertionDisplay, insertionTargetFrame } from "./insertion-frame.js";
+import { insertionDisplay, planWindowInsertion } from "./insertion-frame.js";
 import type { Action } from "./actions.js";
 import { dedupeActions } from "./actions.js";
 import {
@@ -166,7 +168,7 @@ export interface ShutdownReport {
 }
 
 export interface Engine {
-  start(): Effect.Effect<void>;
+  start(): Effect.Effect<void, CommandError>;
   stop(): Effect.Effect<ShutdownReport>;
   execute(command: Command): Effect.Effect<CommandResult, CommandError>;
   state(): Effect.Effect<StateSnapshot>;
@@ -264,10 +266,11 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
      */
     interface ReconcileBatch {
       readonly removals: ReadonlySet<WindowId>;
-      readonly focus: WindowId | null | undefined;
+      readonly focusSignals: (WindowId | null)[];
     }
 
-    let pendingBatch: ReconcileBatch = { removals: new Set(), focus: undefined };
+    let pendingBatch: ReconcileBatch = { removals: new Set(), focusSignals: [] };
+    const pendingFocusSignals: (WindowId | null)[] = [];
 
     const applyFocusSignal = (id: WindowId | null): void => {
       // Deliberately does NOT touch lastObservedFocusId: the event is AHEAD
@@ -275,7 +278,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       // the very next refresh look like a competing "change".
       focusGeneration += 1;
       world = {
-        ...world,
+        ...recordFocusedMember(world, id),
         focusIntent: id === null ? null : { id, generation: focusGeneration },
       };
     };
@@ -299,6 +302,19 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       health.state = next;
       bus.publish("health", { state: next, issues: [...health.issues] });
     };
+
+    const setNativeHotkeySwallowing = (enabled: boolean): Effect.Effect<void, CommandError> =>
+      adapter.setHotkeySwallowing === undefined
+        ? Effect.void
+        : Effect.mapError(
+            adapter.setHotkeySwallowing(enabled),
+            (error) =>
+              new CommandError({
+                code: "internal_error",
+                message: error.detail ?? "native hotkey swallowing control failed",
+              }),
+          );
+
     if (observationStoreFailed) setHealth("degraded", "observation_store_unavailable");
 
     // ------------------------------------------------------------------
@@ -662,6 +678,8 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         floating,
         parkedFrames,
         lastFocusedMember: from.lastFocusedMember === windowId ? null : from.lastFocusedMember,
+        lastFocusedTiledMember:
+          from.lastFocusedTiledMember === windowId ? null : (from.lastFocusedTiledMember ?? null),
       };
     };
 
@@ -676,31 +694,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       workspaceName: string,
       windowId: WindowId,
       besideHint?: WindowId | null,
+      axis?: SplitAxis,
     ): void => {
-      const workspace = ensureWorkspace(workspaceName);
-      const members = tiledMembers(workspace.tree);
-      const beside =
-        besideHint !== undefined && besideHint !== null && members.includes(besideHint)
-          ? besideHint
-          : workspace.lastFocusedMember !== null && members.includes(workspace.lastFocusedMember)
-            ? workspace.lastFocusedMember
-            : members[0];
-      const observedBesideFrame =
-        beside === undefined ? undefined : world.windows.get(beside)?.frame;
-      const insertionHost = insertionDisplay(world, workspace, observedBesideFrame);
-      const besideFrame = insertionTargetFrame(
-        world,
-        workspace,
-        observedBesideFrame,
-        effectiveSettings(config, workspaceName, insertionHost?.id).margins,
-      );
-
-      const tree: BspNode =
-        beside === undefined || besideFrame === undefined || isEmptyTree(workspace.tree)
-          ? { kind: "leaf", windowId }
-          : (insertLeaf(workspace.tree, beside, windowId, besideFrame) ?? workspace.tree);
-
-      commitWorkspace({ ...workspace, tree, lastFocusedMember: windowId });
+      world = insertTiledIntoIn(world, workspaceName, windowId, world, besideHint, axis);
     };
 
     const doFloat = (windowId: WindowId): void => {
@@ -1043,8 +1039,20 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     const applyAction = (action: Action): Effect.Effect<unknown, StepFailure> =>
       Effect.gen(function* () {
         switch (action.kind) {
-          case "setFrame":
-            return yield* writeFrame(action.windowId, action.frame);
+          case "setFrame": {
+            const result = yield* writeFrame(action.windowId, action.frame);
+            const observation = world.windows.get(action.windowId);
+            if (observation !== undefined) {
+              world = {
+                ...world,
+                windows: new Map(world.windows).set(action.windowId, {
+                  ...observation,
+                  frame: result.frame,
+                }),
+              };
+            }
+            return result;
+          }
           case "setPosition": {
             const observation = world.windows.get(action.windowId);
             if (observation === undefined) {
@@ -1116,7 +1124,6 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   commitWorkspace({
                     ...workspace,
                     tree: tombstone.tree,
-                    lastFocusedMember: action.windowId,
                     parkedFrames:
                       tombstone.parkedFrame === null
                         ? workspace.parkedFrames
@@ -1125,6 +1132,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                             tombstone.parkedFrame,
                           ),
                   });
+                  world = recordFocusedMember(world, world.focusIntent?.id ?? null);
                   tombstones.delete(action.windowId);
                   return;
                 }
@@ -1143,8 +1151,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 })(),
               });
             } else {
-              insertTiledInto(action.workspace, action.windowId, action.beside ?? null);
+              insertTiledInto(action.workspace, action.windowId, action.beside, action.axis);
             }
+            world = recordFocusedMember(world, world.focusIntent?.id ?? null);
             tombstones.delete(action.windowId);
             return;
           case "removeWindow":
@@ -1385,20 +1394,29 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           shutdownRestoreIntents.delete(id);
         }
       }
-      if (batch.focus !== undefined) applyFocusSignal(batch.focus);
+      world = { ...world, topology: observation.topology, windows };
+      // Include signals that arrived during the observation reads. Processing
+      // each signal in order preserves a tiled focus even when a later signal
+      // targets a not-yet-managed window or transient surface.
+      const focusSignals = [...batch.focusSignals.splice(0), ...pendingFocusSignals.splice(0)];
+      for (const focus of focusSignals) applyFocusSignal(focus);
       const reportedId = [...windows.values()].find((item) => item.focused)?.id ?? null;
       if (reportedId !== lastObservedFocusId) {
         lastObservedFocusId = reportedId;
-        if (batch.focus === undefined) applyFocusSignal(reportedId);
+        if (focusSignals.length === 0) applyFocusSignal(reportedId);
       } else if (world.focusIntent !== null && !windows.has(world.focusIntent.id)) {
         world = { ...world, focusIntent: null };
       }
-      world = { ...world, topology: observation.topology, windows };
+      world = recordFocusedMember(world, world.focusIntent?.id ?? null);
       return observation;
     };
 
     const planPhase = (observation: PhaseObservation): readonly Action[] =>
       observation.failure !== null ? [] : runRules();
+
+    const applyPendingFocusSignals = (): void => {
+      for (const focus of pendingFocusSignals.splice(0)) applyFocusSignal(focus);
+    };
 
     interface AppliedPhase {
       readonly observation: PhaseObservation;
@@ -1485,6 +1503,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         () => inner,
         () =>
           Effect.gen(function* () {
+            // A platform focus event observed during writes is newer than the
+            // operation. Install it before a waiting command acquires the gate.
+            // Splicing makes delivery exactly-once even when reconciliation retries.
+            applyPendingFocusSignals();
             reconciling = false;
             yield* reconcileGate.release(1);
           }),
@@ -1546,7 +1568,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               },
               passBatch,
             );
-            passBatch = { removals: new Set(), focus: undefined };
+            passBatch = { removals: new Set(), focusSignals: [] };
             if (result.failure !== null) {
               return { ok: false, error: new CommandError(result.failure) };
             }
@@ -1573,7 +1595,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     const mergePendingBatch = (batch: ReconcileBatch): void => {
       pendingBatch = {
         removals: new Set([...batch.removals, ...pendingBatch.removals]),
-        focus: pendingBatch.focus === undefined ? batch.focus : pendingBatch.focus,
+        focusSignals: [...batch.focusSignals, ...pendingBatch.focusSignals],
       };
     };
 
@@ -1583,7 +1605,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           const completion = pendingCycle;
           const batch = pendingBatch;
           pendingCycle = null;
-          pendingBatch = { removals: new Set(), focus: undefined };
+          pendingBatch = { removals: new Set(), focusSignals: [] };
           const interrupted: CycleResult = {
             ok: false,
             error: new CommandError({
@@ -1705,47 +1727,45 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         (ws) => tiledMembers(ws.tree).includes(windowId) || ws.floating.has(windowId),
       );
 
-    /**
-     * Split-axis choice reads the COMMITTED generation's frames
-     * (`framesWorld`) — topology policy deliberately ignores same-pass
-     * geometry writes; plan deltas use fresh observations.
-     */
+    /** Shared logical insertion planning for automatic placement and command drafts. */
     const insertTiledIntoIn = (
       w: World,
       wsName: string,
       windowId: WindowId,
       framesWorld: World,
       besideHint?: WindowId | null,
+      axis?: SplitAxis,
     ): World => {
       const withWs = ensureWorkspaceIn(w, wsName);
       const ws = withWs.workspaces.get(wsName);
       if (ws === undefined) return withWs;
-      const members = tiledMembers(ws.tree);
-      const beside =
-        besideHint !== undefined && besideHint !== null && members.includes(besideHint)
-          ? besideHint
-          : ws.lastFocusedMember !== null && members.includes(ws.lastFocusedMember)
-            ? ws.lastFocusedMember
-            : members[0];
-      const observedBesideFrame =
-        beside === undefined ? undefined : framesWorld.windows.get(beside)?.frame;
-      const insertionHost = insertionDisplay(withWs, ws, observedBesideFrame);
-      const besideFrame = insertionTargetFrame(
-        withWs,
-        ws,
-        observedBesideFrame,
-        effectiveSettings(config, wsName, insertionHost?.id).margins,
-      );
-      const tree: BspNode =
-        beside === undefined || besideFrame === undefined || isEmptyTree(ws.tree)
-          ? { kind: "leaf", windowId }
-          : (insertLeaf(ws.tree, beside, windowId, besideFrame) ?? ws.tree);
+      const insertionHost = insertionDisplay(withWs, ws, undefined);
+      const settings = effectiveSettings(config, wsName, insertionHost?.id);
+      const plan = planWindowInsertion({
+        world: withWs,
+        workspace: ws,
+        newId: windowId,
+        margins: settings.margins,
+        gap: settings.gap,
+        resolve: constraintsResolver((id) => {
+          const obs = framesWorld.windows.get(id);
+          return obs === undefined ? {} : constraintsFor(obs);
+        }),
+        beside: besideHint,
+        axis,
+      });
+      // Commands must retain membership even without a display; their layout verification
+      // rejects infeasible geometry before committing the draft.
+      const tree =
+        plan?.tree ??
+        (isEmptyTree(ws.tree)
+          ? { kind: "leaf" as const, windowId }
+          : (insertLeaf(ws.tree, firstLeaf(ws.tree)!, windowId) ?? ws.tree));
       return {
         ...withWs,
         workspaces: new Map(withWs.workspaces).set(wsName, {
           ...ws,
           tree,
-          lastFocusedMember: windowId,
         }),
       };
     };
@@ -2746,19 +2766,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   ...finalDraft,
                   focusIntent: { id: focusId, generation: focusGeneration },
                 };
-                const focusedWorkspace =
-                  finalDraft.focusedWorkspace === null
-                    ? undefined
-                    : finalDraft.workspaces.get(finalDraft.focusedWorkspace);
-                if (focusedWorkspace !== undefined) {
-                  finalDraft = {
-                    ...finalDraft,
-                    workspaces: new Map(finalDraft.workspaces).set(focusedWorkspace.name, {
-                      ...focusedWorkspace,
-                      lastFocusedMember: focusId,
-                    }),
-                  };
-                }
+                finalDraft = recordFocusedMember(finalDraft, focusId);
                 applied += 1;
               }
               ctx.appliedActions = applied;
@@ -3753,10 +3761,12 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         yield* failIfStopping();
         switch (command.type) {
           case "pause":
+            yield* setNativeHotkeySwallowing(false);
             world = { ...world, paused: true };
             bus.publish("pause", { paused: true });
             break;
           case "resume":
+            yield* setNativeHotkeySwallowing(true);
             world = { ...world, paused: false };
             bus.publish("pause", { paused: false });
             yield* Effect.ignore(gatedReconcile());
@@ -3765,6 +3775,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             // Atomic read-modify-write on committed state inside the
             // serialized transaction step — never a CLI query + race.
             const next = !world.paused;
+            yield* setNativeHotkeySwallowing(!next);
             world = { ...world, paused: next };
             bus.publish("pause", { paused: next });
             if (!next) yield* Effect.ignore(gatedReconcile());
@@ -3951,7 +3962,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   focusIntent: { id: neighborId, generation: focusGeneration },
                 };
                 const ws = world.workspaces.get(ctx.workspaceName);
-                if (ws !== undefined) commitWorkspace({ ...ws, lastFocusedMember: neighborId });
+                if (ws !== undefined) world = recordFocusedMember(world, neighborId);
               }),
             );
             break;
@@ -4230,6 +4241,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                     ...world,
                     focusIntent: { id: command.windowId, generation: focusGeneration },
                   };
+                  world = recordFocusedMember(world, command.windowId);
                 } else if (applied.left.code !== "window_not_controllable") {
                   return yield* Effect.fail(
                     new CommandError({
@@ -4582,6 +4594,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         const topology = yield* Effect.orDie(validatedTopology());
         const observations = yield* Effect.orDie(validatedWindows());
         const windows = new Map(observations.map((observation) => [observation.id, observation]));
+        lastObservedFocusId = observations.find((observation) => observation.focused)?.id ?? null;
         world = { ...world, topology, windows };
         for (const observation of observations) firstSeen.set(observation.id, observation.frame);
 
@@ -4766,6 +4779,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   preferredDisplay: settings.preferredDisplay,
                   lastFocusedMember:
                     members.find((member) => member.focused)?.id ?? existing.lastFocusedMember,
+                  lastFocusedTiledMember:
+                    members.find((member) => member.focused)?.id ??
+                    existing.lastFocusedTiledMember ??
+                    null,
                 });
                 committed = true;
               }),
@@ -4829,6 +4846,11 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             visibleOnDisplay: workspace.visibleOnDisplay,
             preferredDisplay: settings.preferredDisplay,
             lastFocusedMember,
+            lastFocusedTiledMember:
+              lastFocusedMember !== null &&
+              tiledMembers(workspace.tree ?? emptyTreeLeafNode()).includes(lastFocusedMember)
+                ? lastFocusedMember
+                : null,
           });
         }
         for (const observation of observations) firstSeen.set(observation.id, observation.frame);
@@ -4851,6 +4873,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     return {
       start: () =>
         Effect.gen(function* () {
+          // Synchronize before loading keybinds so initially-paused startup
+          // never briefly swallows bindings while the native tap is active.
+          yield* setNativeHotkeySwallowing(!world.paused);
           let startupReady = false;
           const loaded = yield* Effect.either(configSource.load());
           if (loaded._tag === "Right") {
@@ -4947,7 +4972,12 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             fibers,
             Stream.runForEach(adapter.events, (event) =>
               Effect.gen(function* () {
-                if (!startupReady) return;
+                if (!startupReady) {
+                  if (options.initialLayout === undefined && event.kind === "focus_changed") {
+                    pendingFocusSignals.push(event.windowId);
+                  }
+                  return;
+                }
                 if (event.kind === "window_removed") {
                   pendingBatch = {
                     ...pendingBatch,
@@ -4955,7 +4985,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   };
                 }
                 if (event.kind === "focus_changed") {
-                  pendingBatch = { ...pendingBatch, focus: event.windowId };
+                  pendingFocusSignals.push(event.windowId);
                 }
                 yield* Effect.ignore(requestReconcile(false));
               }),
@@ -4963,7 +4993,18 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           );
 
           if (options.initialLayout === undefined) {
-            yield* runOperation(runExclusive(preserveOrdinaryStartup()));
+            yield* runOperation(
+              runExclusive(
+                Effect.zipRight(
+                  preserveOrdinaryStartup(),
+                  Effect.sync(() => {
+                    // Membership now exists, so retain intermediate tiled
+                    // focus before reconciliation admits later windows.
+                    applyPendingFocusSignals();
+                  }),
+                ),
+              ),
+            );
             // Initial reconcile + rule pass (lenient at startup; diagnostics only).
             yield* Effect.ignore(gatedReconcile());
             startupQuarantine.clear();

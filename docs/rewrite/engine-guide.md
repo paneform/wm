@@ -264,11 +264,31 @@ Global keybinds use chord strings as object keys (JSON cannot use arrays as keys
 }
 ```
 
+Directional group moves are a tentative, opt-in experiment:
+
+```jsonc
+{
+  "experiments": {
+    "directionalMoveGroups": true
+  }
+}
+```
+
+The default is `false`. When enabled, directional edge moves can match a whole adjacent
+BSP subtree by its observed area, preserving the grouped layout under the moved window.
+For example, moving B up in `A | B | (C over D)` with observed areas A 600x800, B
+300x800, and C/D 300x400 produces `A | (B over (C over D))`. Ordinary leaf-area
+matching remains enabled; this flag only adds group matching and is designed to be easy
+to disable or remove.
+
 Modifiers are unordered and side-aware: `shift` accepts either side, while `lshift` and
 `rshift` match those physical keys independently. The persistent macOS sidecar applies
 bindings on config load/hotload and sends actions on matching keydown events; Input
-Monitoring permission is required. Matched non-repeat keydown events are suppressed;
-modifier, repeated, and unmatched events remain visible to other applications.
+Monitoring permission is required. Matched non-repeat keydown events are suppressed
+while running; modifier, repeated, and unmatched events remain visible to other
+applications. During pause, the engine tells the sidecar not to suppress matched
+events, except for configured `togglePause` or `resume` chords, which remain
+suppressed. Every matched action is still sent to the engine in either state.
 
 ## Command execution layer (single source of truth)
 

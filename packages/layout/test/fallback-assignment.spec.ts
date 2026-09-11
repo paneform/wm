@@ -104,9 +104,9 @@ describe("unmatched normal-window fallback assignment", () => {
     await execute(engine, { type: "pause" });
     const writesBeforeLoss = fake.writes().length;
     fake.removeWindow(two);
-    await execute(engine, { type: "reconcile" });
+    await Effect.runPromise(engine.reconcile());
     fake.addWindow(makeWindow({ id: two, pid: 7202 }));
-    await execute(engine, { type: "reconcile" });
+    await Effect.runPromise(engine.reconcile());
 
     const restored = await Effect.runPromise(engine.state());
     expect(restored.workspaces.find((workspace) => workspace.name === "1")?.members).toEqual(

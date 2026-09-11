@@ -73,6 +73,30 @@ describe("portable scenario runner", () => {
     },
   );
 
+  it("inserts new windows logically while paused and tiles them on resume", async () => {
+    const openedFrame = { x: 120, y: 80, width: 650, height: 450 };
+    const session = await createScenarioSession({
+      ...base,
+      state: { ...base.state, paused: true },
+    });
+    try {
+      const paused = await session.apply({
+        event: { kind: "window_added", window: { id: "C", frame: openedFrame } },
+      });
+      expect(paused.windows.find(({ id }) => id === "C")).toMatchObject({
+        frame: openedFrame,
+        workspace: "1",
+        floating: false,
+      });
+
+      const resumed = await session.apply({ command: "resume" });
+      expect(resumed.paused).toBe(false);
+      expect(resumed.windows.find(({ id }) => id === "C")?.frame).not.toEqual(openedFrame);
+    } finally {
+      await session.dispose();
+    }
+  });
+
   it.each([["window focus left"], ["workspace focus 2", "workspace focus 1"]])(
     "preserves an imported asymmetric T layout after %s",
     async (...commands) => {
