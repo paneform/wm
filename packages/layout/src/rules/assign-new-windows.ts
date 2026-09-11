@@ -27,6 +27,7 @@ export const assignNewWindows: Rule = {
   name: "assign-new-windows",
   applies: (world: World, ctx: RuleContext): boolean => {
     for (const observation of world.windows.values()) {
+      if (startupQuarantine(ctx).has(observation.id)) continue;
       if (
         !isIgnoredSurface(world, ctx, observation) &&
         findMembership(world, observation.id) === null
@@ -47,6 +48,7 @@ export const assignNewWindows: Rule = {
     const actions: Action[] = [];
     let prospective = world;
     for (const observation of world.windows.values()) {
+      if (startupQuarantine(ctx).has(observation.id)) continue;
       if (isIgnoredSurface(world, ctx, observation)) continue;
       if (findMembership(world, observation.id) !== null) continue;
       const tombstone = ctx.tombstones.get(observation.id);
@@ -109,7 +111,15 @@ export const assignNewWindows: Rule = {
   },
 };
 
-function pickWorkspace(
+const EMPTY_QUARANTINE: ReadonlySet<string> = new Set();
+const startupQuarantine = (ctx: RuleContext): ReadonlySet<string> => {
+  if (!("startupQuarantine" in ctx) || !(ctx.startupQuarantine instanceof Set)) {
+    return EMPTY_QUARANTINE;
+  }
+  return ctx.startupQuarantine;
+};
+
+export function pickWorkspace(
   world: World,
   ctx: RuleContext,
   observation: import("../schema.js").WindowObservation,

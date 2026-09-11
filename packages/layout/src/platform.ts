@@ -31,9 +31,7 @@ export interface PlatformAdapter {
    * Tell a native host whether matched hotkeys should be suppressed. Adapters
    * without native hotkey capture may omit this control.
    */
-  readonly setHotkeySwallowing?: (
-    enabled: boolean,
-  ) => Effect.Effect<void, PlatformError>;
+  readonly setHotkeySwallowing?: (enabled: boolean) => Effect.Effect<void, PlatformError>;
 
   getTopology(): Effect.Effect<TopologyObservation, PlatformError>;
   getWindows(): Effect.Effect<ReadonlyArray<WindowObservation>, PlatformError>;

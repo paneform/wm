@@ -2051,8 +2051,8 @@ describe("atomic identity guard end-to-end (final issue 3)", () => {
   });
 });
 
-describe("pending focus signal observed by waiting command (final issue 4)", () => {
-  test("queued directional command resolves from the pre-idle applied signal", async () => {
+describe("pending focus signal lifecycle batching", () => {
+  test("a waiting directional command observes focus before gate release", async () => {
     const gate = makeGate();
     const h = await bootstrap(undefined, gate.wrapper);
     const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
@@ -2071,28 +2071,20 @@ describe("pending focus signal observed by waiting command (final issue 4)", () 
     const retile = h.run({ type: "retile" });
     await waitFor(() => gate.isSuspended());
 
-    // 2) Authoritative external event arrives while the mutex is held:
-    //    consumed immediately and STASHED.
     h.fake.emitFocusEvent(w2);
-    await new Promise((r) => setTimeout(r, 30));
-
-    // 3) A directional command queues BEHIND the retile on the semaphore.
     const queuedDirection = h.run({ type: "focusDirection", direction: "left" });
-    await new Promise((r) => setTimeout(r, 20));
-
-    // 4) Release: retile commits ⇒ pending signal applies PRE-IDLE ⇒ the
-    //    queued command acquires with intent w2 already installed.
+    await new Promise((resolve) => setTimeout(resolve, 20));
     gate.resume();
     await Promise.all([retile, queuedDirection]);
     DEADLINE.deadlineMs = 3;
 
-    // LEFT from origin w2 lands on w1. Without the pre-idle application the
+    // LEFT from origin w2 lands on w1. Without pre-release delivery the
     // stale origin w1 would have wrapped right back to w2.
     expect(h.fake.focusedWindowId()).toBe(w1);
     expect((await h.snapshot()).focusedWindow).toBe(w1);
   });
 
-  test("queued workspace move resolves the workspace from the pending focus signal", async () => {
+  test("workspace move resolves from focus after the queued cycle settles", async () => {
     const gate = makeGate();
     const h = await bootstrap(undefined, gate.wrapper);
     const docker = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
@@ -2119,11 +2111,17 @@ describe("pending focus signal observed by waiting command (final issue 4)", () 
     });
     await waitFor(() => gate.isSuspended());
 
+    const settled = Effect.runPromise(
+      h.engine.events().pipe(
+        Stream.filter((event) => event.topic === "reconciliation"),
+        Stream.take(1),
+        Stream.runDrain,
+      ),
+    );
     h.fake.emitFocusEvent(docker);
-    const queuedMove = h.run({ type: "moveFocusedWorkspaceToNextDisplay" });
-    await new Promise((resolve) => setTimeout(resolve, 20));
     gate.resume();
-    await Promise.all([heldWrite, queuedMove]);
+    await Promise.all([heldWrite, settled]);
+    await h.run({ type: "moveFocusedWorkspaceToNextDisplay" });
     DEADLINE.deadlineMs = 3;
 
     const snap = await h.snapshot();

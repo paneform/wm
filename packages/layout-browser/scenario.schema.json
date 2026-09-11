@@ -1,0 +1,1500 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$defs": {
+    "LayoutScenario": {
+      "type": "object",
+      "required": ["state"],
+      "properties": {
+        "$schema": {
+          "type": "string",
+          "description": "An editor hint identifying the JSON Schema; it has no runtime meaning.",
+          "title": "maxLength(2000)",
+          "maxLength": 2000
+        },
+        "config": {
+          "type": "object",
+          "required": [],
+          "properties": {
+            "defaults": {
+              "type": "object",
+              "required": [],
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": ["bsp", "floating"]
+                },
+                "margins": {
+                  "type": "object",
+                  "required": [],
+                  "properties": {
+                    "top": {
+                      "type": "number",
+                      "description": "a non-negative number",
+                      "title": "nonNegative",
+                      "minimum": 0
+                    },
+                    "right": {
+                      "type": "number",
+                      "description": "a non-negative number",
+                      "title": "nonNegative",
+                      "minimum": 0
+                    },
+                    "bottom": {
+                      "type": "number",
+                      "description": "a non-negative number",
+                      "title": "nonNegative",
+                      "minimum": 0
+                    },
+                    "left": {
+                      "type": "number",
+                      "description": "a non-negative number",
+                      "title": "nonNegative",
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "gap": {
+                  "type": "number",
+                  "description": "a number between 0 and 128",
+                  "title": "between(0, 128)",
+                  "minimum": 0,
+                  "maximum": 128
+                },
+                "resizeIncrement": {
+                  "type": "number",
+                  "description": "a number between 0.01 and 0.5",
+                  "title": "between(0.01, 0.5)",
+                  "minimum": 0.01,
+                  "maximum": 0.5
+                }
+              },
+              "additionalProperties": false
+            },
+            "displays": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["display"],
+                "properties": {
+                  "display": {
+                    "type": "string",
+                    "description": "a string at least 1 character(s) long",
+                    "title": "minLength(1)",
+                    "minLength": 1
+                  },
+                  "margins": {
+                    "type": "object",
+                    "required": [],
+                    "properties": {
+                      "top": {
+                        "type": "number",
+                        "description": "a non-negative number",
+                        "title": "nonNegative",
+                        "minimum": 0
+                      },
+                      "right": {
+                        "type": "number",
+                        "description": "a non-negative number",
+                        "title": "nonNegative",
+                        "minimum": 0
+                      },
+                      "bottom": {
+                        "type": "number",
+                        "description": "a non-negative number",
+                        "title": "nonNegative",
+                        "minimum": 0
+                      },
+                      "left": {
+                        "type": "number",
+                        "description": "a non-negative number",
+                        "title": "nonNegative",
+                        "minimum": 0
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "gap": {
+                    "type": "number",
+                    "description": "a number between 0 and 128",
+                    "title": "between(0, 128)",
+                    "minimum": 0,
+                    "maximum": 128
+                  }
+                },
+                "additionalProperties": false
+              },
+              "description": "an array of at most 16 item(s)",
+              "title": "maxItems(16)",
+              "maxItems": 16
+            },
+            "workspaces": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "a string at least 1 character(s) long",
+                    "title": "minLength(1)",
+                    "maxLength": 128,
+                    "minLength": 1
+                  },
+                  "preferredDisplay": {
+                    "type": "string",
+                    "description": "a string at least 1 character(s) long",
+                    "title": "minLength(1)",
+                    "maxLength": 128,
+                    "minLength": 1
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": ["bsp", "floating"]
+                  },
+                  "margins": {
+                    "type": "object",
+                    "required": [],
+                    "properties": {
+                      "top": {
+                        "type": "number",
+                        "description": "a non-negative number",
+                        "title": "nonNegative",
+                        "minimum": 0
+                      },
+                      "right": {
+                        "type": "number",
+                        "description": "a non-negative number",
+                        "title": "nonNegative",
+                        "minimum": 0
+                      },
+                      "bottom": {
+                        "type": "number",
+                        "description": "a non-negative number",
+                        "title": "nonNegative",
+                        "minimum": 0
+                      },
+                      "left": {
+                        "type": "number",
+                        "description": "a non-negative number",
+                        "title": "nonNegative",
+                        "minimum": 0
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "gap": {
+                    "type": "number",
+                    "description": "a number between 0 and 128",
+                    "title": "between(0, 128)",
+                    "minimum": 0,
+                    "maximum": 128
+                  },
+                  "resizeIncrement": {
+                    "type": "number",
+                    "description": "a number between 0.01 and 0.5",
+                    "title": "between(0.01, 0.5)",
+                    "minimum": 0.01,
+                    "maximum": 0.5
+                  },
+                  "assign": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [],
+                      "properties": {
+                        "bundleId": {
+                          "type": "string",
+                          "description": "A bounded bundle identifier matcher.",
+                          "title": "maxLength(512)",
+                          "maxLength": 512
+                        },
+                        "executablePath": {
+                          "type": "string",
+                          "description": "A bounded executable path matcher.",
+                          "title": "maxLength(512)",
+                          "maxLength": 512
+                        },
+                        "title": {
+                          "type": "string",
+                          "description": "A bounded title regular expression.",
+                          "title": "maxLength(512)",
+                          "maxLength": 512
+                        },
+                        "role": {
+                          "type": "string",
+                          "description": "A bounded accessibility role matcher.",
+                          "title": "maxLength(512)",
+                          "maxLength": 512
+                        },
+                        "subrole": {
+                          "type": "string",
+                          "description": "A bounded accessibility subrole matcher.",
+                          "title": "maxLength(512)",
+                          "maxLength": 512
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "description": "an array of at most 100 item(s)",
+                    "title": "maxItems(100)",
+                    "maxItems": 100
+                  }
+                },
+                "additionalProperties": false
+              },
+              "description": "an array of at most 100 item(s)",
+              "title": "maxItems(100)",
+              "maxItems": 100
+            },
+            "keybinds": {
+              "type": "object",
+              "required": [],
+              "properties": {},
+              "patternProperties": {
+                "": {
+                  "type": "string"
+                }
+              },
+              "propertyNames": {
+                "type": "string",
+                "description": "a string matching the pattern ^(?!__proto__$).*$",
+                "title": "minLength(1)",
+                "minLength": 1,
+                "pattern": "^(?!__proto__$).*$"
+              },
+              "description": "Key bindings, limited to 500 entries.",
+              "maxProperties": 500
+            },
+            "experiments": {
+              "type": "object",
+              "required": [],
+              "properties": {
+                "directionalMoveGroups": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "presentation": {
+          "type": "object",
+          "required": [],
+          "properties": {
+            "device": {
+              "type": "string",
+              "enum": ["laptop", "display"]
+            },
+            "devices": {
+              "type": "object",
+              "required": [],
+              "properties": {},
+              "patternProperties": {
+                "": {
+                  "type": "string",
+                  "enum": ["laptop", "display"]
+                }
+              },
+              "propertyNames": {
+                "type": "string",
+                "description": "a string matching the pattern ^(?!__proto__$).*$",
+                "title": "minLength(1)",
+                "minLength": 1,
+                "pattern": "^(?!__proto__$).*$"
+              },
+              "description": "Per-display device shell overrides, limited to 16 display identifiers.",
+              "maxProperties": 16
+            },
+            "showKeyboard": {
+              "type": "boolean",
+              "description": "Show the laptop keyboard. Standalone displays do not include a keyboard."
+            },
+            "showDock": {
+              "type": "boolean"
+            },
+            "showTopBar": {
+              "type": "boolean"
+            },
+            "allowMove": {
+              "type": "boolean"
+            },
+            "allowResize": {
+              "type": "boolean"
+            },
+            "animate": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "description": "Optional UI-only playback and device-shell choices."
+        },
+        "state": {
+          "type": "object",
+          "required": ["topology", "windows"],
+          "properties": {
+            "topology": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "frame", "workspace"],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "a string matching the pattern ^(?!__proto__$).*$",
+                    "title": "minLength(1)",
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "^(?!__proto__$).*$"
+                  },
+                  "frame": {
+                    "type": "object",
+                    "required": ["x", "y", "width", "height"],
+                    "properties": {
+                      "x": {
+                        "type": "number",
+                        "description": "A finite screen coordinate.",
+                        "title": "between(-10000000, 10000000)",
+                        "minimum": -10000000,
+                        "maximum": 10000000
+                      },
+                      "y": {
+                        "type": "number",
+                        "description": "A finite screen coordinate.",
+                        "title": "between(-10000000, 10000000)",
+                        "minimum": -10000000,
+                        "maximum": 10000000
+                      },
+                      "width": {
+                        "type": "number",
+                        "description": "A positive finite screen dimension.",
+                        "title": "between(5e-324, 10000000)",
+                        "minimum": 5e-324,
+                        "maximum": 10000000
+                      },
+                      "height": {
+                        "type": "number",
+                        "description": "A positive finite screen dimension.",
+                        "title": "between(5e-324, 10000000)",
+                        "minimum": 5e-324,
+                        "maximum": 10000000
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "A physical screen rectangle.",
+                    "examples": [
+                      {
+                        "x": 80,
+                        "y": 60,
+                        "width": 960,
+                        "height": 720
+                      }
+                    ]
+                  },
+                  "workArea": {
+                    "type": "object",
+                    "required": ["x", "y", "width", "height"],
+                    "properties": {
+                      "x": {
+                        "type": "number",
+                        "description": "A finite screen coordinate.",
+                        "title": "between(-10000000, 10000000)",
+                        "minimum": -10000000,
+                        "maximum": 10000000
+                      },
+                      "y": {
+                        "type": "number",
+                        "description": "A finite screen coordinate.",
+                        "title": "between(-10000000, 10000000)",
+                        "minimum": -10000000,
+                        "maximum": 10000000
+                      },
+                      "width": {
+                        "type": "number",
+                        "description": "A positive finite screen dimension.",
+                        "title": "between(5e-324, 10000000)",
+                        "minimum": 5e-324,
+                        "maximum": 10000000
+                      },
+                      "height": {
+                        "type": "number",
+                        "description": "A positive finite screen dimension.",
+                        "title": "between(5e-324, 10000000)",
+                        "minimum": 5e-324,
+                        "maximum": 10000000
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "A physical screen rectangle.",
+                    "examples": [
+                      {
+                        "x": 80,
+                        "y": 60,
+                        "width": 960,
+                        "height": 720
+                      }
+                    ]
+                  },
+                  "scale": {
+                    "type": "number",
+                    "description": "Display scale. An omitted value defaults to 1.",
+                    "title": "between(5e-324, 10000000)",
+                    "minimum": 5e-324,
+                    "maximum": 10000000,
+                    "default": 1
+                  },
+                  "primary": {
+                    "type": "boolean"
+                  },
+                  "workspace": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "description": "a string at least 1 character(s) long",
+                        "title": "minLength(1)",
+                        "maxLength": 128,
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "description": "A connected display and its required workspace assignment."
+              },
+              "description": "an array of at most 16 item(s)",
+              "title": "maxItems(16)",
+              "maxItems": 16
+            },
+            "windows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "frame"],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "a string matching the pattern ^(?!__proto__$).*$",
+                    "title": "minLength(1)",
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "^(?!__proto__$).*$"
+                  },
+                  "frame": {
+                    "type": "object",
+                    "required": ["x", "y", "width", "height"],
+                    "properties": {
+                      "x": {
+                        "type": "number",
+                        "description": "A finite screen coordinate.",
+                        "title": "between(-10000000, 10000000)",
+                        "minimum": -10000000,
+                        "maximum": 10000000
+                      },
+                      "y": {
+                        "type": "number",
+                        "description": "A finite screen coordinate.",
+                        "title": "between(-10000000, 10000000)",
+                        "minimum": -10000000,
+                        "maximum": 10000000
+                      },
+                      "width": {
+                        "type": "number",
+                        "description": "A positive finite screen dimension.",
+                        "title": "between(5e-324, 10000000)",
+                        "minimum": 5e-324,
+                        "maximum": 10000000
+                      },
+                      "height": {
+                        "type": "number",
+                        "description": "A positive finite screen dimension.",
+                        "title": "between(5e-324, 10000000)",
+                        "minimum": 5e-324,
+                        "maximum": 10000000
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "A physical screen rectangle.",
+                    "examples": [
+                      {
+                        "x": 80,
+                        "y": 60,
+                        "width": 960,
+                        "height": 720
+                      }
+                    ]
+                  },
+                  "workspace": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "description": "a string at least 1 character(s) long",
+                        "title": "minLength(1)",
+                        "maxLength": 128,
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Workspace membership. An omitted value defaults to workspace 1; null is unassigned.",
+                    "default": "1"
+                  },
+                  "floating": {
+                    "type": "boolean"
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "A display title; it may contain sensitive text.",
+                    "title": "maxLength(512)",
+                    "maxLength": 512
+                  },
+                  "bundleId": {
+                    "type": "string",
+                    "description": "An application bundle identifier.",
+                    "title": "maxLength(512)",
+                    "maxLength": 512
+                  },
+                  "role": {
+                    "type": "string",
+                    "description": "A platform accessibility role.",
+                    "title": "maxLength(128)",
+                    "maxLength": 128
+                  },
+                  "subrole": {
+                    "type": "string",
+                    "description": "A platform accessibility subrole.",
+                    "title": "maxLength(128)",
+                    "maxLength": 128
+                  },
+                  "constraints": {
+                    "type": "object",
+                    "required": [],
+                    "properties": {
+                      "minWidth": {
+                        "type": "number",
+                        "description": "A positive finite screen dimension.",
+                        "title": "between(5e-324, 10000000)",
+                        "minimum": 5e-324,
+                        "maximum": 10000000
+                      },
+                      "maxWidth": {
+                        "type": "number",
+                        "description": "A positive finite screen dimension.",
+                        "title": "between(5e-324, 10000000)",
+                        "minimum": 5e-324,
+                        "maximum": 10000000
+                      },
+                      "minHeight": {
+                        "type": "number",
+                        "description": "A positive finite screen dimension.",
+                        "title": "between(5e-324, 10000000)",
+                        "minimum": 5e-324,
+                        "maximum": 10000000
+                      },
+                      "maxHeight": {
+                        "type": "number",
+                        "description": "A positive finite screen dimension.",
+                        "title": "between(5e-324, 10000000)",
+                        "minimum": 5e-324,
+                        "maximum": 10000000
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "Known physical size limits. Each limit is independent."
+                  },
+                  "minimized": {
+                    "type": "boolean"
+                  },
+                  "hidden": {
+                    "type": "boolean"
+                  },
+                  "fullscreen": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false,
+                "description": "An exact initial simulated window."
+              },
+              "description": "an array of at most 100 item(s)",
+              "title": "maxItems(100)",
+              "maxItems": 100
+            },
+            "focusedWindow": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "a string matching the pattern ^(?!__proto__$).*$",
+                  "title": "minLength(1)",
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^(?!__proto__$).*$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Initially focused window. An omitted value means no focused window.",
+              "default": null
+            },
+            "focusedWorkspace": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "a string at least 1 character(s) long",
+                  "title": "minLength(1)",
+                  "maxLength": 128,
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Initially focused workspace. An omitted value means no focused workspace.",
+              "default": null
+            },
+            "paused": {
+              "type": "boolean"
+            },
+            "wmRunning": {
+              "type": "boolean",
+              "description": "Whether a window-manager engine is running. An omitted value defaults to true.",
+              "default": true
+            }
+          },
+          "additionalProperties": false,
+          "description": "The exact physical scene imported before playback."
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["command"],
+                "properties": {
+                  "command": {
+                    "type": "string",
+                    "description": "a string at least 1 character(s) long",
+                    "title": "minLength(1)",
+                    "maxLength": 4096,
+                    "examples": [
+                      "window focus right",
+                      "window move left",
+                      "workspace move-window T",
+                      "retile"
+                    ],
+                    "minLength": 1
+                  },
+                  "caption": {
+                    "type": "string",
+                    "description": "Presentation text shown with this step.",
+                    "title": "maxLength(2000)",
+                    "maxLength": 2000
+                  },
+                  "duration": {
+                    "type": "number",
+                    "description": "Presentation duration in milliseconds.",
+                    "title": "between(0, 60000)",
+                    "minimum": 0,
+                    "maximum": 60000
+                  },
+                  "expect": {
+                    "type": "object",
+                    "required": [],
+                    "properties": {
+                      "focusedWindow": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "description": "a string matching the pattern ^(?!__proto__$).*$",
+                            "title": "minLength(1)",
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "pattern": "^(?!__proto__$).*$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "focusedWorkspace": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "description": "a string at least 1 character(s) long",
+                            "title": "minLength(1)",
+                            "maxLength": 128,
+                            "minLength": 1
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "paused": {
+                        "type": "boolean"
+                      },
+                      "wmRunning": {
+                        "type": "boolean"
+                      },
+                      "windows": {
+                        "type": "object",
+                        "required": [],
+                        "properties": {},
+                        "patternProperties": {
+                          "": {
+                            "type": "object",
+                            "required": [],
+                            "properties": {
+                              "exists": {
+                                "type": "boolean"
+                              },
+                              "workspace": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "description": "a string at least 1 character(s) long",
+                                    "title": "minLength(1)",
+                                    "maxLength": 128,
+                                    "minLength": 1
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "floating": {
+                                "type": "boolean"
+                              },
+                              "frame": {
+                                "type": "object",
+                                "required": [],
+                                "properties": {
+                                  "x": {
+                                    "type": "number",
+                                    "description": "A finite screen coordinate.",
+                                    "title": "between(-10000000, 10000000)",
+                                    "minimum": -10000000,
+                                    "maximum": 10000000
+                                  },
+                                  "y": {
+                                    "type": "number",
+                                    "description": "A finite screen coordinate.",
+                                    "title": "between(-10000000, 10000000)",
+                                    "minimum": -10000000,
+                                    "maximum": 10000000
+                                  },
+                                  "width": {
+                                    "type": "number",
+                                    "description": "A positive finite screen dimension.",
+                                    "title": "between(5e-324, 10000000)",
+                                    "minimum": 5e-324,
+                                    "maximum": 10000000
+                                  },
+                                  "height": {
+                                    "type": "number",
+                                    "description": "A positive finite screen dimension.",
+                                    "title": "between(5e-324, 10000000)",
+                                    "minimum": 5e-324,
+                                    "maximum": 10000000
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "description": "The frame fields that must match."
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "propertyNames": {
+                          "type": "string",
+                          "description": "a string matching the pattern ^(?!__proto__$).*$",
+                          "title": "minLength(1)",
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^(?!__proto__$).*$"
+                        },
+                        "description": "Expected windows, limited to 100 identifiers.",
+                        "maxProperties": 100
+                      },
+                      "error": {
+                        "type": "string",
+                        "description": "The expected command error code.",
+                        "title": "maxLength(128)",
+                        "maxLength": 128
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "Optional state or command-error assertions after a step settles."
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": ["event"],
+                "properties": {
+                  "event": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "required": ["kind", "window"],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["window_added"]
+                          },
+                          "window": {
+                            "type": "object",
+                            "required": ["id", "frame"],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "description": "a string matching the pattern ^(?!__proto__$).*$",
+                                "title": "minLength(1)",
+                                "maxLength": 128,
+                                "minLength": 1,
+                                "pattern": "^(?!__proto__$).*$"
+                              },
+                              "frame": {
+                                "type": "object",
+                                "required": ["x", "y", "width", "height"],
+                                "properties": {
+                                  "x": {
+                                    "type": "number",
+                                    "description": "A finite screen coordinate.",
+                                    "title": "between(-10000000, 10000000)",
+                                    "minimum": -10000000,
+                                    "maximum": 10000000
+                                  },
+                                  "y": {
+                                    "type": "number",
+                                    "description": "A finite screen coordinate.",
+                                    "title": "between(-10000000, 10000000)",
+                                    "minimum": -10000000,
+                                    "maximum": 10000000
+                                  },
+                                  "width": {
+                                    "type": "number",
+                                    "description": "A positive finite screen dimension.",
+                                    "title": "between(5e-324, 10000000)",
+                                    "minimum": 5e-324,
+                                    "maximum": 10000000
+                                  },
+                                  "height": {
+                                    "type": "number",
+                                    "description": "A positive finite screen dimension.",
+                                    "title": "between(5e-324, 10000000)",
+                                    "minimum": 5e-324,
+                                    "maximum": 10000000
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "description": "A physical screen rectangle.",
+                                "examples": [
+                                  {
+                                    "x": 80,
+                                    "y": 60,
+                                    "width": 960,
+                                    "height": 720
+                                  }
+                                ]
+                              },
+                              "title": {
+                                "type": "string",
+                                "description": "A display title; it may contain sensitive text.",
+                                "title": "maxLength(512)",
+                                "maxLength": 512
+                              },
+                              "bundleId": {
+                                "type": "string",
+                                "description": "An application bundle identifier.",
+                                "title": "maxLength(512)",
+                                "maxLength": 512
+                              },
+                              "role": {
+                                "type": "string",
+                                "description": "A platform accessibility role.",
+                                "title": "maxLength(128)",
+                                "maxLength": 128
+                              },
+                              "subrole": {
+                                "type": "string",
+                                "description": "A platform accessibility subrole.",
+                                "title": "maxLength(128)",
+                                "maxLength": 128
+                              },
+                              "constraints": {
+                                "type": "object",
+                                "required": [],
+                                "properties": {
+                                  "minWidth": {
+                                    "type": "number",
+                                    "description": "A positive finite screen dimension.",
+                                    "title": "between(5e-324, 10000000)",
+                                    "minimum": 5e-324,
+                                    "maximum": 10000000
+                                  },
+                                  "maxWidth": {
+                                    "type": "number",
+                                    "description": "A positive finite screen dimension.",
+                                    "title": "between(5e-324, 10000000)",
+                                    "minimum": 5e-324,
+                                    "maximum": 10000000
+                                  },
+                                  "minHeight": {
+                                    "type": "number",
+                                    "description": "A positive finite screen dimension.",
+                                    "title": "between(5e-324, 10000000)",
+                                    "minimum": 5e-324,
+                                    "maximum": 10000000
+                                  },
+                                  "maxHeight": {
+                                    "type": "number",
+                                    "description": "A positive finite screen dimension.",
+                                    "title": "between(5e-324, 10000000)",
+                                    "minimum": 5e-324,
+                                    "maximum": 10000000
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "description": "Known physical size limits. Each limit is independent."
+                              },
+                              "minimized": {
+                                "type": "boolean"
+                              },
+                              "hidden": {
+                                "type": "boolean"
+                              },
+                              "fullscreen": {
+                                "type": "boolean"
+                              }
+                            },
+                            "additionalProperties": false,
+                            "description": "Physical window facts; workspace and floating policy are intentionally absent."
+                          },
+                          "focus": {
+                            "type": "boolean",
+                            "description": "Focus the new window within the same step, before layout settles. Omission retains ordinary background-add behavior."
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": ["kind", "window"],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["window_changed"]
+                          },
+                          "window": {
+                            "type": "object",
+                            "required": ["id", "frame"],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "description": "a string matching the pattern ^(?!__proto__$).*$",
+                                "title": "minLength(1)",
+                                "maxLength": 128,
+                                "minLength": 1,
+                                "pattern": "^(?!__proto__$).*$"
+                              },
+                              "frame": {
+                                "type": "object",
+                                "required": ["x", "y", "width", "height"],
+                                "properties": {
+                                  "x": {
+                                    "type": "number",
+                                    "description": "A finite screen coordinate.",
+                                    "title": "between(-10000000, 10000000)",
+                                    "minimum": -10000000,
+                                    "maximum": 10000000
+                                  },
+                                  "y": {
+                                    "type": "number",
+                                    "description": "A finite screen coordinate.",
+                                    "title": "between(-10000000, 10000000)",
+                                    "minimum": -10000000,
+                                    "maximum": 10000000
+                                  },
+                                  "width": {
+                                    "type": "number",
+                                    "description": "A positive finite screen dimension.",
+                                    "title": "between(5e-324, 10000000)",
+                                    "minimum": 5e-324,
+                                    "maximum": 10000000
+                                  },
+                                  "height": {
+                                    "type": "number",
+                                    "description": "A positive finite screen dimension.",
+                                    "title": "between(5e-324, 10000000)",
+                                    "minimum": 5e-324,
+                                    "maximum": 10000000
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "description": "A physical screen rectangle.",
+                                "examples": [
+                                  {
+                                    "x": 80,
+                                    "y": 60,
+                                    "width": 960,
+                                    "height": 720
+                                  }
+                                ]
+                              },
+                              "title": {
+                                "type": "string",
+                                "description": "A display title; it may contain sensitive text.",
+                                "title": "maxLength(512)",
+                                "maxLength": 512
+                              },
+                              "bundleId": {
+                                "type": "string",
+                                "description": "An application bundle identifier.",
+                                "title": "maxLength(512)",
+                                "maxLength": 512
+                              },
+                              "role": {
+                                "type": "string",
+                                "description": "A platform accessibility role.",
+                                "title": "maxLength(128)",
+                                "maxLength": 128
+                              },
+                              "subrole": {
+                                "type": "string",
+                                "description": "A platform accessibility subrole.",
+                                "title": "maxLength(128)",
+                                "maxLength": 128
+                              },
+                              "constraints": {
+                                "type": "object",
+                                "required": [],
+                                "properties": {
+                                  "minWidth": {
+                                    "type": "number",
+                                    "description": "A positive finite screen dimension.",
+                                    "title": "between(5e-324, 10000000)",
+                                    "minimum": 5e-324,
+                                    "maximum": 10000000
+                                  },
+                                  "maxWidth": {
+                                    "type": "number",
+                                    "description": "A positive finite screen dimension.",
+                                    "title": "between(5e-324, 10000000)",
+                                    "minimum": 5e-324,
+                                    "maximum": 10000000
+                                  },
+                                  "minHeight": {
+                                    "type": "number",
+                                    "description": "A positive finite screen dimension.",
+                                    "title": "between(5e-324, 10000000)",
+                                    "minimum": 5e-324,
+                                    "maximum": 10000000
+                                  },
+                                  "maxHeight": {
+                                    "type": "number",
+                                    "description": "A positive finite screen dimension.",
+                                    "title": "between(5e-324, 10000000)",
+                                    "minimum": 5e-324,
+                                    "maximum": 10000000
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "description": "Known physical size limits. Each limit is independent."
+                              },
+                              "minimized": {
+                                "type": "boolean"
+                              },
+                              "hidden": {
+                                "type": "boolean"
+                              },
+                              "fullscreen": {
+                                "type": "boolean"
+                              }
+                            },
+                            "additionalProperties": false,
+                            "description": "Physical window facts; workspace and floating policy are intentionally absent."
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": ["kind", "windowId"],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["window_removed"]
+                          },
+                          "windowId": {
+                            "type": "string",
+                            "description": "a string matching the pattern ^(?!__proto__$).*$",
+                            "title": "minLength(1)",
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "pattern": "^(?!__proto__$).*$"
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": ["kind", "windowId"],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["focus_changed"]
+                          },
+                          "windowId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "description": "a string matching the pattern ^(?!__proto__$).*$",
+                                "title": "minLength(1)",
+                                "maxLength": 128,
+                                "minLength": 1,
+                                "pattern": "^(?!__proto__$).*$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": ["kind", "topology"],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["topology_changed"]
+                          },
+                          "topology": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": ["id", "frame"],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "description": "a string matching the pattern ^(?!__proto__$).*$",
+                                  "title": "minLength(1)",
+                                  "maxLength": 128,
+                                  "minLength": 1,
+                                  "pattern": "^(?!__proto__$).*$"
+                                },
+                                "frame": {
+                                  "type": "object",
+                                  "required": ["x", "y", "width", "height"],
+                                  "properties": {
+                                    "x": {
+                                      "type": "number",
+                                      "description": "A finite screen coordinate.",
+                                      "title": "between(-10000000, 10000000)",
+                                      "minimum": -10000000,
+                                      "maximum": 10000000
+                                    },
+                                    "y": {
+                                      "type": "number",
+                                      "description": "A finite screen coordinate.",
+                                      "title": "between(-10000000, 10000000)",
+                                      "minimum": -10000000,
+                                      "maximum": 10000000
+                                    },
+                                    "width": {
+                                      "type": "number",
+                                      "description": "A positive finite screen dimension.",
+                                      "title": "between(5e-324, 10000000)",
+                                      "minimum": 5e-324,
+                                      "maximum": 10000000
+                                    },
+                                    "height": {
+                                      "type": "number",
+                                      "description": "A positive finite screen dimension.",
+                                      "title": "between(5e-324, 10000000)",
+                                      "minimum": 5e-324,
+                                      "maximum": 10000000
+                                    }
+                                  },
+                                  "additionalProperties": false,
+                                  "description": "A physical screen rectangle.",
+                                  "examples": [
+                                    {
+                                      "x": 80,
+                                      "y": 60,
+                                      "width": 960,
+                                      "height": 720
+                                    }
+                                  ]
+                                },
+                                "workArea": {
+                                  "type": "object",
+                                  "required": ["x", "y", "width", "height"],
+                                  "properties": {
+                                    "x": {
+                                      "type": "number",
+                                      "description": "A finite screen coordinate.",
+                                      "title": "between(-10000000, 10000000)",
+                                      "minimum": -10000000,
+                                      "maximum": 10000000
+                                    },
+                                    "y": {
+                                      "type": "number",
+                                      "description": "A finite screen coordinate.",
+                                      "title": "between(-10000000, 10000000)",
+                                      "minimum": -10000000,
+                                      "maximum": 10000000
+                                    },
+                                    "width": {
+                                      "type": "number",
+                                      "description": "A positive finite screen dimension.",
+                                      "title": "between(5e-324, 10000000)",
+                                      "minimum": 5e-324,
+                                      "maximum": 10000000
+                                    },
+                                    "height": {
+                                      "type": "number",
+                                      "description": "A positive finite screen dimension.",
+                                      "title": "between(5e-324, 10000000)",
+                                      "minimum": 5e-324,
+                                      "maximum": 10000000
+                                    }
+                                  },
+                                  "additionalProperties": false,
+                                  "description": "A physical screen rectangle.",
+                                  "examples": [
+                                    {
+                                      "x": 80,
+                                      "y": 60,
+                                      "width": 960,
+                                      "height": 720
+                                    }
+                                  ]
+                                },
+                                "scale": {
+                                  "type": "number",
+                                  "description": "Display scale. An omitted value defaults to 1.",
+                                  "title": "between(5e-324, 10000000)",
+                                  "minimum": 5e-324,
+                                  "maximum": 10000000,
+                                  "default": 1
+                                },
+                                "primary": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "additionalProperties": false,
+                              "description": "Physical facts about a connected display."
+                            },
+                            "description": "an array of at most 16 item(s)",
+                            "title": "maxItems(16)",
+                            "maxItems": 16
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": ["kind"],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["space_changed"]
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": ["kind"],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["sleep"]
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": ["kind"],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["wake"]
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    ],
+                    "description": "A simplified physical platform event."
+                  },
+                  "caption": {
+                    "type": "string",
+                    "description": "Presentation text shown with this step.",
+                    "title": "maxLength(2000)",
+                    "maxLength": 2000
+                  },
+                  "duration": {
+                    "type": "number",
+                    "description": "Presentation duration in milliseconds.",
+                    "title": "between(0, 60000)",
+                    "minimum": 0,
+                    "maximum": 60000
+                  },
+                  "expect": {
+                    "type": "object",
+                    "required": [],
+                    "properties": {
+                      "focusedWindow": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "description": "a string matching the pattern ^(?!__proto__$).*$",
+                            "title": "minLength(1)",
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "pattern": "^(?!__proto__$).*$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "focusedWorkspace": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "description": "a string at least 1 character(s) long",
+                            "title": "minLength(1)",
+                            "maxLength": 128,
+                            "minLength": 1
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "paused": {
+                        "type": "boolean"
+                      },
+                      "wmRunning": {
+                        "type": "boolean"
+                      },
+                      "windows": {
+                        "type": "object",
+                        "required": [],
+                        "properties": {},
+                        "patternProperties": {
+                          "": {
+                            "type": "object",
+                            "required": [],
+                            "properties": {
+                              "exists": {
+                                "type": "boolean"
+                              },
+                              "workspace": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "description": "a string at least 1 character(s) long",
+                                    "title": "minLength(1)",
+                                    "maxLength": 128,
+                                    "minLength": 1
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "floating": {
+                                "type": "boolean"
+                              },
+                              "frame": {
+                                "type": "object",
+                                "required": [],
+                                "properties": {
+                                  "x": {
+                                    "type": "number",
+                                    "description": "A finite screen coordinate.",
+                                    "title": "between(-10000000, 10000000)",
+                                    "minimum": -10000000,
+                                    "maximum": 10000000
+                                  },
+                                  "y": {
+                                    "type": "number",
+                                    "description": "A finite screen coordinate.",
+                                    "title": "between(-10000000, 10000000)",
+                                    "minimum": -10000000,
+                                    "maximum": 10000000
+                                  },
+                                  "width": {
+                                    "type": "number",
+                                    "description": "A positive finite screen dimension.",
+                                    "title": "between(5e-324, 10000000)",
+                                    "minimum": 5e-324,
+                                    "maximum": 10000000
+                                  },
+                                  "height": {
+                                    "type": "number",
+                                    "description": "A positive finite screen dimension.",
+                                    "title": "between(5e-324, 10000000)",
+                                    "minimum": 5e-324,
+                                    "maximum": 10000000
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "description": "The frame fields that must match."
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "propertyNames": {
+                          "type": "string",
+                          "description": "a string matching the pattern ^(?!__proto__$).*$",
+                          "title": "minLength(1)",
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^(?!__proto__$).*$"
+                        },
+                        "description": "Expected windows, limited to 100 identifiers.",
+                        "maxProperties": 100
+                      },
+                      "error": {
+                        "type": "string",
+                        "description": "The expected command error code.",
+                        "title": "maxLength(128)",
+                        "maxLength": 128
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "Optional state or command-error assertions after a step settles."
+                  }
+                },
+                "additionalProperties": false
+              }
+            ],
+            "description": "Exactly one command or event plus optional presentation and assertions."
+          },
+          "description": "an array of at most 500 item(s)",
+          "title": "maxItems(500)",
+          "maxItems": 500
+        }
+      },
+      "additionalProperties": false,
+      "description": "A portable, data-only initial layout and deterministic sequence of commands or events.",
+      "title": "Paneform layout scenario"
+    }
+  },
+  "$ref": "#/$defs/LayoutScenario",
+  "$id": "https://paneform.com/wm/play/scenario.schema.json"
+}

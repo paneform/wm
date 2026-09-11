@@ -118,7 +118,10 @@ state is rebuilt.
 
 Paths follow XDG conventions:
 
-- Config: `$XDG_CONFIG_HOME/wm/config.jsonc`, default `~/.config/wm/config.jsonc`
+- Config: `$XDG_CONFIG_HOME/paneform/wm/config.jsonc`, default
+  `~/.config/paneform/wm/config.jsonc`. `WM_CONFIG` overrides this path. When the
+  canonical file is absent, an existing legacy `$XDG_CONFIG_HOME/wm/config.jsonc`
+  (default `~/.config/wm/config.jsonc`) is loaded without being moved or copied.
 - State and logs: `$XDG_STATE_HOME/wm`, default `~/.local/state/wm`
 - Cache: `$XDG_CACHE_HOME/wm`, default `~/.cache/wm`
 - Single-instance lock and ephemeral ownership metadata: XDG state directory

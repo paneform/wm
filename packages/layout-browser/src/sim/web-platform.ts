@@ -97,6 +97,20 @@ export interface AddWindowSpec {
   height: number;
   personality?: SimPersonality | undefined;
   minimized?: boolean | undefined;
+  hidden?: boolean | undefined;
+  fullscreen?: boolean | undefined;
+}
+
+export interface UpdateWindowSpec {
+  frame: Frame;
+  title?: string | undefined;
+  bundleId?: string | undefined;
+  role?: string | undefined;
+  subrole?: string | undefined;
+  personality?: SimPersonality | undefined;
+  minimized?: boolean | undefined;
+  hidden?: boolean | undefined;
+  fullscreen?: boolean | undefined;
 }
 
 export interface WebPlatformSimOptions {
@@ -128,10 +142,13 @@ export interface WebPlatformSim {
   focusWindowExternal(id: WindowId | null): void;
   driftWindow(id: WindowId, dx: number, dy: number): void;
   nudgeWindow(id: WindowId, frame: Partial<Frame>): void;
+  updateWindow(id: WindowId, spec: UpdateWindowSpec): void;
   scheduleIdentityReplacement(id: WindowId): void;
   connectDisplay(spec: DisplaySpec): void;
   disconnectDisplay(displayId: DisplayId): void;
   updateWorkArea(displayId: DisplayId, workArea: Frame): void;
+  setTopology(specs: readonly DisplaySpec[]): void;
+  signal(kind: "space_changed" | "sleep" | "wake"): void;
   setVisibilityLimits(displayId: DisplayId, limits: { horizontal: number; vertical: number }): void;
 
   // Introspection.
@@ -689,8 +706,8 @@ export function createWebPlatformSim(options: WebPlatformSimOptions = {}): WebPl
       frame,
       target: null,
       minimized: spec.minimized ?? false,
-      hidden: false,
-      fullscreen: false,
+      hidden: spec.hidden ?? false,
+      fullscreen: spec.fullscreen ?? false,
       generation: 1,
       replacementPending: false,
       initialFrame: { ...frame },
@@ -735,6 +752,29 @@ export function createWebPlatformSim(options: WebPlatformSimOptions = {}): WebPl
     const w = windows.get(id);
     if (w === undefined) return;
     w.replacementPending = true;
+  };
+
+  const updateWindow = (id: WindowId, spec: UpdateWindowSpec): void => {
+    const window = windows.get(id);
+    if (window === undefined) throw new Error(`Unknown simulated window: ${id}`);
+    window.frame = { ...spec.frame };
+    window.target = null;
+    window.title = spec.title ?? window.title;
+    window.bundleId = spec.bundleId ?? window.bundleId;
+    window.role = spec.role ?? window.role;
+    window.subrole = spec.subrole ?? window.subrole;
+    window.personality = spec.personality ?? window.personality;
+    window.minimized = spec.minimized ?? window.minimized;
+    window.hidden = spec.hidden ?? window.hidden;
+    window.fullscreen = spec.fullscreen ?? window.fullscreen;
+    dispatch({ kind: "window_changed", window: observationOf(window) });
+  };
+
+  const setTopology = (specs: readonly DisplaySpec[]): void => {
+    displays = specs.map((spec) => ({
+      spec: { ...spec, visibility: { ...(spec.visibility ?? DEFAULT_VISIBILITY) } },
+    }));
+    dispatch({ kind: "topology_changed" });
   };
 
   const connectDisplay = (spec: DisplaySpec): void => {
@@ -787,10 +827,13 @@ export function createWebPlatformSim(options: WebPlatformSimOptions = {}): WebPl
     focusWindowExternal,
     driftWindow,
     nudgeWindow,
+    updateWindow,
     scheduleIdentityReplacement,
     connectDisplay,
     disconnectDisplay,
     updateWorkArea,
+    setTopology,
+    signal: (kind) => dispatch({ kind }),
     setVisibilityLimits,
     displays: () => sortedDisplays(),
     windowIds: () => [...windows.keys()],

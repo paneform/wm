@@ -115,24 +115,25 @@ export function directionalFocusNeighbor(input: DirectionalFocusNeighborInput): 
 
     const candidateOrthoStart = horizontal ? frame.y : frame.x;
     const candidateOrthoEnd = candidateOrthoStart + (horizontal ? frame.height : frame.width);
-    return [{
-      id: candidate.id,
-      primaryGap:
-        input.direction === "left" || input.direction === "up"
-          ? originPrimaryStart - candidatePrimaryEnd
-          : candidatePrimaryStart - originPrimaryEnd,
-      orthoGap: intervalGap(
-        originOrthoStart,
-        originOrthoEnd,
-        candidateOrthoStart,
-        candidateOrthoEnd,
-      ),
-      orthoCenterGap: Math.abs(
-        (originOrthoStart + originOrthoEnd) / 2 -
-          (candidateOrthoStart + candidateOrthoEnd) / 2,
-      ),
-      index,
-    }];
+    return [
+      {
+        id: candidate.id,
+        primaryGap:
+          input.direction === "left" || input.direction === "up"
+            ? originPrimaryStart - candidatePrimaryEnd
+            : candidatePrimaryStart - originPrimaryEnd,
+        orthoGap: intervalGap(
+          originOrthoStart,
+          originOrthoEnd,
+          candidateOrthoStart,
+          candidateOrthoEnd,
+        ),
+        orthoCenterGap: Math.abs(
+          (originOrthoStart + originOrthoEnd) / 2 - (candidateOrthoStart + candidateOrthoEnd) / 2,
+        ),
+        index,
+      },
+    ];
   });
 
   ranked.sort(

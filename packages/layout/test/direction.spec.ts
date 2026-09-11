@@ -110,9 +110,15 @@ describe("directionalFocusNeighbor — frame borders", () => {
   const c = { id: "C", frame: frame(100, 0, 100, 200) };
 
   test("uses visible borders for a stacked column beside a spanning window", () => {
-    expect(directionalFocusNeighbor({ direction: "right", origin: c.frame, candidates: [a, b] })).toBeNull();
-    expect(directionalFocusNeighbor({ direction: "up", origin: c.frame, candidates: [a, b] })).toBeNull();
-    expect(directionalFocusNeighbor({ direction: "down", origin: c.frame, candidates: [a, b] })).toBeNull();
+    expect(
+      directionalFocusNeighbor({ direction: "right", origin: c.frame, candidates: [a, b] }),
+    ).toBeNull();
+    expect(
+      directionalFocusNeighbor({ direction: "up", origin: c.frame, candidates: [a, b] }),
+    ).toBeNull();
+    expect(
+      directionalFocusNeighbor({ direction: "down", origin: c.frame, candidates: [a, b] }),
+    ).toBeNull();
 
     expect(
       directionalFocusNeighbor({
