@@ -2,8 +2,16 @@
 
 The production window manager is the TypeScript engine with the persistent
 macOS sidecar. It listens on `127.0.0.1:17832`, loads
-`~/.config/wm/config.jsonc`, and is supervised by the per-user launchd service
+`~/.config/paneform/wm/config.jsonc`, and is supervised by the per-user launchd service
 `com.paneform.wm`.
+
+The canonical config path is
+`${XDG_CONFIG_HOME:-~/.config}/paneform/wm/config.jsonc`. `WM_CONFIG` overrides
+it when set. Existing installations continue to load
+`${XDG_CONFIG_HOME:-~/.config}/wm/config.jsonc` only while the canonical file is
+absent. To migrate, create the `paneform/wm` directory and move the legacy file
+there while the service is stopped. Once the canonical file exists, it always
+wins; no config is copied or overwritten automatically.
 
 `wm.app` is the single installed application and permission identity. Its native
 executable dispatches CLI commands, hosts the daemon, and provides native system

@@ -7,7 +7,7 @@ import { clockNode } from "./clock-node.ts";
 import { executeEngineCommand } from "./command-handler.ts";
 import { createFileConfigSource, resolveConfigPath } from "./config-file.ts";
 import { createFileObservationStore, resolveObservationPath } from "./observation-file.ts";
-import { buildKeybindCommand, parseArgs, USAGE } from "./cli-args.ts";
+import { buildKeybindCommand, helpFor, parseArgs, USAGE } from "./cli-args.ts";
 import {
   errorReport,
   exitCodeFor,
@@ -87,7 +87,7 @@ async function gateDaemonPermissions(adapter: MacOsSidecarAdapter): Promise<numb
 async function main(): Promise<number> {
   const parsed = parseArgs(process.argv.slice(2));
   if (parsed.help || (parsed.command === null && !parsed.serve && parsed.localCommand === null)) {
-    console.log(USAGE);
+    console.log(parsed.help ? helpFor(parsed.positional) : USAGE);
     return parsed.help ? 0 : parsed.command === null && !parsed.serve ? 1 : 0;
   }
   if (parsed.localCommand !== null) {

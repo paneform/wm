@@ -4,9 +4,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createFileConfigSource, resolveConfigPath, stripJsonc } from "../src/config-file.ts";
-import { buildCommand, buildKeybindCommand, parseArgs, USAGE } from "../src/cli-args.ts";
+import { buildCommand, buildKeybindCommand, helpFor, parseArgs, USAGE } from "../src/cli-args.ts";
 import { legacySketchybarSnapshot } from "../src/sketchybar.ts";
-import { emptyObservationDocument, type ObservationDocument, type StateSnapshot } from "@paneform/layout";
+import {
+  emptyObservationDocument,
+  type ObservationDocument,
+  type StateSnapshot,
+} from "@paneform/layout";
 import { createFileObservationStore, resolveObservationPath } from "../src/observation-file.ts";
 
 describe("stripJsonc", () => {
@@ -54,8 +58,22 @@ describe("SketchyBar compatibility", () => {
         },
       ],
       workspaces: [
-        { name: "1", members: [], floating: [], preferredDisplay: "display:built-in", visibleOnDisplay: null, pinnedDisplayOverride: null },
-        { name: "T", members: ["w1"], floating: [], preferredDisplay: "display:dell", visibleOnDisplay: null, pinnedDisplayOverride: "display:dell" },
+        {
+          name: "1",
+          members: [],
+          floating: [],
+          preferredDisplay: "display:built-in",
+          visibleOnDisplay: null,
+          pinnedDisplayOverride: null,
+        },
+        {
+          name: "T",
+          members: ["w1"],
+          floating: [],
+          preferredDisplay: "display:dell",
+          visibleOnDisplay: null,
+          pinnedDisplayOverride: "display:dell",
+        },
       ],
     } as unknown as StateSnapshot;
 
@@ -73,10 +91,36 @@ describe("SketchyBar compatibility", () => {
 });
 
 describe("resolveConfigPath", () => {
-  test("WM_CONFIG wins, then XDG, then default home", () => {
-    expect(resolveConfigPath({ WM_CONFIG: "/tmp/a.jsonc" })).toBe("/tmp/a.jsonc");
-    expect(resolveConfigPath({ XDG_CONFIG_HOME: "/xdg", HOME: "/h" })).toBe("/xdg/wm/config.jsonc");
-    expect(resolveConfigPath({ HOME: "/h" })).toBe("/h/.config/wm/config.jsonc");
+  test("WM_CONFIG wins and fresh XDG or home paths use the Paneform namespace", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "wm-config-path-"));
+
+    expect(resolveConfigPath({ WM_CONFIG: "/tmp/a.jsonc", XDG_CONFIG_HOME: root })).toBe(
+      "/tmp/a.jsonc",
+    );
+    expect(resolveConfigPath({ XDG_CONFIG_HOME: root })).toBe(
+      path.join(root, "paneform/wm/config.jsonc"),
+    );
+    expect(resolveConfigPath({ HOME: root })).toBe(
+      path.join(root, ".config/paneform/wm/config.jsonc"),
+    );
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test("prefers the canonical config and falls back only to an existing legacy config", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "wm-config-path-"));
+    const canonical = path.join(root, "paneform/wm/config.jsonc");
+    const legacy = path.join(root, "wm/config.jsonc");
+    fs.mkdirSync(path.dirname(legacy), { recursive: true });
+    fs.writeFileSync(legacy, "{}\n");
+
+    expect(resolveConfigPath({ XDG_CONFIG_HOME: root })).toBe(legacy);
+
+    fs.mkdirSync(path.dirname(canonical), { recursive: true });
+    fs.writeFileSync(canonical, "{}\n");
+    expect(resolveConfigPath({ XDG_CONFIG_HOME: root })).toBe(canonical);
+
+    fs.rmSync(root, { recursive: true, force: true });
   });
 });
 
@@ -108,25 +152,33 @@ describe("createFileConfigSource", () => {
 describe("file observation store", () => {
   const documentWithMaximum = (maxWidth: number): ObservationDocument => ({
     schemaVersion: 1,
-    profiles: [{
-      key: {
-        application: "com.apple.systempreferences",
-        role: "AXWindow",
-        contextFingerprint: "display-a",
+    profiles: [
+      {
+        key: {
+          application: "com.apple.systempreferences",
+          role: "AXWindow",
+          contextFingerprint: "display-a",
+        },
+        constraints: { maxWidth },
+        sampleCount: 3,
+        confidence: "learned",
+        correctiveAttemptCount: 0,
+        cooperative: false,
       },
-      constraints: { maxWidth },
-      sampleCount: 3,
-      confidence: "learned",
-      correctiveAttemptCount: 0,
-      cooperative: false,
-    }],
+    ],
     pending: [],
   });
 
   test("resolves WM_OBSERVATIONS, XDG state, and home paths", () => {
-    expect(resolveObservationPath({ WM_OBSERVATIONS: "/tmp/custom.json" })).toBe("/tmp/custom.json");
-    expect(resolveObservationPath({ XDG_STATE_HOME: "/state" })).toBe("/state/wm/observations.json");
-    expect(resolveObservationPath({ HOME: "/home/test" })).toBe("/home/test/.local/state/wm/observations.json");
+    expect(resolveObservationPath({ WM_OBSERVATIONS: "/tmp/custom.json" })).toBe(
+      "/tmp/custom.json",
+    );
+    expect(resolveObservationPath({ XDG_STATE_HOME: "/state" })).toBe(
+      "/state/wm/observations.json",
+    );
+    expect(resolveObservationPath({ HOME: "/home/test" })).toBe(
+      "/home/test/.local/state/wm/observations.json",
+    );
   });
 
   test("atomically round-trips observations and rejects stale revisions", async () => {
@@ -137,7 +189,9 @@ describe("file observation store", () => {
     expect(initial.document).toEqual(emptyObservationDocument());
 
     const saved = await Effect.runPromise(store.save(initial.revision, documentWithMaximum(723)));
-    expect((await Effect.runPromise(store.load())).document.profiles[0]?.constraints.maxWidth).toBe(723);
+    expect((await Effect.runPromise(store.load())).document.profiles[0]?.constraints.maxWidth).toBe(
+      723,
+    );
 
     const conflict = await Effect.runPromise(
       Effect.either(store.save(initial.revision, documentWithMaximum(800))),
@@ -153,7 +207,9 @@ describe("file observation store", () => {
     const file = path.join(directory, "observations.json");
     const store = createFileObservationStore(file);
     const initial = await Effect.runPromise(store.load());
-    const fiber = Effect.runFork(Stream.runCollect(Stream.take(store.changes(initial.revision), 1)));
+    const fiber = Effect.runFork(
+      Stream.runCollect(Stream.take(store.changes(initial.revision), 1)),
+    );
     await new Promise((resolve) => setTimeout(resolve, 20));
     fs.writeFileSync(file, `${JSON.stringify(documentWithMaximum(723))}\n`, { mode: 0o600 });
 
@@ -169,7 +225,9 @@ describe("file observation store", () => {
     const initial = await Effect.runPromise(store.load());
     fs.writeFileSync(file, `${JSON.stringify(documentWithMaximum(723))}\n`, { mode: 0o600 });
 
-    const changes = await Effect.runPromise(Stream.runCollect(Stream.take(store.changes(initial.revision), 1)));
+    const changes = await Effect.runPromise(
+      Stream.runCollect(Stream.take(store.changes(initial.revision), 1)),
+    );
 
     expect(Array.from(changes)[0]?.document.profiles[0]?.constraints.maxWidth).toBe(723);
     fs.rmSync(directory, { recursive: true, force: true });
@@ -182,8 +240,9 @@ describe("file observation store", () => {
     const initial = await Effect.runPromise(store.load());
     const valid = await Effect.runPromise(store.save(initial.revision, documentWithMaximum(723)));
     let changes = 0;
-    const fiber = Effect.runFork(Stream.runForEach(store.changes(valid.revision), () =>
-      Effect.sync(() => changes += 1)));
+    const fiber = Effect.runFork(
+      Stream.runForEach(store.changes(valid.revision), () => Effect.sync(() => (changes += 1))),
+    );
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     fs.writeFileSync(file, "invalid\n", { mode: 0o600 });
@@ -218,13 +277,26 @@ describe("file observation store", () => {
     const loaded = await Effect.runPromise(createFileObservationStore(file).load());
 
     expect(loaded.document).toEqual(emptyObservationDocument());
-    expect(fs.readdirSync(directory).some((entry) => entry.startsWith("observations.json.corrupt-")))
-      .toBe(true);
+    expect(
+      fs.readdirSync(directory).some((entry) => entry.startsWith("observations.json.corrupt-")),
+    ).toBe(true);
     fs.rmSync(directory, { recursive: true, force: true });
   });
 });
 
 describe("parseArgs / buildCommand", () => {
+  test("contextual help shares command and argument descriptions", () => {
+    expect(helpFor(["workspace", "move-window"])).toContain("The name of a workspace.");
+    expect(helpFor(["workspace", "move-window"])).toContain("window ID");
+    expect(helpFor(["service", "start"])).toContain(
+      "Start the window manager and manage the current desktop.",
+    );
+    expect(helpFor([])).toBe(USAGE);
+  });
+  test("does not silently discard reserved-property flags", () => {
+    expect(parseArgs(["retile", "--__proto__"]).command).toBeNull();
+    expect(parseArgs(["workspace", "move-window", "A", "--__proto__"]).command).toBeNull();
+  });
   test("human-friendly keybind actions map directly to engine commands", () => {
     expect(buildKeybindCommand("window move workspace S")).toEqual({
       type: "moveFocusedWindowToWorkspace",
@@ -287,6 +359,13 @@ describe("parseArgs / buildCommand", () => {
     expect(parsed.serve).toBe(true);
     expect(parsed.flags["port"]).toBe("9999");
     expect(parsed.command).toBeNull();
+  });
+
+  test("host flags do not alter command syntax", () => {
+    expect(parseArgs(["state", "--url", "ws://127.0.0.1:17832"]).command).toEqual({
+      type: "getState",
+    });
+    expect(parseArgs(["state", "--unknown"]).command).toBeNull();
   });
 });
 
