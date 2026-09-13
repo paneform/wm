@@ -1,3 +1,4 @@
+import { isHeroActionEnabled } from "./feature-flags.js";
 import type { ActionArbiter } from "./action-arbiter.js";
 import { DEMO_DURATION, demoTimeline, type DemoCue, type DemoCueAction } from "./demo-timeline.js";
 import type { HeroActionResult, HeroSimulation } from "./create-hero-simulation.js";
@@ -78,7 +79,7 @@ export function createDemoRunner(options: {
   onSnapshot?: (snapshot: HeroActionResult["snapshot"]) => void;
 }): DemoRunner {
   const scheduler = options.scheduler ?? defaultScheduler;
-  const cues = options.cues ?? demoTimeline;
+  const cues = (options.cues ?? demoTimeline).filter(({ action }) => isHeroActionEnabled(action));
   let controller: AbortController | null = null;
   let cursor = 0;
 

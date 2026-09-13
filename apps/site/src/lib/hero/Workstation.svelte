@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { heroFeatures } from "./feature-flags.js";
   import DisplaySurface from "./DisplaySurface.svelte";
   import DesktopDisplay from "../desktop/DesktopDisplay.svelte";
   import Laptop from "../desktop/Laptop.svelte";
@@ -66,12 +67,12 @@
   } = $props();
 
   const hasStudio = $derived(
-    fallback ||
+    heroFeatures.secondMonitor && (fallback ||
       phase === "monitor" ||
       phase === "connected" ||
       phase === "powered" ||
       phase === "complete" ||
-      Boolean(snapshot?.state.topology.some(({ id }) => id === STUDIO_DISPLAY_ID)),
+      Boolean(snapshot?.state.topology.some(({ id }) => id === STUDIO_DISPLAY_ID))),
   );
   const powered = $derived(fallback || phase === "powered" || phase === "complete");
   const open = $derived(fallback || phase !== "closed");
@@ -101,6 +102,7 @@
   class:powered
   class="scene"
 >
+  {#if heroFeatures.secondMonitor}
   <svg class="cable cable-wide" viewBox="0 0 1760 1100" aria-hidden="true">
     <path pathLength="1" d="M 660 380 C 690 500, 740 560, 790 550" />
     <circle cx="660" cy="380" r="8" />
@@ -124,6 +126,7 @@
           />
   {/snippet}
   <DesktopDisplay class="studio" screen={studioScreen} {powered} {paused} />
+  {/if}
 
   {#snippet laptopScreen()}
             <DisplaySurface

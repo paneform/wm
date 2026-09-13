@@ -782,8 +782,7 @@
 		</div>
 
 		<p class="visually-hidden">
-			Workstation simulation. Browser workspace B is on the MacBook.
-			Terminal workspace T is on the external display.
+			Interactive workstation simulation showing window tiling and switching workspaces.
 		</p>
 		<p
 			class="visually-hidden"
