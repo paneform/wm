@@ -61,6 +61,7 @@ export type HeroActionResult =
 
 export interface HeroSimulation {
   snapshot(): Promise<HeroCommittedSnapshot>;
+  updateMacBookWorkArea(area: HeroWindowFrame): Promise<HeroActionResult>;
   activateApp(app: HeroAppTitle): Promise<HeroActionResult>;
   closeWindow(app: HeroAppTitle): Promise<HeroActionResult>;
   focusWindow(app: HeroAppTitle): Promise<HeroActionResult>;
@@ -345,6 +346,10 @@ export async function createHeroSimulation(): Promise<HeroSimulation> {
 
   return {
     snapshot: read,
+    updateMacBookWorkArea: (area) => result(async () => {
+      sim.updateWorkArea(MACBOOK_DISPLAY_ID, area);
+      if (wmRunning) await reconcile();
+    }),
     activateApp: (app) =>
       result(async () => {
         if (app === "Paneform") {

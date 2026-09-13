@@ -9,7 +9,7 @@ export interface DisplayPreset {
 // These are the logical-point geometries used by the original /wm devices.
 export const laptopDisplayPreset: DisplayPreset = {
   frame: { x: 0, y: 0, width: 1512, height: 982 },
-  workArea: { x: 0, y: 44, width: 1512, height: 780 },
+  workArea: { x: 0, y: 44, width: 1512, height: 982 - 44 },
   scale: 2,
 };
 

@@ -53,7 +53,7 @@ describe("hero simulation", () => {
       const snapshot = await simulation.snapshot();
       expect(snapshot.state.topology.map(({ id }) => id)).toEqual([MACBOOK_DISPLAY_ID]);
       expect(snapshot.state.workspaces.map(({ name }) => name)).toEqual(HERO_WORKSPACES);
-      expect(macBookDisplay.workArea).toEqual({ x: 0, y: 44, width: 1512, height: 780 });
+      expect(macBookDisplay.workArea).toEqual({ x: 0, y: 44, width: 1512, height: 938 });
       expect(snapshot.wmRunning).toBe(false);
       expect(snapshot.state.windows).toEqual([]);
     } finally {
@@ -366,4 +366,24 @@ describe("hero simulation", () => {
       await simulation.dispose();
     }
   });
+});
+
+
+it("retiles the MacBook when the measured dock changes the work area", async () => {
+  const simulation = await createHeroSimulation();
+  try {
+    await fastForwardHeroSimulation(simulation);
+    for (const height of [810, 880]) {
+      const area = { x: 0, y: 44, width: 1512, height };
+      const result = await simulation.updateMacBookWorkArea(area);
+      expect(result.ok).toBe(true);
+      const snapshot = await simulation.snapshot();
+      expect(snapshot.state.topology.find(d => d.id === macBookDisplay.id)?.workArea).toEqual(area);
+      const workspace = snapshot.state.workspaces.find(w => w.visibleOnDisplay === macBookDisplay.id);
+      const windows = snapshot.state.windows.filter(w => w.managed && !w.parked && w.workspace === workspace?.name);
+      expect(windows.length).toBeGreaterThan(0);
+      for (const window of windows) expect(window.frame.y + window.frame.height).toBeLessThanOrEqual(area.y + area.height);
+      expect(Math.max(...windows.map(w => w.frame.y + w.frame.height))).toBeGreaterThan(area.y + area.height - 32);
+    }
+  } finally { await simulation.dispose(); }
 });

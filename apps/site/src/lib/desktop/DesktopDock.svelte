@@ -3,7 +3,7 @@
   import { measureDock, type DockMetrics } from "./dock-layout.js";
   import type { DockItem, Frame } from "./desktop-model.js";
 
-  let { items, interactive = false, cursorApp = null, hoveredApp = null, onactivate, frame, workArea }: {
+  let { items, interactive = false, cursorApp = null, hoveredApp = null, onactivate, frame, workArea, onworkareachange }: {
     items: readonly DockItem[];
     interactive?: boolean;
     cursorApp?: string | null;
@@ -11,13 +11,14 @@
     onactivate?: (id: string) => void;
     frame?: Frame;
     workArea?: Frame;
+    onworkareachange?: ((area: Frame) => void) | undefined;
   } = $props();
   const instanceId = $props.id();
   let dock = $state<HTMLElement>();
   let metrics = $state<DockMetrics | null>(null);
 
   $effect(() => {
-    if (!frame || !workArea || !dock) { metrics = null; return; }
+    if (onworkareachange || !frame || !workArea || !dock) { metrics = null; return; }
     const parent = dock.parentElement;
     if (!parent) return;
     const update = () => { metrics = measureDock(frame, workArea, parent.clientWidth, parent.clientHeight, items.length); };
@@ -25,6 +26,38 @@
     observer.observe(parent);
     update();
     return () => observer.disconnect();
+  });
+
+  $effect(() => {
+    if (!dock || !frame || !workArea || !onworkareachange) return;
+    const element = dock;
+    const parent = element.parentElement;
+    if (!parent) return;
+    const displayFrame = frame;
+    const baseArea = workArea;
+    const notify = onworkareachange;
+    let lastHeight = -1;
+    let pending = 0;
+    const update = () => {
+      cancelAnimationFrame(pending);
+      pending = requestAnimationFrame(() => {
+        if (parent.clientHeight <= 0) return;
+        // Local layout coordinates remain correct while the laptop tilts in 3D.
+        // offsetTop includes the dock's height, border, padding and bottom spacing.
+        const top = element.offsetTop - (parseFloat(getComputedStyle(element).marginTop) || 0);
+        const bottom = displayFrame.y + top / parent.clientHeight * displayFrame.height;
+        const height = Math.max(0, Math.floor(bottom - baseArea.y));
+        if (height === lastHeight) return;
+        lastHeight = height;
+        notify({ ...baseArea, height });
+      });
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(parent);
+    observer.observe(element);
+    window.addEventListener("resize", update);
+    update();
+    return () => { observer.disconnect(); window.removeEventListener("resize", update); cancelAnimationFrame(pending); };
   });
 </script>
 
@@ -42,7 +75,7 @@
 
 <style>
   .dock { --dock-icon-background: color-mix(in srgb, var(--color-surface-raised) var(--opacity-88), transparent); display: flex; justify-content: center; gap: var(--dock-gap); }
-  .dock.screen-dock { --dock-icon-size: var(--measured-dock-icon-size); --dock-gap: var(--measured-dock-gap); --dock-padding: var(--measured-dock-padding); --dock-screen-bottom: var(--measured-dock-bottom); --dock-indicator-offset: var(--measured-dock-indicator-offset); border-width: var(--measured-dock-border); }
+  .dock.screen-dock.measured { --dock-icon-size: var(--measured-dock-icon-size); --dock-gap: var(--measured-dock-gap); --dock-padding: var(--measured-dock-padding); --dock-screen-bottom: var(--measured-dock-bottom); --dock-indicator-offset: var(--measured-dock-indicator-offset); border-width: var(--measured-dock-border); }
   .screen-dock { position: absolute; z-index: var(--layer-screen-dock); inset: auto 50% var(--dock-screen-bottom) auto; transform: translateX(50%); backface-visibility: hidden; will-change: transform; padding: var(--dock-padding); border: var(--stroke-hairline) solid var(--color-line-default); border-radius: var(--radius-control); background: var(--color-window-background); pointer-events: auto; }
   button { position: relative; display: grid; width: var(--dock-icon-size); aspect-ratio: 1; place-items: center; border: 0; border-radius: var(--radius-small); padding: 0; background: var(--dock-icon-background); box-shadow: inset 0 var(--stroke-hairline) var(--space-1) color-mix(in srgb, var(--color-page-foreground) 8%, transparent), 0 var(--stroke-hairline) var(--space-2) color-mix(in srgb, var(--rp-base) 24%, transparent); color: var(--color-page-foreground); transition: background var(--motion-feedback) var(--easing-standard), box-shadow var(--motion-feedback) var(--easing-standard), transform var(--motion-feedback) var(--easing-standard); }
   .dock-icon { display: block; width: var(--dock-glyph-size); aspect-ratio: 1; pointer-events: none; }

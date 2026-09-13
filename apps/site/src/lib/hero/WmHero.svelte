@@ -42,6 +42,16 @@
 		client: SimulationClient | null;
 	}
 
+	let measuredWorkArea: HeroWindowFrame | null = null;
+	async function updateWorkArea(area: HeroWindowFrame) {
+		measuredWorkArea = area;
+		const current = session;
+		if (!current) return;
+		const result = await current.simulation.updateMacBookWorkArea(area);
+		if (current !== session) return;
+		if (result.ok) snapshot = result.snapshot;
+		else failInteractive();
+	}
 	let stage = $state<HTMLElement>();
 	let lifecycle = $state<Lifecycle>("static");
 	let phase = $state<ScenePhase>("closed");
@@ -469,6 +479,7 @@
 			}
 			client = next.client;
 			session = next.session;
+			if (measuredWorkArea) await updateWorkArea(measuredWorkArea);
 			const initialSnapshot = await session.simulation.snapshot();
 			if (!initialSnapshot.valid)
 				throw new Error(
@@ -619,6 +630,7 @@
 			runner?.abort();
 			keyboard.releaseAll();
 			session = await client.replay();
+			if (measuredWorkArea) await updateWorkArea(measuredWorkArea);
 			snapshot = await session.simulation.snapshot();
 			phase = "closed";
 			started = false;
@@ -731,6 +743,7 @@
 				tabindex={ready ? 0 : undefined}
 			>
 				<Workstation
+					onworkareachange={(area) => void updateWorkArea(area)}
 					{snapshot}
 					{phase}
 					controller={keyboard}

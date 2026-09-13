@@ -45,8 +45,10 @@
     onfocusworkspace,
     onmovewindow,
     onresizewindow,
+    onworkareachange,
   }: {
     snapshot: HeroCommittedSnapshot | null;
+    onworkareachange?: (area: HeroWindowFrame) => void;
     phase: ScenePhase;
     controller: KeyboardController;
     interactive?: boolean;
@@ -140,6 +142,7 @@
             />
             <ShortcutReadout {controller} />
             <Dock
+              {onworkareachange}
               {snapshot}
               interactive={macBookDockInteractive}
               {cursorApp}
