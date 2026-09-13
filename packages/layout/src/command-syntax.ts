@@ -1,6 +1,12 @@
 import type { Command } from "./commands.js";
 
 const DIRECTIONS = ["left", "right", "up", "down"] as const;
+const FOCUS_RELATIONS = {
+  left: "to the left of",
+  right: "to the right of",
+  up: "above",
+  down: "below",
+} as const;
 type Direction = (typeof DIRECTIONS)[number];
 
 export type CommandToken =
@@ -150,8 +156,8 @@ export const commandPaths: readonly CommandPath[] = [
       tokens: [literal("window"), literal(action), literal(direction)],
       description:
         action === "focus"
-          ? "Focus the spatial neighbor without edge wrapping."
-          : "Move the focused pane using visible geometry.",
+          ? `Focus the window ${FOCUS_RELATIONS[direction]} the focused window.`
+          : `Move the focused window ${direction}. At the display’s edge, expand it along that edge.`,
     })),
   ),
   {
