@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { untrack, type Snippet } from "svelte";
   import { resizeEdges, resizeFrame, type ResizeEdge } from "../hero/resize-frame.js";
   import { updateWindowStack } from "../hero/window-stack.js";
   import type { Frame, SurfaceWindow } from "./desktop-model.js";
 
-  let { windows, viewport, focusedWindowId, interactive = false, selectable = false, allowMove = true, allowResize = true, motion = true, onfocuswindow, onselectwindow, onclosewindow, onmovewindow, onresizewindow }: {
+  let { contentForWindow, windows, viewport, focusedWindowId, interactive = false, selectable = false, allowMove = true, allowResize = true, motion = true, onfocuswindow, onselectwindow, onclosewindow, onmovewindow, onresizewindow }: {
+    contentForWindow?: (window: SurfaceWindow) => Snippet | undefined;
     windows: readonly SurfaceWindow[]; viewport: Frame; focusedWindowId: string | null; interactive?: boolean; selectable?: boolean; allowMove?: boolean; allowResize?: boolean; motion?: boolean;
     onfocuswindow?: (id: string) => void; onselectwindow?: (id: string) => void; onclosewindow?: (id: string) => void;
     onmovewindow?: (id: string, point: Pick<Frame, "x" | "y">) => Promise<void> | void; onresizewindow?: (id: string, frame: Frame) => Promise<void> | void;
@@ -31,13 +32,14 @@
 
 <div class="display-surface" class:motion>
   {#each windows as window (window.id)}
+    {@const content = contentForWindow?.(window)}
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <div class="managed-window" class:focused={focusedWindowId === window.id} class:dragging={drag?.windowId === window.id} class:movable={interactive && allowMove} style={styleFor(window)} style:z-index={focusedWindowId === window.id ? windowStack.length + 1 : windowStack.indexOf(window.id) + 1} role="group" aria-label={`${window.title} window`} data-window-id={window.id} onpointerdowncapture={(event) => pointerSelect(event, window.id)}>
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
        <div class="window-titlebar" role="toolbar" aria-label={`${window.title} window title bar`} tabindex={interactive || selectable ? 0 : -1} onkeydown={(event) => { if (!event.defaultPrevented && event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); select(window.id); } }} onpointerdown={(event) => start(event, window)} onpointermove={move} onpointerup={(event) => finish(event, true)} onpointercancel={(event) => finish(event, false)}>
         <span class="traffic"><button class="close-window" disabled={!interactive} aria-label={`Close ${window.title}`} onpointerdown={(event) => event.stopPropagation()} onclick={(event) => { event.stopPropagation(); onclosewindow?.(window.id); }}></button><i></i><i></i></span><span>{window.title}</span>
       </div>
-      <span class="app-glyph" aria-hidden="true">{window.title.slice(0, 1)}</span>
+      {#if content}{@render content()}{:else}<span class="app-glyph" aria-hidden="true">{window.title.slice(0, 1)}</span>{/if}
       {#if interactive && allowResize}{#each resizeEdges as edge}<div class="resize-handle resize-{edge}" data-resize-edge={edge} aria-hidden="true" onpointerdown={(event) => start(event, window, edge)} onpointermove={move} onpointerup={(event) => finish(event, true)} onpointercancel={(event) => finish(event, false)}></div>{/each}{/if}
     </div>
   {/each}
