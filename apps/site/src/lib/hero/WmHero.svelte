@@ -10,6 +10,7 @@
 	} from "$lib/design/tokens.js";
 	import Workstation, { type ScenePhase } from "./Workstation.svelte";
 	import PaneformWordmark from "./PaneformWordmark.svelte";
+	import WaitlistForm from "./WaitlistForm.svelte";
 	import type { ActionArbiter } from "./action-arbiter.js";
 	import type { DemoRunner, DemoRunResult } from "./demo-runner.js";
 	import type { DemoCue } from "./demo-timeline.js";
@@ -29,10 +30,6 @@
 		SimulationSession,
 	} from "./simulation-client.js";
 
-	let {
-		waitlistUrl,
-		privacyUrl,
-	}: { waitlistUrl: string; privacyUrl: string } = $props();
 
 	type Lifecycle =
 		| "static"
@@ -714,15 +711,9 @@
 			<div class="wordmark"><PaneformWordmark clipId="paneform-hero-clip" /></div>
 			<h1 id="wm-heading">no more<br />window panes</h1>
 			<p class="description">
-				A minimal tiling window manager. wm learns your windows and
-				adapts to them so you don't have to.
+				A minimal tiling window manager<br /><em>that just works</em>.
 			</p>
-			<div class="actions">
-				<a class="primary-action" href={waitlistUrl}
-					>Join the waitlist</a
-				>
-				<a class="privacy" href={privacyUrl}>Privacy</a>
-			</div>
+			<WaitlistForm />
 			<p class="support">Apple silicon. Current macOS.</p>
 		</div>
 
@@ -868,37 +859,14 @@
 		overflow-wrap: anywhere;
 	}
 
-	.actions {
-		display: flex;
-		align-items: center;
-		gap: var(--space-4);
-		margin-block: var(--space-5) var(--space-3);
-	}
-
-	.primary-action,
 	.stage-controls button {
 		min-height: var(--control-target);
 		border: var(--stroke-hairline) solid transparent;
 		border-radius: var(--radius-control);
 		background: var(--color-action-background);
 		color: var(--color-action-foreground);
-		font: var(--type-weight-strong) var(--type-size-control) / 1
-			var(--type-family-product);
+		font: var(--type-weight-strong) var(--type-size-control) / 1 var(--type-family-product);
 	}
-
-	.primary-action {
-		display: inline-flex;
-		align-items: center;
-		padding-inline: var(--space-4);
-		text-decoration: none;
-	}
-	.privacy {
-		color: var(--color-page-secondary);
-		font-size: var(--type-size-control);
-		text-underline-offset: var(--space-1);
-	}
-	.primary-action:focus-visible,
-	.privacy:focus-visible,
 	.stage-controls button:focus-visible {
 		outline: var(--stroke-strong) solid var(--color-focus-ring);
 		outline-offset: var(--space-1);
@@ -983,11 +951,13 @@
 			grid-template-rows: 1fr auto;
 		}
 		.copy {
-			position: absolute;
-			inset: var(--copy-wide-top) auto auto 0;
+			grid-area: 1 / 1;
+			align-self: end;
+			margin-block: 35svh var(--space-5);
 			width: var(--copy-wide-width);
 		}
 		.stage-shell {
+			grid-column: 1;
 			grid-row: 1 / 3;
 			min-height: var(--hero-min-height);
 		}

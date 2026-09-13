@@ -18,7 +18,7 @@ const config = {
         "script-src": ["self"],
         "style-src": ["self", "unsafe-inline"],
         "img-src": ["self", "data:"],
-        "connect-src": ["self"],
+        "connect-src": ["self", "https://app.loops.so"],
         "font-src": ["self"],
         "base-uri": ["none"],
         "object-src": ["none"],

@@ -47,6 +47,3 @@ jobs:
 
       - name: Build
         run: pnpm --filter @paneform/layout --filter @paneform/layout-browser --filter @paneform/site build
-        env:
-          PUBLIC_WAITLIST_URL: https://example.test/waitlist
-          PUBLIC_PRIVACY_URL: https://example.test/privacy

@@ -1,7 +1,6 @@
 <script lang="ts">
   import WmHero from "$lib/hero/WmHero.svelte";
 
-  let { data } = $props();
 </script>
 
 <svelte:head>
@@ -13,4 +12,4 @@
   <link rel="canonical" href="https://paneform.com/wm" />
 </svelte:head>
 
-<WmHero waitlistUrl={data.waitlistUrl} privacyUrl={data.privacyUrl} />
+<WmHero />

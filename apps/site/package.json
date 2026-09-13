@@ -11,7 +11,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "pretypecheck": "pnpm generate:hero-snapshot",
-    "typecheck": "PUBLIC_WAITLIST_URL=https://example.test/waitlist PUBLIC_PRIVACY_URL=https://example.test/privacy svelte-kit sync && PUBLIC_WAITLIST_URL=https://example.test/waitlist PUBLIC_PRIVACY_URL=https://example.test/privacy svelte-check --tsconfig ./tsconfig.json",
+    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "pretest": "pnpm generate:hero-snapshot",
     "test": "vitest run",
     "lint": "oxlint src scripts test vite.config.ts svelte.config.js",
