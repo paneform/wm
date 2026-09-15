@@ -23,6 +23,11 @@ create a production deployment with production environment settings instead.
 
 ## Vercel
 
+The `paneform` Vercel project is connected to `https://github.com/paneform/wm`.
+Pushes to `main` trigger production deployments; other branches create previews.
+Release through the repository, not manual CLI source uploads. The production
+domain is `paneform.com`; deployment URLs and previews use Vercel authentication.
+
 - Project root: `apps/site`.
 - Include source files outside the root directory: enabled (workspace packages).
 - Framework: SvelteKit. Build command: `pnpm run build` (includes snapshot generation).
