@@ -63,7 +63,7 @@ const rows: KeySource[][] = [
     key("backquote", "Backquote", "`", undefined, "~"),
     ...Array.from({ length: 10 }, (_, index) => {
       const digit = String((index + 1) % 10);
-      return key(digit, `Digit${digit}`, digit);
+      return key(digit, `Digit${digit}`, digit, undefined, "!@#$%^&*()"[index]);
     }),
     key("minus", "Minus", "-", undefined, "_"),
     key("equal", "Equal", "=", undefined, "+"),
@@ -206,10 +206,10 @@ export const tokens = {
     bedWidth,
     bedHeight: functionHeight + gap + 5 + gap * 4,
     stroke: 0.01,
-    touchIdSize: 0.45,
+    touchIdSize: 0.6,
     functionHeight,
-    labelSize: 0.56,
-    shiftLabelSize: 0.56,
+    labelSize: 0.6,
+    shiftLabelSize: 0.6,
     alternateLabelSize: 0.34,
   },
   motion: {

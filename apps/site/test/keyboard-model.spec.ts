@@ -90,6 +90,12 @@ describe("canonical keyboard model", () => {
     expect(keyboardKeys.find((key) => key.id === "a")?.legend).toBe("A");
   });
 
+  it("pairs number keys with their ANSI shifted symbols", () => {
+    const numbers = keyboardKeys.filter((key) => key.code?.startsWith("Digit"));
+    expect(numbers.map((key) => key.legend).join("")).toBe("1234567890");
+    expect(numbers.map((key) => key.alternateLegend).join("")).toBe("!@#$%^&*()");
+  });
+
   it("keeps every cap inside the tokenized keyboard bed", () => {
     for (const key of keyboardKeys) {
       expect(key.x).toBeGreaterThanOrEqual(0);
