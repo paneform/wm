@@ -8,8 +8,12 @@ dist/
 packages/layout-browser/playground-dist/
 apps/site/.svelte-kit/
 apps/site/build/
+.vercel/
+.env*
+!.env.example
 *.tsbuildinfo
 xcuserdata/
 DerivedData/
 packages/platform-macos/sidecar/.build/
 packages/platform-macos/sidecar/.swiftpm/
+.vercel

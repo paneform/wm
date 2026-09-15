@@ -47,3 +47,6 @@ jobs:
 
       - name: Build
         run: pnpm --filter @paneform/layout --filter @paneform/layout-browser --filter @paneform/site build
+
+      - name: Check site release boundaries
+        run: pnpm --filter @paneform/site check:release

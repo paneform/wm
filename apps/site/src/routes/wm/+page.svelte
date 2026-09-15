@@ -1,15 +1,12 @@
 <script lang="ts">
   import WmHero from "$lib/hero/WmHero.svelte";
-
+  import SocialMetadata from "$lib/hero/SocialMetadata.svelte";
 </script>
 
-<svelte:head>
-  <title>Paneform WM | Every window in its place</title>
-  <meta
-    name="description"
-    content="A reliability-first tiling window manager for macOS. Group windows into workspaces, then move the whole workspace between displays."
-  />
-  <link rel="canonical" href="https://paneform.com/wm" />
-</svelte:head>
+<SocialMetadata
+  title="Paneform WM | Every window in its place"
+  description="A reliability-first tiling window manager for macOS. Group windows into workspaces, then move the whole workspace between displays."
+  canonical="https://paneform.com/wm/"
+/>
 
 <WmHero />

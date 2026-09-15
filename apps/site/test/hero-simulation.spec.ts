@@ -70,11 +70,22 @@ describe("hero simulation", () => {
       for (const app of ["Terminal", "Browser", "Text Editor"] as const)
         await simulation.activateApp(app);
       const initial = await simulation.snapshot();
-      expect(new Set(initial.state.windows.map(({ frame }) => frame.width)).size).toBeGreaterThan(1);
-      expect(initial.state.windows.some((a, i, windows) => windows.slice(i + 1).some((b) =>
-        a.frame.x < b.frame.x + b.frame.width && b.frame.x < a.frame.x + a.frame.width &&
-        a.frame.y < b.frame.y + b.frame.height && b.frame.y < a.frame.y + a.frame.height,
-      ))).toBe(true);
+      expect(new Set(initial.state.windows.map(({ frame }) => frame.width)).size).toBeGreaterThan(
+        1,
+      );
+      expect(
+        initial.state.windows.some((a, i, windows) =>
+          windows
+            .slice(i + 1)
+            .some(
+              (b) =>
+                a.frame.x < b.frame.x + b.frame.width &&
+                b.frame.x < a.frame.x + a.frame.width &&
+                a.frame.y < b.frame.y + b.frame.height &&
+                b.frame.y < a.frame.y + a.frame.height,
+            ),
+        ),
+      ).toBe(true);
       await simulation.activateApp("Paneform");
       await simulation.moveDirection("right");
       const arranged = await simulation.snapshot();
@@ -101,7 +112,11 @@ describe("hero simulation", () => {
       expect(final.state.focusedWorkspace).toBe("W");
       expect(final.apps.Settings).not.toBeNull();
       expect(final.state.focusedWindow).toBe(final.apps.Settings);
-      expect(final.state.windows.find(({ id }) => id === final.apps.Settings)).toMatchObject({ workspace: "W", parked: false, managed: true });
+      expect(final.state.windows.find(({ id }) => id === final.apps.Settings)).toMatchObject({
+        workspace: "W",
+        parked: false,
+        managed: true,
+      });
       expect(final.state.topology.map(({ id }) => id)).not.toContain(STUDIO_DISPLAY_ID);
       expect(final.state.workspaces.find(({ name }) => name === "W")?.visibleOnDisplay).toBe(
         MACBOOK_DISPLAY_ID,
@@ -113,7 +128,10 @@ describe("hero simulation", () => {
       expect(waitlist.frame.y).toBe(settings.frame.y);
       expect(waitlist.frame.x + waitlist.frame.width).toBeLessThanOrEqual(settings.frame.x);
       expect(final.apps.Browser).not.toBeNull();
-      expect(final.state.windows.find(({ id }) => id === final.apps.Browser)).toMatchObject({ workspace: "1", parked: true });
+      expect(final.state.windows.find(({ id }) => id === final.apps.Browser)).toMatchObject({
+        workspace: "1",
+        parked: true,
+      });
       expect(final.state.windows.find(({ id }) => id === final.apps.Terminal)?.workspace).toBe("T");
     } finally {
       await simulation.dispose();
@@ -151,7 +169,9 @@ describe("hero simulation", () => {
       expect(result.ok).toBe(true);
       expect(result.snapshot.state.focusedWorkspace).toBe("W");
       expect(result.snapshot.state.focusedWindow).toBe(result.snapshot.apps.Waitlist);
-      expect(result.snapshot.state.workspaces.find(({ name }) => name === "W")?.visibleOnDisplay).toBe(MACBOOK_DISPLAY_ID);
+      expect(
+        result.snapshot.state.workspaces.find(({ name }) => name === "W")?.visibleOnDisplay,
+      ).toBe(MACBOOK_DISPLAY_ID);
     } finally {
       await simulation.dispose();
     }
@@ -446,7 +466,6 @@ describe("hero simulation", () => {
   });
 });
 
-
 it("retiles the MacBook when the measured dock changes the work area", async () => {
   const simulation = await createHeroSimulation();
   try {
@@ -456,12 +475,23 @@ it("retiles the MacBook when the measured dock changes the work area", async () 
       const result = await simulation.updateMacBookWorkArea(area);
       expect(result.ok).toBe(true);
       const snapshot = await simulation.snapshot();
-      expect(snapshot.state.topology.find(d => d.id === macBookDisplay.id)?.workArea).toEqual(area);
-      const workspace = snapshot.state.workspaces.find(w => w.visibleOnDisplay === macBookDisplay.id);
-      const windows = snapshot.state.windows.filter(w => w.managed && !w.parked && w.workspace === workspace?.name);
+      expect(snapshot.state.topology.find((d) => d.id === macBookDisplay.id)?.workArea).toEqual(
+        area,
+      );
+      const workspace = snapshot.state.workspaces.find(
+        (w) => w.visibleOnDisplay === macBookDisplay.id,
+      );
+      const windows = snapshot.state.windows.filter(
+        (w) => w.managed && !w.parked && w.workspace === workspace?.name,
+      );
       expect(windows.length).toBeGreaterThan(0);
-      for (const window of windows) expect(window.frame.y + window.frame.height).toBeLessThanOrEqual(area.y + area.height);
-      expect(Math.max(...windows.map(w => w.frame.y + w.frame.height))).toBeGreaterThan(area.y + area.height - 32);
+      for (const window of windows)
+        expect(window.frame.y + window.frame.height).toBeLessThanOrEqual(area.y + area.height);
+      expect(Math.max(...windows.map((w) => w.frame.y + w.frame.height))).toBeGreaterThan(
+        area.y + area.height - 32,
+      );
     }
-  } finally { await simulation.dispose(); }
+  } finally {
+    await simulation.dispose();
+  }
 });

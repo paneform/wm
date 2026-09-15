@@ -5,10 +5,7 @@ export const heroFeatures = {
 };
 
 /** Skip both presentation and simulation commands for the external monitor. */
-export function isHeroActionEnabled(
-  action: DemoCueAction,
-  features = heroFeatures,
-): boolean {
+export function isHeroActionEnabled(action: DemoCueAction, features = heroFeatures): boolean {
   if (features.secondMonitor) return true;
   switch (action.type) {
     case "connect-display":

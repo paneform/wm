@@ -346,10 +346,11 @@ export async function createHeroSimulation(): Promise<HeroSimulation> {
 
   return {
     snapshot: read,
-    updateMacBookWorkArea: (area) => result(async () => {
-      sim.updateWorkArea(MACBOOK_DISPLAY_ID, area);
-      if (wmRunning) await reconcile();
-    }),
+    updateMacBookWorkArea: (area) =>
+      result(async () => {
+        sim.updateWorkArea(MACBOOK_DISPLAY_ID, area);
+        if (wmRunning) await reconcile();
+      }),
     activateApp: (app) =>
       result(async () => {
         if (app === "Paneform") {

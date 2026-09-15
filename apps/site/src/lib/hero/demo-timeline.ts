@@ -55,7 +55,10 @@ export const demoTimeline: readonly DemoCue[] = [
   cue("launch-paneform", 6400, 7600, { type: "launch-wm" }, 590),
   cue("layout-hold", 7600, 8800, { type: "hold", state: "tiled-windows" }),
   cue("editor-right", 8800, 10700, { type: "move-direction", direction: "right" }, 350),
-  cue("arrangement-hold", 10700, 11900, { type: "hold", state: "terminal-beside-browser-and-editor" }),
+  cue("arrangement-hold", 10700, 11900, {
+    type: "hold",
+    state: "terminal-beside-browser-and-editor",
+  }),
   cue("editor-left", 11900, 13800, { type: "move-direction", direction: "left" }, 350),
   cue("select-terminal", 13800, 15600, { type: "focus-direction", direction: "up" }, 250),
   cue("terminal-to-t", 15600, 17500, { type: "move-window", workspace: "T" }, 350),
@@ -77,5 +80,6 @@ export function validateDemoTimeline(cues: readonly DemoCue[] = demoTimeline): v
     }
     cursor = current.end;
   }
-  if (cursor !== DEMO_DURATION) throw new Error(`Demo timeline must end at ${DEMO_DURATION} milliseconds`);
+  if (cursor !== DEMO_DURATION)
+    throw new Error(`Demo timeline must end at ${DEMO_DURATION} milliseconds`);
 }

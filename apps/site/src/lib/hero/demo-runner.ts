@@ -80,9 +80,14 @@ export function createDemoRunner(options: {
   onSnapshot?: (snapshot: HeroActionResult["snapshot"]) => void;
 }): DemoRunner {
   const scheduler = options.scheduler ?? defaultScheduler;
-  const cues = (options.cues ?? demoTimeline).filter(({ action }) =>
-    isHeroActionEnabled(action) &&
-    !(options.includeSettings === false && action.type === "activate-app" && action.app === "Settings"),
+  const cues = (options.cues ?? demoTimeline).filter(
+    ({ action }) =>
+      isHeroActionEnabled(action) &&
+      !(
+        options.includeSettings === false &&
+        action.type === "activate-app" &&
+        action.app === "Settings"
+      ),
   );
   const duration = cues.reduce((total, cue) => total + cue.end - cue.start, 0);
   let controller: AbortController | null = null;
