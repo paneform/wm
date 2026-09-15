@@ -16,6 +16,7 @@
       <rect x="33" y="16" width="25" height="24" rx="5" fill="var(--ansi-cyan, var(--pf-cyan))" />
       <rect x="33" y="42" width="25" height="15" rx="5" fill="var(--ansi-white, var(--pf-white))" />
     </g>
+  {:else if icon === "waitlist"}<rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 6 9 7 9-7" />
   {:else if icon === "messages"}<path d="M5 17.5 3.5 21l4.2-1.7a9 9 0 1 0-2.7-1.8Z" />
   {:else if icon === "contacts"}<circle cx="12" cy="8" r="3.5" /><path d="M5.5 20c.7-3.4 3-5.3 6.5-5.3s5.8 1.9 6.5 5.3" />
   {:else if icon === "browser"}<circle cx="12" cy="12" r="9" /><path d="M3.5 9h17M3.5 15h17M12 3c2.2 2.4 3.3 5.4 3.3 9S14.2 18.6 12 21M12 3C9.8 5.4 8.7 8.4 8.7 12s1.1 6.6 3.3 9" />

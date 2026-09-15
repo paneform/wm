@@ -99,8 +99,10 @@
 			? "Pause demo"
 			: lifecycle === "paused"
 				? "Resume demo"
-				: "Replay demo",
+				: "Restart demo",
 	);
+
+	const controlIcon = $derived(lifecycle === "autoplay" ? "pause" : lifecycle === "paused" ? "play" : "restart");
 
 	const keyboard = createKeyboardController({
 		layout: keyboardKeys,
@@ -293,7 +295,7 @@
 			case "focus-workspace": {
 				const gate = commandGate(cue);
 				return keyboard.chord({
-					keys: ["rshift", "b"],
+					keys: ["rshift", cue.action.workspace.toLowerCase()],
 					preHold: tokens.motion.twoKeyPrelude,
 					hold: tokens.motion.twoKeyHold,
 					releaseStagger: tokens.motion.keyReleaseStagger,
@@ -313,6 +315,7 @@
 	async function createRunner(current: SimulationSession) {
 		const { createDemoRunner } = await import("./demo-runner.js");
 		return createDemoRunner({
+			includeSettings: !matchMedia("(max-width: 45rem)").matches,
 			simulation: current.simulation,
 			arbiter: current.arbiter,
 			presentation: {
@@ -364,7 +367,7 @@
 		lifecycle = reducedMotion ? "loading" : "autoplay";
 		status = reducedMotion
 			? "Preparing the reduced-motion interactive state."
-			: "Demo running. The physical keyboard mirrors each command.";
+			: "See how wm arranges your windows.";
 		runner = await createRunner(session);
 		const operation = runner.run({ reducedMotion });
 		activeRun = operation;
@@ -396,7 +399,7 @@
 		}
 		await activeRun;
 		lifecycle = "autoplay";
-		status = "Demo running. The physical keyboard mirrors each command.";
+		status = "See how wm arranges your windows.";
 		const operation = runner.run();
 		activeRun = operation;
 		const result = await operation;
@@ -488,7 +491,7 @@
 			if (!matchMedia("(prefers-reduced-motion: reduce)").matches)
 				snapshot = initialSnapshot;
 			lifecycle = "interactive";
-			status = "Click an app or focus the demo and use the keyboard.";
+			status = "Demo ready.";
 			if (!drainPendingDockApp()) void runDemo();
 		} catch {
 			if (generation !== lifecycleGeneration) {
@@ -715,19 +718,19 @@
 	});
 </script>
 
-<svelte:window onpagehide={() => keyboard.releaseAll()} />
+<svelte:window onpagehide={() => keyboard.releaseAll()} onmessage={(event) => {
+  if (event.origin !== window.location.origin || event.data?.type !== "wm-waitlist-interaction") return;
+  const frame = stage?.querySelector<HTMLIFrameElement>(".waitlist-frame");
+  if (event.source !== frame?.contentWindow) return;
+  if (lifecycle === "autoplay" || lifecycle === "paused") pauseDemo(false);
+}} />
 
-<main>
+<main class="wm-landing">
 	<section class="hero" aria-labelledby="wm-heading">
-		<div class="copy">
+		<header class="hero-header">
 			<div class="wordmark"><PaneformWordmark clipId="paneform-hero-clip" /></div>
-			<h1 id="wm-heading">no more<br />window panes</h1>
-			<p class="description">
-				A minimal tiling window manager<br /><em>that just works</em>.
-			</p>
-			<WaitlistForm />
-			<p class="support">Apple silicon. Current macOS.</p>
-		</div>
+			<h1 id="wm-heading" class="visually-hidden">paneform wm interactive demo</h1>
+		</header>
 
 		<div class="stage-shell">
 			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -762,25 +765,30 @@
 					onmovewindow={(app, point) => moveWindow(app, point)}
 					onresizewindow={(app, frame) => resizeWindow(app, frame)}
 				/>
-			</div>
-
-			<div class="stage-controls">
-				<p
-					id="stage-instructions"
-					class:visible={ready}
-					aria-hidden={!ready}
-				>
-					Click an app or focus the demo and use the keyboard.
-				</p>
-				<div class="status-group">
-					<p class="visual-status">{status}</p>
-					<button disabled={!ready} onclick={toggleDemo}
-						>{controlLabel}</button
-					>
+				<div class="demo-control" class:available={ready}>
+					<button disabled={!ready} onclick={toggleDemo} aria-label={controlLabel} aria-describedby="demo-control-help">
+						<svg viewBox="0 0 24 24" aria-hidden="true">
+							{#if controlIcon === "pause"}
+								<path d="M9 5v14M15 5v14" />
+							{:else if controlIcon === "play"}
+								<path d="m9 5 11 7-11 7Z" />
+							{:else}
+								<path d="M4 10a8 8 0 1 1 1.5 7M4 4v6h6" />
+							{/if}
+						</svg>
+					</button>
+					<span class="control-tooltip" id="demo-control-help" role="tooltip">
+						<strong>{controlLabel}</strong>
+						<span>{status}</span>
+					</span>
 				</div>
 			</div>
+
 		</div>
 
+		<p id="stage-instructions" class="visually-hidden">
+			Click an app or focus the demo and use the keyboard.
+		</p>
 		<p class="visually-hidden">
 			Interactive workstation simulation showing window tiling and switching workspaces.
 		</p>
@@ -793,6 +801,11 @@
 			{liveStatus}
 		</p>
 	</section>
+  <footer id="waitlist-signup" class="stage-controls" onfocusin={() => { if (lifecycle === "autoplay" || lifecycle === "paused") pauseDemo(false); }}>
+    <p>Built for macOS on Apple silicon.</p>
+    {#if lifecycle === "failed"}<p role="status">{status}</p>{/if}
+    <div class="footer-form"><WaitlistForm compact /></div>
+  </footer>
 </main>
 
 <svelte:head>
@@ -809,97 +822,98 @@
 </svelte:head>
 
 <style>
+	:global(html:has(.wm-landing)), :global(body:has(.wm-landing)) { min-width: 0; height: 100%; overflow: hidden; }
 	main {
+		display: grid;
+		grid-template-rows: minmax(0, 1fr) auto;
+		height: 100svh;
 		width: 100%;
 		max-width: 100vw;
-		min-height: var(--hero-min-height);
+		min-height: 0;
 	}
 
 	.hero {
 		position: relative;
 		display: grid;
 		grid-template-columns: minmax(0, 1fr);
+		grid-template-rows: auto minmax(0, 1fr);
 		width: 100%;
 		max-width: 100vw;
-		min-height: var(--hero-min-height);
+		min-height: 0;
 		overflow: hidden;
 		container: hero / inline-size;
 	}
 
-	.copy {
-		z-index: var(--layer-readout);
-		width: 100%;
-		min-width: 0;
-		padding: var(--page-gutter) var(--page-gutter) 0;
-		pointer-events: none;
+  .hero-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: var(--space-5) var(--page-gutter); }
+  .wordmark { width: min(11rem, 42vw); }
+  .wordmark :global(svg) { width: 100%; }
+  .footer-form { width: min(100%, 30rem); min-width: 0; }
+  .stage { --laptop-intro-wide-width: 68%; --laptop-intro-wide-left: 16%; --laptop-intro-wide-top: 44%; }
+  .stage :global(.scene) { width: min(100%, 130cqh); aspect-ratio: 1.3; margin: auto; --laptop-solo-width: 68%; --laptop-solo-top: 44%; }
+
+	.demo-control {
+		position: absolute;
+		right: var(--page-gutter);
+		top: var(--space-4);
+		z-index: var(--layer-controls);
+		visibility: hidden;
 	}
-
-	.copy > * {
-		pointer-events: auto;
-	}
-
-	.support {
-		margin: 0;
-		color: var(--color-page-quiet);
-		font-size: var(--type-size-label);
-		font-weight: var(--type-weight-medium);
-		letter-spacing: var(--type-tracking-label);
-		text-transform: uppercase;
-	}
-
-	.wordmark {
-		width: min(11rem, 42vw);
-	}
-
-	.wordmark :global(svg) { width: 100%; }
-
-	h1 {
-		max-width: var(--copy-measure);
-		margin: var(--space-3) 0 var(--space-4);
-		font-size: var(--type-size-hero);
-		font-weight: var(--type-weight-strong);
-		letter-spacing: var(--type-tracking-hero);
-		line-height: var(--type-leading-hero);
-	}
-
-	.description {
-		max-width: var(--copy-measure);
-		margin: 0;
-		color: var(--color-page-secondary);
-		font-size: var(--type-size-body);
-		line-height: var(--type-leading-body);
-		overflow-wrap: anywhere;
-	}
-
-	.stage-controls button {
-		min-height: var(--control-target);
+	.demo-control.available { visibility: visible; }
+	.demo-control button {
+		display: grid;
+		place-items: center;
+		width: var(--control-target);
+		height: var(--control-target);
 		border: var(--stroke-hairline) solid transparent;
-		border-radius: var(--radius-control);
-		background: var(--color-action-background);
-		color: var(--color-action-foreground);
-		font: var(--type-weight-strong) var(--type-size-control) / 1 var(--type-family-product);
+		border-radius: 50%;
+		background: transparent;
+		color: var(--color-page-secondary);
+		cursor: pointer;
+		transition: color 160ms, border-color 160ms, background 160ms;
 	}
-	.stage-controls button:focus-visible {
+	.demo-control button:hover { color: var(--rp-rose); border-color: currentColor; background: var(--color-window-background); }
+	.demo-control button:focus-visible {
 		outline: var(--stroke-strong) solid var(--color-focus-ring);
 		outline-offset: var(--space-1);
 	}
+	.demo-control svg { width: 1.1rem; height: 1.1rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+	.control-tooltip {
+		position: absolute;
+		top: calc(100% + var(--space-2));
+		right: 0;
+		width: max-content;
+		max-width: min(17rem, 75vw);
+		padding: var(--space-3);
+		border: var(--stroke-hairline) solid var(--color-line-default);
+		border-radius: var(--radius-control);
+		background: var(--color-window-background);
+		color: var(--color-page-secondary);
+		font-size: var(--type-size-label);
+		line-height: 1.5;
+		visibility: hidden;
+	}
+	.control-tooltip strong { display: block; color: var(--color-page-foreground); }
+	.demo-control.available:hover .control-tooltip,
+	.demo-control.available:focus-within .control-tooltip { visibility: visible; }
 
 	.stage-shell {
 		display: grid;
-		align-content: end;
+		min-height: 0;
 		width: 100%;
 		max-width: 100vw;
 		min-width: 0;
 		overflow: hidden;
-		container: stage / inline-size;
+		container: stage / size;
 	}
 
 	.stage {
+		display: grid;
+		place-items: center;
 		position: relative;
 		width: 100%;
 		max-width: 100vw;
 		min-width: 0;
-		min-height: var(--stage-min-height);
+		min-height: 0;
 		padding-inline: var(--page-gutter);
 		outline: none;
 	}
@@ -925,30 +939,6 @@
 	.stage-controls p {
 		margin: 0;
 	}
-	#stage-instructions {
-		visibility: hidden;
-	}
-	#stage-instructions.visible {
-		visibility: visible;
-	}
-	.status-group {
-		display: flex;
-		align-items: center;
-		justify-content: flex-end;
-		min-width: 0;
-		gap: var(--space-3);
-	}
-	.visual-status {
-		text-align: end;
-	}
-	.stage-controls button {
-		padding-inline: var(--space-3);
-		cursor: pointer;
-	}
-	.stage-controls button:disabled {
-		visibility: hidden;
-	}
-
 	.visually-hidden {
 		position: absolute;
 		width: 1px;
@@ -958,42 +948,13 @@
 		white-space: nowrap;
 	}
 
-	@container hero (min-width: 72rem) {
-		.hero {
-			grid-template-rows: 1fr auto;
-		}
-		.copy {
-			grid-area: 1 / 1;
-			align-self: end;
-			margin-block: 35svh var(--space-5);
-			width: var(--copy-wide-width);
-		}
-		.stage-shell {
-			grid-column: 1;
-			grid-row: 1 / 3;
-			min-height: var(--hero-min-height);
-		}
-		.stage {
-			display: grid;
-			align-items: center;
-			min-height: calc(
-				var(--hero-min-height) - var(--stage-control-height)
-			);
-			padding-block-start: var(--space-8);
-		}
-	}
 
 	@media (max-width: 45rem) {
+		.footer-form { width: min(100%, 30rem); }
 		.stage-controls {
-			align-items: flex-start;
+			align-items: center;
+			text-align: center;
 			flex-direction: column;
-		}
-		.status-group {
-			width: 100%;
-			justify-content: space-between;
-		}
-		.visual-status {
-			text-align: start;
 		}
 	}
 </style>

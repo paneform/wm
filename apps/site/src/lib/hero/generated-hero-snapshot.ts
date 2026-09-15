@@ -170,7 +170,7 @@ export const generatedHeroSnapshot = {
       name: "T",
       mode: "bsp",
       apps: ["Terminal"],
-      visibleOnDisplay: "display:hero-macbook",
+      visibleOnDisplay: null,
     },
     {
       name: "U",
@@ -187,8 +187,8 @@ export const generatedHeroSnapshot = {
     {
       name: "W",
       mode: "bsp",
-      apps: [],
-      visibleOnDisplay: null,
+      apps: ["Waitlist", "Settings"],
+      visibleOnDisplay: "display:hero-macbook",
     },
     {
       name: "X",
@@ -211,6 +211,19 @@ export const generatedHeroSnapshot = {
   ],
   windows: [
     {
+      app: "Waitlist",
+      workspace: "W",
+      frame: {
+        x: 0,
+        y: 44,
+        width: 773,
+        height: 938,
+      },
+      managed: true,
+      floating: false,
+      parked: false,
+    },
+    {
       app: "Browser",
       workspace: "1",
       frame: {
@@ -227,14 +240,14 @@ export const generatedHeroSnapshot = {
       app: "Terminal",
       workspace: "T",
       frame: {
-        x: 0,
-        y: 44,
-        width: 1512,
+        x: -747,
+        y: 930,
+        width: 748,
         height: 938,
       },
       managed: true,
       floating: false,
-      parked: false,
+      parked: true,
     },
     {
       app: "Text Editor",
@@ -249,7 +262,20 @@ export const generatedHeroSnapshot = {
       floating: false,
       parked: true,
     },
+    {
+      app: "Settings",
+      workspace: "W",
+      frame: {
+        x: 789,
+        y: 44,
+        width: 723,
+        height: 938,
+      },
+      managed: true,
+      floating: false,
+      parked: false,
+    },
   ],
-  focusedWorkspace: "T",
-  focusedApp: "Terminal",
+  focusedWorkspace: "W",
+  focusedApp: "Settings",
 } as const satisfies HeroFallbackSnapshot;

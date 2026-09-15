@@ -5,7 +5,7 @@ import { createDemoRunner } from "../src/lib/hero/demo-runner.js";
 import type { HeroActionResult, HeroSimulation } from "../src/lib/hero/create-hero-simulation.js";
 
 describe("hero demo runner", () => {
-  it("executes the reduced-motion path logically without presentation motion", async () => {
+  it.each([true, false])("executes the reduced-motion path with includeSettings=%s", async (includeSettings) => {
     const calls: string[] = [];
     // SAFETY: This partial snapshot is never inspected by the runner under test.
     const success = { ok: true, snapshot: { valid: true } } as HeroActionResult;
@@ -30,6 +30,7 @@ describe("hero demo runner", () => {
       settleFinal: vi.fn(),
     };
     const runner = createDemoRunner({
+      includeSettings,
       simulation,
       arbiter: createActionArbiter(),
       presentation,
@@ -38,22 +39,23 @@ describe("hero demo runner", () => {
 
     await expect(runner.run({ reducedMotion: true })).resolves.toEqual({
       status: "completed",
-      activeTime: 30_000,
+      activeTime: includeSettings ? 22_000 : 20_800,
     });
     expect(presentation.run).not.toHaveBeenCalled();
     expect(presentation.settleFinal).toHaveBeenCalledOnce();
     expect(calls).toEqual([
-      "app:Browser",
       "app:Terminal",
+      "app:Browser",
       "app:Text Editor",
       "execute:launch-paneform",
       "app:Paneform",
-      "app:Browser",
       "move:right",
-      "app:Text Editor",
-      "move:right",
-      "app:Terminal",
+      "move:left",
+      "select:up",
       "window:T",
+      "app:Waitlist",
+      "window:W",
+      ...(includeSettings ? ["app:Settings"] : []),
     ]);
     expect(calls.indexOf("execute:launch-paneform")).toBe(calls.indexOf("app:Paneform") - 1);
   });

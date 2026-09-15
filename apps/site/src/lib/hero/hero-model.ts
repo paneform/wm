@@ -23,6 +23,7 @@ export const HERO_APPS = [
     icon: "paneform",
     bundleId: "com.paneform.wm",
   },
+  { title: "Waitlist", icon: "waitlist", bundleId: "com.paneform.hero.waitlist" },
   { title: "Browser", icon: "browser", bundleId: "com.paneform.hero.browser" },
   {
     title: "Terminal",

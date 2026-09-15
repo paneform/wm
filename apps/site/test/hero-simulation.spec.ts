@@ -8,6 +8,8 @@ import {
   MACBOOK_DISPLAY_ID,
   STUDIO_DISPLAY_ID,
 } from "../src/lib/hero/create-hero-simulation.js";
+import { createDemoRunner } from "../src/lib/hero/demo-runner.js";
+import { createActionArbiter } from "../src/lib/hero/action-arbiter.js";
 import { fastForwardHeroSimulation } from "../src/lib/hero/hero-snapshot.js";
 
 describe("hero simulation", () => {
@@ -32,6 +34,7 @@ describe("hero simulation", () => {
   it("defines dock apps with typed metadata and observed bounds", () => {
     expect(HERO_APPS.map(({ title }) => title)).toEqual([
       "Paneform",
+      "Waitlist",
       "Browser",
       "Terminal",
       "Text Editor",
@@ -61,19 +64,94 @@ describe("hero simulation", () => {
     }
   });
 
-  it("opens bounded windows, starts Paneform, and ends with Terminal on T", async () => {
+  it("starts with scattered windows and reaches the simplified rearrangement", async () => {
+    const simulation = await createHeroSimulation();
+    try {
+      for (const app of ["Terminal", "Browser", "Text Editor"] as const)
+        await simulation.activateApp(app);
+      const initial = await simulation.snapshot();
+      expect(new Set(initial.state.windows.map(({ frame }) => frame.width)).size).toBeGreaterThan(1);
+      expect(initial.state.windows.some((a, i, windows) => windows.slice(i + 1).some((b) =>
+        a.frame.x < b.frame.x + b.frame.width && b.frame.x < a.frame.x + a.frame.width &&
+        a.frame.y < b.frame.y + b.frame.height && b.frame.y < a.frame.y + a.frame.height,
+      ))).toBe(true);
+      await simulation.activateApp("Paneform");
+      await simulation.moveDirection("right");
+      const arranged = await simulation.snapshot();
+      const terminal = arranged.state.windows.find(({ id }) => id === arranged.apps.Terminal)!;
+      const browser = arranged.state.windows.find(({ id }) => id === arranged.apps.Browser)!;
+      const editor = arranged.state.windows.find(({ id }) => id === arranged.apps["Text Editor"])!;
+      expect(terminal.frame.x + terminal.frame.width).toBeLessThanOrEqual(browser.frame.x);
+      expect(browser.frame.x).toBe(editor.frame.x);
+      expect(browser.frame.y + browser.frame.height).toBeLessThanOrEqual(editor.frame.y);
+      expect(arranged.state.focusedWindow).toBe(editor.id);
+      await simulation.moveDirection("left");
+      const focused = await simulation.focusDirection("up");
+      expect(focused.snapshot.state.focusedWindow).toBe(terminal.id);
+    } finally {
+      await simulation.dispose();
+    }
+  });
+
+  it("opens bounded windows, starts Paneform, and ends with Waitlist and Settings side by side on W", async () => {
     const simulation = await createHeroSimulation();
     try {
       const final = await fastForwardHeroSimulation(simulation);
       expect(final.wmRunning).toBe(true);
-      expect(final.state.focusedWorkspace).toBe("T");
+      expect(final.state.focusedWorkspace).toBe("W");
+      expect(final.apps.Settings).not.toBeNull();
+      expect(final.state.focusedWindow).toBe(final.apps.Settings);
+      expect(final.state.windows.find(({ id }) => id === final.apps.Settings)).toMatchObject({ workspace: "W", parked: false, managed: true });
       expect(final.state.topology.map(({ id }) => id)).not.toContain(STUDIO_DISPLAY_ID);
-      expect(final.state.workspaces.find(({ name }) => name === "T")?.visibleOnDisplay).toBe(
+      expect(final.state.workspaces.find(({ name }) => name === "W")?.visibleOnDisplay).toBe(
         MACBOOK_DISPLAY_ID,
       );
-      const browser = final.state.windows.find(({ id }) => id === final.apps.Browser);
-      expect(browser?.workspace).toBe("1");
+      const waitlist = final.state.windows.find(({ id }) => id === final.apps.Waitlist)!;
+      const settings = final.state.windows.find(({ id }) => id === final.apps.Settings)!;
+      expect(waitlist.workspace).toBe("W");
+      expect(waitlist.parked).toBe(false);
+      expect(waitlist.frame.y).toBe(settings.frame.y);
+      expect(waitlist.frame.x + waitlist.frame.width).toBeLessThanOrEqual(settings.frame.x);
+      expect(final.apps.Browser).not.toBeNull();
+      expect(final.state.windows.find(({ id }) => id === final.apps.Browser)).toMatchObject({ workspace: "1", parked: true });
       expect(final.state.windows.find(({ id }) => id === final.apps.Terminal)?.workspace).toBe("T");
+    } finally {
+      await simulation.dispose();
+    }
+  });
+
+  it("ends the mobile demo with only Waitlist filling workspace W", async () => {
+    const simulation = await createHeroSimulation();
+    try {
+      const runner = createDemoRunner({
+        simulation,
+        arbiter: createActionArbiter(),
+        includeSettings: false,
+        presentation: { run: async () => {} },
+      });
+      expect((await runner.run({ reducedMotion: true })).status).toBe("completed");
+      const final = await simulation.snapshot();
+      expect(final.apps.Settings).toBeNull();
+      expect(final.state.focusedWorkspace).toBe("W");
+      expect(final.state.focusedWindow).toBe(final.apps.Waitlist);
+      const visible = final.state.windows.filter(({ parked }) => !parked);
+      expect(visible).toHaveLength(1);
+      expect(visible[0]).toMatchObject({ id: final.apps.Waitlist, frame: macBookDisplay.workArea });
+    } finally {
+      await simulation.dispose();
+    }
+  });
+
+  it("reveals the signup workspace when Waitlist is selected in the dock", async () => {
+    const simulation = await createHeroSimulation();
+    try {
+      await fastForwardHeroSimulation(simulation);
+      await simulation.focusWorkspace("T");
+      const result = await simulation.activateApp("Waitlist");
+      expect(result.ok).toBe(true);
+      expect(result.snapshot.state.focusedWorkspace).toBe("W");
+      expect(result.snapshot.state.focusedWindow).toBe(result.snapshot.apps.Waitlist);
+      expect(result.snapshot.state.workspaces.find(({ name }) => name === "W")?.visibleOnDisplay).toBe(MACBOOK_DISPLAY_ID);
     } finally {
       await simulation.dispose();
     }
@@ -354,14 +432,14 @@ describe("hero simulation", () => {
     const simulation = await createHeroSimulation();
     try {
       const final = await fastForwardHeroSimulation(simulation);
-      const result = await simulation.activateApp("Browser");
+      const result = await simulation.activateApp("Text Editor");
       expect(result.ok).toBe(true);
       expect(
-        result.snapshot.state.windows.find(({ id }) => id === final.apps.Browser),
+        result.snapshot.state.windows.find(({ id }) => id === final.apps["Text Editor"]),
       ).toMatchObject({
         workspace: "1",
       });
-      expect(result.snapshot.state.focusedWindow).toBe(final.apps.Browser);
+      expect(result.snapshot.state.focusedWindow).toBe(final.apps["Text Editor"]);
     } finally {
       await simulation.dispose();
     }

@@ -240,7 +240,7 @@ export const tokens = {
     },
   },
   timeline: {
-    duration: 30_000,
+    duration: 22_000,
     dock: { cursorArrival: 500, submit: 590, commit: 740, complete: 1060 },
     threeKeyChord: {
       first: 0,

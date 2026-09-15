@@ -365,6 +365,11 @@ export async function createHeroSimulation(): Promise<HeroSimulation> {
             sim.focusWindowExternal(existing);
             return;
           }
+          if (app === "Waitlist") {
+            const current = await read();
+            const workspace = current.state.windows.find(({ id }) => id === existing)?.workspace;
+            if (workspace) await execute({ type: "focusWorkspace", name: workspace });
+          }
           await focusApp(app, existing);
           return;
         }

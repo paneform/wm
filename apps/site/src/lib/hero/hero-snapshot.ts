@@ -50,16 +50,17 @@ const requireSuccess = async (
 export async function fastForwardHeroSimulation(
   simulation: HeroSimulation,
 ): Promise<HeroCommittedSnapshot> {
-  await requireSuccess(simulation.activateApp("Browser"));
   await requireSuccess(simulation.activateApp("Terminal"));
+  await requireSuccess(simulation.activateApp("Browser"));
   await requireSuccess(simulation.activateApp("Text Editor"));
   await requireSuccess(simulation.activateApp("Paneform"));
-  await requireSuccess(simulation.activateApp("Browser"));
   await requireSuccess(simulation.moveDirection("right"));
-  await requireSuccess(simulation.activateApp("Text Editor"));
-  await requireSuccess(simulation.moveDirection("right"));
-  await requireSuccess(simulation.activateApp("Terminal"));
+  await requireSuccess(simulation.moveDirection("left"));
+  await requireSuccess(simulation.focusDirection("up"));
   await requireSuccess(simulation.moveFocusedWindowToWorkspace("T"));
+  await requireSuccess(simulation.activateApp("Waitlist"));
+  await requireSuccess(simulation.moveFocusedWindowToWorkspace("W"));
+  await requireSuccess(simulation.activateApp("Settings"));
   return simulation.snapshot();
 }
 

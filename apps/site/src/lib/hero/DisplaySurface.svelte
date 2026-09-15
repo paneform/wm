@@ -22,12 +22,18 @@
   function withApp(id: string, callback: ((app: HeroAppTitle) => Promise<void> | void) | undefined): Promise<void> | void { const app = appForWindow(id); if (app) return callback?.(app); }
 </script>
 
+{#snippet waitlistBody()}
+  <iframe class="waitlist-frame" src="/wm/waitlist/" title="Join the paneform wm waitlist"></iframe>
+{/snippet}
+
 {#snippet settingsBody()}<SettingsShortcuts />{/snippet}
 
 {#if viewport}
-  <WindowSurface contentForWindow={(window) => window.title === "Settings" ? settingsBody : undefined} {windows} {viewport} {focusedWindowId} {interactive} onselectwindow={(id) => withApp(id, onfocuswindow)} onclosewindow={(id) => withApp(id, onclosewindow)} onmovewindow={(id, point) => withApp(id, (app) => onmovewindow?.(app, point))} onresizewindow={(id, frame) => withApp(id, (app) => onresizewindow?.(app, frame))} />
+  <WindowSurface contentForWindow={(window) => window.title === "Settings" ? settingsBody : window.title === "Waitlist" ? waitlistBody : undefined} {windows} {viewport} {focusedWindowId} {interactive} onselectwindow={(id) => withApp(id, onfocuswindow)} onclosewindow={(id) => withApp(id, onclosewindow)} onmovewindow={(id, point) => withApp(id, (app) => onmovewindow?.(app, point))} onresizewindow={(id, frame) => withApp(id, (app) => onresizewindow?.(app, frame))} />
 {:else}
   <div class="display-surface"></div>
 {/if}
 
-<style>.display-surface { position: absolute; inset: 0; border-radius: inherit; background: var(--color-screen-background); }</style>
+<style>
+.waitlist-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--color-page-background); }
+.display-surface { position: absolute; inset: 0; border-radius: inherit; background: var(--color-screen-background); }</style>

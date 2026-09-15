@@ -1,6 +1,6 @@
 import { isHeroActionEnabled } from "./feature-flags.js";
 import type { ActionArbiter } from "./action-arbiter.js";
-import { DEMO_DURATION, demoTimeline, type DemoCue, type DemoCueAction } from "./demo-timeline.js";
+import { demoTimeline, type DemoCue, type DemoCueAction } from "./demo-timeline.js";
 import type { HeroActionResult, HeroSimulation } from "./create-hero-simulation.js";
 
 export interface DemoScheduler {
@@ -76,10 +76,15 @@ export function createDemoRunner(options: {
   presentation: DemoPresentationHooks;
   scheduler?: DemoScheduler;
   cues?: readonly DemoCue[];
+  includeSettings?: boolean;
   onSnapshot?: (snapshot: HeroActionResult["snapshot"]) => void;
 }): DemoRunner {
   const scheduler = options.scheduler ?? defaultScheduler;
-  const cues = (options.cues ?? demoTimeline).filter(({ action }) => isHeroActionEnabled(action));
+  const cues = (options.cues ?? demoTimeline).filter(({ action }) =>
+    isHeroActionEnabled(action) &&
+    !(options.includeSettings === false && action.type === "activate-app" && action.app === "Settings"),
+  );
+  const duration = cues.reduce((total, cue) => total + cue.end - cue.start, 0);
   let controller: AbortController | null = null;
   let cursor = 0;
 
@@ -133,7 +138,7 @@ export function createDemoRunner(options: {
         if (reducedMotion) await options.presentation.settleFinal?.();
         return {
           status: "completed",
-          activeTime: reducedMotion ? DEMO_DURATION : scheduler.now() - started,
+          activeTime: reducedMotion ? duration : scheduler.now() - started,
         };
       } catch (cause) {
         if (signal.aborted || generation !== options.arbiter.generation())

@@ -15,6 +15,7 @@ export type AppIcon =
   | "paneform"
   | "text-editor"
   | "browser"
+  | "waitlist"
   | "terminal"
   | "music"
   | "contacts"
