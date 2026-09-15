@@ -170,6 +170,70 @@ describe("keyboard controller", () => {
     expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
+  it("runs arrow primaries and reports them for HJKL aliases", async () => {
+    const { controller, dispatch } = setup();
+    controller.press({ key: "rshift", source: "user" });
+    controller.press({ key: "h", source: "user" });
+    expect(controller.state.userPressed).toEqual(new Set(["rshift", "h"]));
+    expect(controller.state.activeChord?.keys).toEqual(["rshift", "arrow-left"]);
+    await Promise.resolve();
+    expect(controller.state.completedCommand?.chord.id).toBe("focus-left");
+    expect(dispatch).toHaveBeenCalledWith({ type: "focusDirection", direction: "left" }, "user");
+
+    controller.releaseAll();
+    controller.press({ key: "rshift", source: "user" });
+    controller.press({ key: "arrow-right", source: "user" });
+    expect(dispatch).toHaveBeenLastCalledWith(
+      { type: "focusDirection", direction: "right" },
+      "user",
+    );
+  });
+
+  it("clears a canonical active chord when an alias modifier is released first", () => {
+    const { controller } = setup();
+    controller.press({ key: "rshift", source: "user" });
+    controller.press({ key: "h", source: "user" });
+    expect(controller.state.activeChord?.id).toBe("focus-left");
+
+    controller.release({ key: "rshift", source: "user" });
+    expect(controller.state.activeChord).toBeNull();
+    expect(controller.state.userPressed).toEqual(new Set(["h"]));
+  });
+
+  it("does not fall through from both-Shift move to right-Shift focus", () => {
+    const { controller, dispatch } = setup();
+    controller.press({ key: "lshift", source: "user" });
+    controller.press({ key: "rshift", source: "user" });
+    controller.press({ key: "arrow-left", source: "user" });
+    expect(dispatch).toHaveBeenCalledOnce();
+    expect(dispatch).toHaveBeenCalledWith({ type: "moveDirection", direction: "left" }, "user");
+  });
+
+  it("prevents native repeats only while a registered arrow shortcut is held", () => {
+    const { controller, dispatch } = setup();
+    const stage = new Stage();
+    controller.attach(stage);
+    stage.root.dispatchEvent(event("keydown", "ArrowDown"));
+    const bareRepeat = event("keydown", "ArrowDown", { repeat: true });
+    stage.root.dispatchEvent(bareRepeat);
+    expect(bareRepeat.defaultPrevented).toBe(false);
+    stage.root.dispatchEvent(event("keyup", "ArrowDown"));
+
+    stage.root.dispatchEvent(event("keydown", "ShiftRight"));
+    const first = event("keydown", "ArrowDown");
+    const repeat = event("keydown", "ArrowDown", { repeat: true });
+    stage.root.dispatchEvent(first);
+    stage.root.dispatchEvent(repeat);
+    expect(first.defaultPrevented).toBe(true);
+    expect(repeat.defaultPrevented).toBe(true);
+    expect(dispatch).toHaveBeenCalledOnce();
+
+    stage.root.dispatchEvent(event("keyup", "ShiftRight"));
+    const releasedRepeat = event("keydown", "ArrowDown", { repeat: true });
+    stage.root.dispatchEvent(releasedRepeat);
+    expect(releasedRepeat.defaultPrevented).toBe(false);
+  });
+
   it("limits keyboard capture to the supplied stage when requested", () => {
     const { controller, dispatch } = setup(undefined, true);
     const stage = new Stage();

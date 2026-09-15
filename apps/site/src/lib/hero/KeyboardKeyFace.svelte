@@ -25,6 +25,8 @@
 <kbd
   class:pressed
   class:screen={surface === "screen"}
+  class:split-legend={surface === "keyboard" && Boolean(keyData.alternateLegend)}
+  class:number-key={keyData.code?.startsWith("Digit")}
   class="key"
   data-key={keyData.id}
   style:--screen-key-units={keyData.width}
@@ -63,7 +65,7 @@
     color: var(--color-key-label);
     font-family: var(--type-family-keyboard);
     font-size: var(--key-label);
-    font-weight: var(--type-weight-regular);
+    font-weight: 450;
     line-height: 1;
     transform: translateY(0);
     transition:
@@ -106,6 +108,7 @@
     [data-key="return"]
   ) {
     font-size: var(--key-named-label);
+    font-weight: var(--type-weight-regular);
   }
 
   .key[data-key="fn"] .primary-legend { font-weight: 350; }
@@ -149,23 +152,44 @@
 
   .alternate { font-size: var(--key-alt-label); }
 
+  .key.split-legend {
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    place-content: stretch;
+    place-items: center;
+  }
+
+  .key.split-legend .alternate { font-size: inherit; }
+
+  .key.split-legend.number-key .alternate {
+    font-size: 0.8em;
+    font-weight: 300;
+  }
+
   .modifier-name {
     position: absolute;
     inset-block-end: var(--key-legend-padding);
     inset-inline-start: 50%;
-    font-size: 0.72em;
-    font-weight: var(--type-weight-regular);
+    font-size: var(--physical-modifier-label-size, 0.6em);
+    font-weight: 300;
     transform: translateX(-50%);
   }
 
+  .key:not(.screen) .modifier-name {
+    inset-inline: var(--key-legend-padding);
+    text-align: center;
+    transform: none;
+  }
+
   .touch-id {
+    position: absolute;
+    inset: 50% auto auto 50%;
     width: var(--touch-id-size);
     aspect-ratio: 1;
-    border: var(--stroke-hairline) solid currentColor;
     border-radius: 50%;
     background: color-mix(in srgb, var(--color-key-depth) 18%, transparent);
     box-shadow: inset 0 var(--key-inset-depth) var(--key-inset-blur)
-      color-mix(in srgb, var(--color-key-depth) 55%, transparent);
+      color-mix(in srgb, var(--color-key-depth) 25%, transparent);
+    transform: translate(-50%, -50%);
   }
 
   .key.screen {
@@ -173,6 +197,7 @@
     height: 2.15em;
     padding: 0.35em 0.5em;
     font-size: 1em;
+    font-weight: var(--type-weight-regular);
     --key-depth: 0.16em;
     --key-label: 1em;
     --key-shift-label: 0.82em;
@@ -181,7 +206,7 @@
     --key-legend-padding: 0.3em;
   }
 
-  .key.screen .modifier-name { font-size: 0.52em; }
+  .key.screen .modifier-name { font-size: 0.52em; font-weight: var(--type-weight-regular); }
 
   @media (max-width: 45rem) {
     .key:not(.screen):is(

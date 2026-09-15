@@ -5,6 +5,11 @@ import { fileURLToPath } from "node:url";
 const siteRoot = fileURLToPath(new URL("..", import.meta.url));
 
 describe("social metadata", () => {
+  it("uses the requested landing title for the shared metadata component", async () => {
+    const page = await readFile(`${siteRoot}/src/routes/wm/+page.svelte`, "utf8");
+    expect(page).toContain('title="paneform wm | A window manager that works."');
+  });
+
   it("declares complete Open Graph and Twitter card metadata", async () => {
     const component = await readFile(`${siteRoot}/src/lib/hero/SocialMetadata.svelte`, "utf8");
     for (const field of [

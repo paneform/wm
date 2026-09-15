@@ -9,7 +9,7 @@
   } from "$lib/design/tokens.js";
   import type { KeyboardController, KeyboardSnapshot } from "./keyboard-controller.js";
   import KeyboardKeyFace from "./KeyboardKeyFace.svelte";
-  import { sortShortcutKeys } from "./shortcut-key-order.js";
+  import { shortcutReadoutKeyIds, sortShortcutKeys } from "./shortcut-key-order.js";
 
   let { controller }: { controller: KeyboardController } = $props();
 
@@ -21,21 +21,17 @@
   let wasPressed = false;
   let hideTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const pressedKeys = $derived(
+  const displayKeys = $derived(
     sortShortcutKeys(
-      keyboardKeys.filter(({ id }) => keyboardState?.pressed.has(id)),
+      shortcutReadoutKeyIds(
+        keyboardState?.pressed ?? new Set(),
+        keyboardState?.activeChord ?? null,
+        completedChord,
+      )
+        .map((id) => keyById.get(id))
+        .filter((key): key is KeyboardKey => Boolean(key)),
       keyboardKeys,
     ),
-  );
-  const displayKeys = $derived(
-    pressedKeys.length
-      ? pressedKeys
-      : sortShortcutKeys(
-          completedChord?.keys
-            .map((id) => keyById.get(id))
-            .filter((key): key is KeyboardKey => Boolean(key)) ?? [],
-          keyboardKeys,
-        ),
   );
   const displayChord = $derived(keyboardState?.activeChord ?? completedChord);
 
@@ -104,7 +100,9 @@
     {#each displayKeys as key, index (key.id)}
       <KeyboardKeyFace
         keyData={key}
-        pressed={Boolean(keyboardState?.pressed.has(key.id))}
+        pressed={Boolean(
+          keyboardState?.activeChord?.keys.includes(key.id) ?? keyboardState?.pressed.has(key.id),
+        )}
         surface="screen"
         ariaLabel={keyName(key)}
       />

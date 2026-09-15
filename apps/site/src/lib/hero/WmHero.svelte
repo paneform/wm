@@ -5,6 +5,7 @@
 	import {
 		heroKeyboardChords,
 		keyboardKeys,
+		primaryKeyboardChord,
 		tokens,
 		type HeroCommand,
 	} from "$lib/design/tokens.js";
@@ -250,14 +251,13 @@
 			case "focus-direction": {
 				cursorApp = null;
 				const gate = commandGate(cue);
-				const key = { left: "h", down: "j", up: "k", right: "l" }[
-					cue.action.direction
-				];
+				const command: HeroCommand = cue.action.type === "move-direction"
+					? { type: "moveDirection", direction: cue.action.direction }
+					: { type: "focusDirection", direction: cue.action.direction };
+				const chord = primaryKeyboardChord(heroKeyboardChords, command);
+				if (!chord) throw new Error(`Missing keyboard chord for ${cue.action.type}`);
 				return keyboard.chord({
-					keys:
-						cue.action.type === "move-direction"
-							? ["lshift", "rshift", key]
-							: ["rshift", key],
+					keys: chord.keys,
 					preHold:
 						cue.action.type === "move-direction"
 							? tokens.motion.chordPrelude
@@ -802,7 +802,7 @@
 		</p>
 	</section>
   <footer id="waitlist-signup" class="stage-controls" onfocusin={() => { if (lifecycle === "autoplay" || lifecycle === "paused") pauseDemo(false); }}>
-    <p>Built for macOS on Apple silicon.</p>
+    <p>Your desktop, organized. Coming first to Mac.</p>
     {#if lifecycle === "failed"}<p role="status">{status}</p>{/if}
     <div class="footer-form"><WaitlistForm compact /></div>
   </footer>
