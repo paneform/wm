@@ -197,12 +197,6 @@
   --fallback-window-y: 12%;
   --fallback-window-width: 92%;
   --fallback-window-height: 80%;
-  --dock-gap: clamp(0.12rem, 0.35vw, 0.35rem);
-  --dock-padding: clamp(0.15rem, 0.4vw, 0.4rem);
-  --dock-screen-bottom: 2%;
-  --dock-icon-size: clamp(0.9rem, 2.9vw, 2.9rem);
-  --dock-glyph-size: calc(80% + 1.6px);
-  --dock-indicator-offset: 0.2rem;
 
   --motion-feedback: 160ms;
   --motion-cursor-slot: 1060ms;
@@ -225,6 +219,18 @@
   --keyboard-well-depth: 0.12rem;
   --keyboard-well-shadow: 0.25rem;
   --cursor-size: 1.1rem;
+}
+
+.mac-screen,
+.studio-screen {
+  container-type: size;
+  /* The dock and sibling shortcut readout share the display's sizing context. */
+  --dock-gap: min(0.35rem, 0.7cqw);
+  --dock-padding: min(0.4rem, 0.8cqw);
+  --dock-screen-bottom: 2%;
+  --dock-icon-size: min(2.9rem, 6cqw, 10cqh);
+  --dock-glyph-size: calc(80% + 1.6px);
+  --dock-indicator-offset: min(0.2rem, 0.4cqw);
 }
 
 @media (prefers-color-scheme: light) {
