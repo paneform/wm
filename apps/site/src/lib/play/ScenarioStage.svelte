@@ -144,7 +144,7 @@
   .stage:focus-visible { box-shadow: inset 0 0 0 2px var(--color-focus-ring); }
   .device { position: relative; width: min(100%, 42rem, calc(44svh * var(--ratio))); margin-inline: auto; }
   .device.laptop { width: min(100%, 38rem, calc(56svh / 1.18)); aspect-ratio: 1 / 1.18; }
-  .device.laptop :global(.laptop-device) { position: absolute; inset: auto 0 0; transform: perspective(var(--scene-perspective)) rotateX(var(--laptop-base-pitch)); transform-origin: 50% 100%; }
+  .device.laptop :global(.laptop-device) { --laptop-pivot: 1; position: absolute; inset: auto 0 0; }
   .text-alternative { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   @media (max-width: 42rem) { .stage { min-height: 18rem; padding-block: 1rem; } }
 </style>

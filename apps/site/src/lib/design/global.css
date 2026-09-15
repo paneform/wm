@@ -34,6 +34,7 @@
   --color-screen-background: var(--rp-overlay);
   --color-screen-off: color-mix(in srgb, var(--rp-base) 82%, var(--rp-surface));
   --color-window-background: var(--rp-surface);
+  --color-window-titlebar-background: color-mix(in srgb, var(--rp-overlay) 35%, var(--rp-surface));
   --color-window-focus: var(--rp-iris);
   --color-window-unfocused: var(--rp-subtle);
   --color-state-connected: var(--rp-foam);
@@ -62,7 +63,7 @@
   --type-size-body: clamp(0.875rem, 0.82rem + 0.25vw, 1.0625rem);
   --type-size-control: 0.8125rem;
   --type-size-label: 0.6875rem;
-  --type-screen-label: clamp(0.24rem, 0.75vw, 0.6875rem);
+  --type-screen-label: clamp(0.38rem, 1.6cqw, 0.9375rem);
   --type-app-glyph: clamp(0.8rem, 4vw, 4rem);
   --type-weight-regular: 400;
   --type-weight-medium: 550;
@@ -156,7 +157,8 @@
   --laptop-wide-top: 38%;
   --laptop-wide-left: 44.5%;
   --macbook-deck-aspect: 502 / 355;
-  --macbook-lid-height: 95.2%;
+  --macbook-lid-ratio: 0.952;
+  --macbook-lid-height: calc(100% * var(--macbook-lid-ratio));
   --macbook-bezel-top: 1.7%;
   --macbook-bezel-inline: 1.7%;
   --macbook-bezel-bottom: 3.4%;
@@ -188,20 +190,14 @@
   );
   --shadow-device: 0 1.5rem 3rem color-mix(in srgb, var(--rp-base) 40%, transparent);
   --cable-stroke: 3;
-  --window-titlebar-height: 1.75rem;
+  --window-titlebar-height: clamp(0.75rem, 2.5cqw, 1.5rem);
   --window-titlebar-padding: var(--window-control-size);
-  --window-control-size: clamp(0.15rem, 0.55vw, 0.5rem);
-  --window-control-gap: clamp(0.08rem, 0.25vw, 0.25rem);
+  --window-control-size: clamp(0.26rem, 1.2cqw, 0.71875rem);
+  --window-control-gap: clamp(0.1rem, 0.5cqw, 0.3125rem);
   --fallback-window-x: 4%;
   --fallback-window-y: 12%;
   --fallback-window-width: 92%;
   --fallback-window-height: 80%;
-  --dock-gap: clamp(0.12rem, 0.35vw, 0.35rem);
-  --dock-padding: clamp(0.15rem, 0.4vw, 0.4rem);
-  --dock-screen-bottom: 2%;
-  --dock-icon-size: clamp(0.9rem, 2.9vw, 2.9rem);
-  --dock-glyph-size: calc(80% + 1.6px);
-  --dock-indicator-offset: 0.2rem;
 
   --motion-feedback: 160ms;
   --motion-cursor-slot: 1060ms;
@@ -224,6 +220,18 @@
   --keyboard-well-depth: 0.12rem;
   --keyboard-well-shadow: 0.25rem;
   --cursor-size: 1.1rem;
+}
+
+.mac-screen,
+.studio-screen {
+  container-type: size;
+  /* The dock and sibling shortcut readout share the display's sizing context. */
+  --dock-gap: min(0.35rem, 0.7cqw);
+  --dock-padding: min(0.4rem, 0.8cqw);
+  --dock-screen-bottom: 2%;
+  --dock-icon-size: min(2.9rem, 6cqw, 10cqh);
+  --dock-glyph-size: calc(80% + 1.6px);
+  --dock-indicator-offset: min(0.2rem, 0.4cqw);
 }
 
 @media (prefers-color-scheme: light) {

@@ -225,9 +225,7 @@
     inset: var(--laptop-solo-top) auto auto 50%;
     width: var(--laptop-solo-width);
     aspect-ratio: var(--macbook-deck-aspect);
-    /* Center after projection so perspective stays aligned with the laptop. */
-    transform: translateX(-50%) perspective(var(--scene-perspective)) rotateX(var(--laptop-base-pitch));
-    transform-style: preserve-3d;
+    transform: translateX(-50%);
     transition:
       width var(--motion-scene) var(--easing-mechanical),
       inset var(--motion-scene) var(--easing-mechanical),
@@ -237,7 +235,7 @@
   .scene.connected :global(.laptop) {
     inset: var(--laptop-stacked-top) auto auto var(--laptop-stacked-left);
     width: var(--laptop-stacked-width);
-    transform: perspective(var(--scene-perspective)) rotateX(var(--laptop-base-pitch));
+    transform: none;
   }
 
   .paneform-splash {
@@ -277,8 +275,7 @@
     .scene.connected :global(.laptop) {
       inset: var(--laptop-solo-top) auto auto 50%;
       width: var(--laptop-solo-width);
-      transform: translateX(-50%) perspective(var(--scene-perspective))
-        rotateX(var(--laptop-base-pitch));
+      transform: translateX(-50%);
     }
   }
 
@@ -290,12 +287,12 @@
     .scene :global(.laptop) {
       inset: var(--laptop-intro-wide-top) auto auto var(--laptop-intro-wide-left);
       width: var(--laptop-intro-wide-width);
-      transform: perspective(var(--scene-perspective)) rotateX(var(--laptop-base-pitch));
+      transform: none;
     }
     .scene.connected :global(.laptop) {
       inset: var(--laptop-wide-top) auto auto var(--laptop-wide-left);
       width: var(--laptop-wide-width);
-      transform: perspective(var(--scene-perspective)) rotateX(var(--laptop-base-pitch));
+      transform: none;
     }
   }
 

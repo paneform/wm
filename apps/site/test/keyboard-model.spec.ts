@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { heroKeyboardChords, keyboardKeys, tokens } from "$lib/design/tokens.js";
-import { sortShortcutKeys } from "$lib/hero/shortcut-key-order.js";
+import {
+  heroKeyboardChords,
+  keyboardKeys,
+  primaryKeyboardChord,
+  tokens,
+} from "$lib/design/tokens.js";
+import { shortcutReadoutKeyIds, sortShortcutKeys } from "$lib/hero/shortcut-key-order.js";
 import { HERO_WORKSPACES } from "$lib/hero/workspace-model.js";
 
 describe("canonical keyboard model", () => {
@@ -20,6 +25,19 @@ describe("canonical keyboard model", () => {
       "z",
       "slash",
     ]);
+  });
+
+  it("shows canonical chord keys while preserving raw keys for partial input", () => {
+    const chord = primaryKeyboardChord(heroKeyboardChords, {
+      type: "focusDirection",
+      direction: "left",
+    })!;
+    const physicalAlias = new Set(["rshift", "h"] as const);
+
+    expect(shortcutReadoutKeyIds(physicalAlias, chord, null)).toEqual(["rshift", "arrow-left"]);
+    expect(shortcutReadoutKeyIds(physicalAlias, null, chord)).toEqual(["rshift", "arrow-left"]);
+    expect(shortcutReadoutKeyIds(new Set(["rshift"]), null, null)).toEqual(["rshift"]);
+    expect(shortcutReadoutKeyIds(new Set(), null, chord)).toEqual(["rshift", "arrow-left"]);
   });
 
   it("contains the complete ANSI matrix and unique physical mappings", () => {
@@ -72,6 +90,12 @@ describe("canonical keyboard model", () => {
     expect(keyboardKeys.find((key) => key.id === "a")?.legend).toBe("A");
   });
 
+  it("pairs number keys with their ANSI shifted symbols", () => {
+    const numbers = keyboardKeys.filter((key) => key.code?.startsWith("Digit"));
+    expect(numbers.map((key) => key.legend).join("")).toBe("1234567890");
+    expect(numbers.map((key) => key.alternateLegend).join("")).toBe("!@#$%^&*()");
+  });
+
   it("keeps every cap inside the tokenized keyboard bed", () => {
     for (const key of keyboardKeys) {
       expect(key.x).toBeGreaterThanOrEqual(0);
@@ -122,7 +146,16 @@ describe("canonical keyboard model", () => {
       "move-right",
       "focus-right",
     ];
-    expect(heroKeyboardChords.slice(0, 8).map(({ id }) => id)).toEqual(directionalIds);
+    expect(heroKeyboardChords.filter(({ primary }) => primary).map(({ id }) => id)).toEqual(
+      directionalIds,
+    );
+    expect(
+      primaryKeyboardChord(heroKeyboardChords, { type: "focusDirection", direction: "left" })?.keys,
+    ).toEqual(["rshift", "arrow-left"]);
+    expect(heroKeyboardChords.find(({ id }) => id === "focus-left-hjkl")?.keys).toEqual([
+      "rshift",
+      "h",
+    ]);
     for (const workspace of HERO_WORKSPACES) {
       const key = workspace.toLowerCase();
       expect(heroKeyboardChords).toEqual(
@@ -141,7 +174,8 @@ describe("canonical keyboard model", () => {
       );
     }
     expect(heroKeyboardChords.at(-1)?.id).toBe("move-workspace-display");
-    expect(heroKeyboardChords).toHaveLength(8 + HERO_WORKSPACES.length * 2 + 1);
+    expect(new Set(heroKeyboardChords.map(({ id }) => id)).size).toBe(heroKeyboardChords.length);
+    expect(heroKeyboardChords).toHaveLength(16 + HERO_WORKSPACES.length * 2 + 1);
     expect(tokens.motion.commandReadout).toBe(1500);
     expect(heroKeyboardChords.find(({ id }) => id === "move-window-z")?.readout).toBe(
       "move window workspace Z",

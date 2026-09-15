@@ -1,4 +1,4 @@
-import type { KeyboardKey } from "$lib/design/tokens.js";
+import type { KeyboardChord, KeyboardKey, KeyboardKeyId } from "$lib/design/tokens.js";
 
 const leadingKeyIds = [
   "lshift",
@@ -27,4 +27,12 @@ export function sortShortcutKeys(
     );
   };
   return [...keys].sort((left, right) => rank(left) - rank(right));
+}
+
+export function shortcutReadoutKeyIds(
+  pressed: ReadonlySet<KeyboardKeyId>,
+  activeChord: KeyboardChord | null,
+  completedChord: KeyboardChord | null,
+): readonly KeyboardKeyId[] {
+  return (activeChord ?? completedChord)?.keys ?? [...pressed];
 }

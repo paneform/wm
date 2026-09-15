@@ -4,7 +4,7 @@
 </script>
 
 <SocialMetadata
-  title="Paneform WM | Every window in its place"
+  title="paneform wm | A window manager that works."
   description="A reliability-first tiling window manager for macOS. Group windows into workspaces, then move the whole workspace between displays."
   canonical="https://paneform.com/wm/"
 />
