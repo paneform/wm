@@ -802,7 +802,7 @@
 		</p>
 	</section>
   <footer id="waitlist-signup" class="stage-controls" onfocusin={() => { if (lifecycle === "autoplay" || lifecycle === "paused") pauseDemo(false); }}>
-    <p>Built for macOS on Apple silicon.</p>
+    <p>Your desktop, organized. Coming first to Mac.</p>
     {#if lifecycle === "failed"}<p role="status">{status}</p>{/if}
     <div class="footer-form"><WaitlistForm compact /></div>
   </footer>
