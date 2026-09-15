@@ -225,7 +225,8 @@
     inset: var(--laptop-solo-top) auto auto 50%;
     width: var(--laptop-solo-width);
     aspect-ratio: var(--macbook-deck-aspect);
-    transform: perspective(var(--scene-perspective)) translateX(-50%) rotateX(var(--laptop-base-pitch));
+    /* Center after projection so perspective stays aligned with the laptop. */
+    transform: translateX(-50%) perspective(var(--scene-perspective)) rotateX(var(--laptop-base-pitch));
     transform-style: preserve-3d;
     transition:
       width var(--motion-scene) var(--easing-mechanical),
@@ -276,7 +277,7 @@
     .scene.connected :global(.laptop) {
       inset: var(--laptop-solo-top) auto auto 50%;
       width: var(--laptop-solo-width);
-      transform: perspective(var(--scene-perspective)) translateX(-50%)
+      transform: translateX(-50%) perspective(var(--scene-perspective))
         rotateX(var(--laptop-base-pitch));
     }
   }

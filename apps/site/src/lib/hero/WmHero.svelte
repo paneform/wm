@@ -948,6 +948,33 @@
 		white-space: nowrap;
 	}
 
+  @container stage (max-width: 72rem) {
+    .stage { padding-inline: var(--space-3); }
+    .stage :global(.scene) {
+      width: min(100%, 110cqh);
+      aspect-ratio: 1.1;
+      --laptop-solo-width: 82%;
+    }
+  }
+
+  @container stage (max-width: 45rem) {
+    .stage { padding-inline: 0; }
+    .stage :global(.scene) {
+      width: 100%;
+      aspect-ratio: 0.9;
+      --laptop-solo-width: 103vw;
+    }
+  }
+
+  @container stage (min-width: 36.25rem) and (max-width: 72rem) {
+    .stage :global(.scene) {
+      /* The stage occupies the viewport space remaining after header and footer. */
+      width: min(96%, 84cqh);
+      aspect-ratio: 0.84;
+      --laptop-solo-width: 100%;
+      --laptop-solo-top: 45%;
+    }
+  }
 
 	@media (max-width: 45rem) {
 		.footer-form { width: min(100%, 30rem); }
