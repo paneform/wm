@@ -156,7 +156,8 @@
   --laptop-wide-top: 38%;
   --laptop-wide-left: 44.5%;
   --macbook-deck-aspect: 502 / 355;
-  --macbook-lid-height: 95.2%;
+  --macbook-lid-ratio: 0.952;
+  --macbook-lid-height: calc(100% * var(--macbook-lid-ratio));
   --macbook-bezel-top: 1.7%;
   --macbook-bezel-inline: 1.7%;
   --macbook-bezel-bottom: 3.4%;
