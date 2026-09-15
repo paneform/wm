@@ -27,6 +27,28 @@ it("keeps the shared laptop root unprojected in both layout callers", async () =
   expect(callers[1]).toContain("--laptop-pivot: 1");
 });
 
+it("models the lower clamshell as bounded deck-local depth", async () => {
+  const source = await readFile(
+    new URL("../src/lib/desktop/Laptop.svelte", import.meta.url),
+    "utf8",
+  );
+  const shell = source.match(/<div class="base-shell"[^>]*>(.*?)<\/div>/s)?.[1];
+  const shellRule = source.match(/\.base-shell\s*\{([^}]+)\}/)?.[1];
+  const sliceRule = source.match(/\.base-shell i\s*\{([^}]+)\}/)?.[1];
+  const deckRule = source.match(/\.base\s*\{([^}]+)\}/)?.[1];
+
+  expect(shell?.match(/<i><\/i>/g)).toHaveLength(16);
+  expect(shellRule).toContain("inset: 0 0 var(--base-edge-size)");
+  expect(shellRule).not.toContain("overflow: hidden");
+  expect(sliceRule).toContain("translateZ(calc(-1 * var(--base-edge-size)");
+  expect(sliceRule).toContain("var(--radius-laptop-base) - var(--shell-inset)");
+  expect(deckRule).toContain("inset: 0 0 var(--base-edge-size)");
+  expect(source).toContain("--shell-depth: 16");
+  expect(source).toContain("--shell-inset: 2.2px");
+  expect(source).not.toContain("skewX(");
+  expect(source).not.toContain("base-clip");
+});
+
 it("extends the top bar background across the screen without placing buttons under the notch", async () => {
   const source = await readFile(
     new URL("../src/lib/desktop/DesktopTopBar.svelte", import.meta.url),
