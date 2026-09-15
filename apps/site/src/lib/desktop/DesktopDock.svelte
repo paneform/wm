@@ -41,11 +41,16 @@
     const update = () => {
       cancelAnimationFrame(pending);
       pending = requestAnimationFrame(() => {
-        if (parent.clientHeight <= 0) return;
-        // Local layout coordinates remain correct while the laptop tilts in 3D.
-        // offsetTop includes the dock's height, border, padding and bottom spacing.
-        const top = element.offsetTop - (parseFloat(getComputedStyle(element).marginTop) || 0);
-        const bottom = displayFrame.y + top / parent.clientHeight * displayFrame.height;
+        const parentStyle = getComputedStyle(parent);
+        const parentHeight = parseFloat(parentStyle.height) + (parentStyle.boxSizing === "border-box"
+          ? -parseFloat(parentStyle.borderTopWidth) - parseFloat(parentStyle.borderBottomWidth)
+          : parseFloat(parentStyle.paddingTop) + parseFloat(parentStyle.paddingBottom));
+        // Resolved CSS positions preserve subpixels and ignore the laptop's 3D tilt.
+        // `top` locates the dock's outer margin edge within the parent's padding box.
+        // offsetTop/clientHeight round independently and can let the borders overlap.
+        const top = parseFloat(getComputedStyle(element).top);
+        if (!Number.isFinite(top) || !Number.isFinite(parentHeight) || parentHeight <= 0) return;
+        const bottom = displayFrame.y + top / parentHeight * displayFrame.height;
         const height = Math.max(0, Math.floor(bottom - baseArea.y));
         if (height === lastHeight) return;
         lastHeight = height;
