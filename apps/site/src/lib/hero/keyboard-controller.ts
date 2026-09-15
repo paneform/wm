@@ -1,4 +1,10 @@
-import type { HeroCommand, KeyboardChord, KeyboardKey, KeyboardKeyId } from "$lib/design/tokens.js";
+import {
+  primaryKeyboardChord,
+  type HeroCommand,
+  type KeyboardChord,
+  type KeyboardKey,
+  type KeyboardKeyId,
+} from "$lib/design/tokens.js";
 
 export type KeyboardPressSource = "script" | "user";
 
@@ -119,6 +125,7 @@ export function createKeyboardController(options: KeyboardControllerOptions) {
   );
   const dispatchedTriggers = new Set<KeyboardKeyId>();
   let activeChord: KeyboardChord | null = null;
+  let activeMatchedChord: KeyboardChord | null = null;
   let completedCommand: KeyboardSnapshot["completedCommand"] = null;
   let commandSequence = 0;
   let detachCurrent: (() => void) | null = null;
@@ -179,11 +186,13 @@ export function createKeyboardController(options: KeyboardControllerOptions) {
     const chord = matchingChord(trigger, source);
     if (!chord) return null;
     dispatchedTriggers.add(trigger);
-    activeChord = chord;
+    const presentedChord = primaryKeyboardChord(options.chords, chord.command) ?? chord;
+    activeMatchedChord = chord;
+    activeChord = presentedChord;
     publish();
     Promise.resolve(options.dispatch(chord.command, source)).then(
       () => {
-        completedCommand = { sequence: ++commandSequence, chord };
+        completedCommand = { sequence: ++commandSequence, chord: presentedChord };
         publish();
       },
       (reason) => {
@@ -202,7 +211,10 @@ export function createKeyboardController(options: KeyboardControllerOptions) {
   const releaseOwned = (key: KeyboardKeyId, source: KeyboardPressSource) => {
     if (!owned[source].delete(key)) return false;
     dispatchedTriggers.delete(key);
-    if (activeChord?.keys.includes(key)) activeChord = null;
+    if (activeMatchedChord?.keys.includes(key)) {
+      activeMatchedChord = null;
+      activeChord = null;
+    }
     publish();
     return true;
   };
@@ -231,6 +243,7 @@ export function createKeyboardController(options: KeyboardControllerOptions) {
       }
       if (changed) {
         dispatchedTriggers.clear();
+        activeMatchedChord = null;
         activeChord = null;
         publish();
       }
@@ -290,7 +303,10 @@ export function createKeyboardController(options: KeyboardControllerOptions) {
           controller.releaseAll();
           return;
         }
-        if (event.repeat || owned.user.has(key)) return;
+        if (event.repeat || owned.user.has(key)) {
+          if (matchingChord(key, "user")) event.preventDefault();
+          return;
+        }
         options.onUserPress?.(key);
         pressOwned(key, "user");
         const chord = dispatchMatch(key, "user");

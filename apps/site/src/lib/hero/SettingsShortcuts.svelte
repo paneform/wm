@@ -1,6 +1,6 @@
 <script lang="ts">
   import { commandPaths } from "@paneform/layout";
-  import { keyboardKeys, type KeyboardKey } from "$lib/design/tokens.js";
+  import { heroKeyboardChords, keyboardKeys, type KeyboardKey } from "$lib/design/tokens.js";
   import KeyboardKeyFace from "./KeyboardKeyFace.svelte";
   import { HERO_WORKSPACES } from "./workspace-model.js";
 
@@ -25,7 +25,7 @@
     if (!path?.description) throw new Error(`Missing command help: ${prefix}`);
     return path.description;
   }
-  const directions = [["h", "left"], ["j", "down"], ["k", "up"], ["l", "right"]] as const;
+  const directionalRows = heroKeyboardChords.filter((chord) => chord.primary);
   const workspaceKeys = [{ ...key("0"), legend: "0–9 / A–Z", width: 4 }];
   const excluded = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").filter((letter) =>
     !HERO_WORKSPACES.some((workspace) => workspace === letter),
@@ -33,14 +33,20 @@
   const rows = [
     { id: "workspace", modifiers: [key("rshift")], keys: workspaceKeys, action: "Focus workspace", help: help("workspace focus <workspace>") },
     { id: "move-workspace", modifiers: [key("lshift"), key("rshift")], keys: workspaceKeys, action: "Move window to workspace", help: help("workspace move-window <workspace>") },
-    ...directions.map(([hotkey, direction]) => ({
-      id: `move-${direction}`, modifiers: [key("lshift"), key("rshift")],
-      keys: [key(hotkey)], action: `Move window ${direction}`, help: help(`window move ${direction}`),
-    })),
-    ...directions.map(([hotkey, direction]) => ({
-      id: `focus-${direction}`, modifiers: [key("rshift")],
-      keys: [key(hotkey)], action: `Focus window ${direction}`, help: help(`window focus ${direction}`),
-    })),
+    ...directionalRows.map((chord) => {
+      const direction = "direction" in chord.command ? chord.command.direction : "";
+      const aliases = heroKeyboardChords.filter((candidate) =>
+        !candidate.primary && candidate.command.type === chord.command.type &&
+        "direction" in candidate.command && candidate.command.direction === direction
+      );
+      return {
+        id: chord.id,
+        modifiers: chord.keys.slice(0, -1).map(key),
+        keys: [chord.trigger, ...aliases.map(({ trigger }) => trigger)].map(key),
+        action: `${chord.command.type === "moveDirection" ? "Move" : "Focus"} window ${direction}`,
+        help: help(`window ${chord.command.type === "moveDirection" ? "move" : "focus"} ${direction}`),
+      };
+    }),
   ];
 </script>
 
@@ -60,8 +66,8 @@
                 <KeyboardKeyFace keyData={modifier} surface="screen" ariaLabel={modifier.id === "lshift" ? "left shift" : "right shift"} />
                 <span class="plus" aria-hidden="true">+</span>
               {/each}
-              <span class="alternatives" aria-label={row.keys === workspaceKeys ? `0–9 or A–Z, except ${excluded}` : row.keys.map(({ legend }) => legend).join(", ")}>
-                {#each row.keys as keyData}<KeyboardKeyFace {keyData} surface="screen" />{/each}
+              <span class="alternatives" aria-label={row.keys === workspaceKeys ? `0–9 or A–Z, except ${excluded}` : row.keys.map(({ legend }) => legend).join(" or ")}>
+                {#each row.keys as keyData, index}{#if index > 0}<span class="plus">or</span>{/if}<KeyboardKeyFace {keyData} surface="screen" />{/each}
               </span>
             </span>
           </td>

@@ -267,28 +267,45 @@ export interface KeyboardChord {
   trigger: KeyboardKeyId;
   command: HeroCommand;
   readout: string;
+  primary?: boolean;
 }
 
+const directionalKeys = [
+  ["arrow-left", "h", "left"],
+  ["arrow-down", "j", "down"],
+  ["arrow-up", "k", "up"],
+  ["arrow-right", "l", "right"],
+] as const;
+
 export const heroKeyboardChords: readonly KeyboardChord[] = [
-  ...(
-    [
-      ["h", "left"],
-      ["j", "down"],
-      ["k", "up"],
-      ["l", "right"],
-    ] as const
-  ).flatMap(([key, direction]) => [
+  ...directionalKeys.flatMap(([arrow, alias, direction]) => [
     {
       id: `move-${direction}`,
-      keys: ["lshift", "rshift", key],
-      trigger: key,
+      keys: ["lshift", "rshift", arrow],
+      trigger: arrow,
+      command: { type: "moveDirection" as const, direction },
+      readout: `move window ${direction}`,
+      primary: true,
+    },
+    {
+      id: `focus-${direction}`,
+      keys: ["rshift", arrow],
+      trigger: arrow,
+      command: { type: "focusDirection" as const, direction },
+      readout: `focus window ${direction}`,
+      primary: true,
+    },
+    {
+      id: `move-${direction}-hjkl`,
+      keys: ["lshift", "rshift", alias],
+      trigger: alias,
       command: { type: "moveDirection" as const, direction },
       readout: `move window ${direction}`,
     },
     {
-      id: `focus-${direction}`,
-      keys: ["rshift", key],
-      trigger: key,
+      id: `focus-${direction}-hjkl`,
+      keys: ["rshift", alias],
+      trigger: alias,
       command: { type: "focusDirection" as const, direction },
       readout: `focus window ${direction}`,
     },
@@ -320,3 +337,24 @@ export const heroKeyboardChords: readonly KeyboardChord[] = [
     readout: "move workspace to next display",
   },
 ];
+
+function sameCommand(left: HeroCommand, right: HeroCommand): boolean {
+  if (left.type !== right.type) return false;
+  if (left.type === "moveDirection" || left.type === "focusDirection") {
+    return "direction" in right && left.direction === right.direction;
+  }
+  if (left.type === "moveFocusedWindowToWorkspace" || left.type === "focusWorkspace") {
+    return "workspace" in right && left.workspace === right.workspace;
+  }
+  return true;
+}
+
+export function primaryKeyboardChord(
+  chords: readonly KeyboardChord[],
+  command: HeroCommand,
+): KeyboardChord | undefined {
+  return (
+    chords.find((chord) => chord.primary && sameCommand(chord.command, command)) ??
+    chords.find((chord) => sameCommand(chord.command, command))
+  );
+}

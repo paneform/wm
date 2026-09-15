@@ -164,6 +164,10 @@ describe("configured keybinds", () => {
     expect(eventToConfiguredCommand(event("KeyL", { shiftKey: true }), undefined)).toBe(
       "window focus right",
     );
+    expect(eventToConfiguredCommand(event("ArrowRight", { shiftKey: true }), undefined)).toBe(
+      "window focus right",
+    );
     expect(eventToConfiguredCommand(event("KeyL", { shiftKey: true }), {})).toBeNull();
+    expect(eventToConfiguredCommand(event("ArrowRight", { shiftKey: true }), {})).toBeNull();
   });
 });

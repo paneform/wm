@@ -200,8 +200,8 @@ export function eventToConfiguredCommand(
 }
 
 export const defaultScenarioKeybinds: Keybinds = Object.fromEntries(
-  (["left", "down", "up", "right"] as const).map((direction, index) => [
-    `shift ${["h", "j", "k", "l"][index]}`,
-    `window focus ${direction}`,
+  (["left", "down", "up", "right"] as const).flatMap((direction, index) => [
+    [`shift ${direction}`, `window focus ${direction}`],
+    [`shift ${["h", "j", "k", "l"][index]}`, `window focus ${direction}`],
   ]),
 );
