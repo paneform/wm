@@ -34,16 +34,19 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Check formatting
-        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser format:check
+        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser --filter @paneform/site format:check
 
       - name: Lint
-        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser lint
+        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser --filter @paneform/site lint
 
       - name: Typecheck
-        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser typecheck
+        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser --filter @paneform/site typecheck
 
       - name: Test
-        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser test
+        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser --filter @paneform/site test
 
       - name: Build
-        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser build
+        run: pnpm --filter @paneform/layout --filter @paneform/layout-browser --filter @paneform/site build
+
+      - name: Check site release boundaries
+        run: pnpm --filter @paneform/site check:release

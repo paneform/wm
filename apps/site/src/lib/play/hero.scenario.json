@@ -1,0 +1,122 @@
+{
+  "$schema": "https://paneform.com/wm/play/scenario.schema.json",
+  "config": { "defaults": { "gap": 16 } },
+  "presentation": {
+    "device": "laptop",
+    "showKeyboard": true,
+    "showDock": true,
+    "showTopBar": true,
+    "animate": true
+  },
+  "state": {
+    "topology": [
+      {
+        "id": "display:hero-macbook",
+        "frame": { "x": 0, "y": 0, "width": 1512, "height": 982 },
+        "workArea": { "x": 0, "y": 44, "width": 1512, "height": 780 },
+        "scale": 2,
+        "primary": true,
+        "workspace": "1"
+      }
+    ],
+    "windows": [],
+    "focusedWorkspace": "1",
+    "focusedWindow": null,
+    "wmRunning": false
+  },
+  "steps": [
+    {
+      "event": {
+        "kind": "window_added",
+        "window": {
+          "id": "browser",
+          "title": "Browser",
+          "bundleId": "com.paneform.hero.browser",
+          "frame": { "x": 84, "y": 132, "width": 856, "height": 448 }
+        }
+      },
+      "caption": "One browser. Several rabbit holes.",
+      "duration": 1000
+    },
+    {
+      "event": {
+        "kind": "window_added",
+        "window": {
+          "id": "terminal",
+          "title": "Terminal",
+          "bundleId": "com.paneform.hero.terminal",
+          "frame": { "x": 243, "y": 153, "width": 690, "height": 596 }
+        }
+      },
+      "duration": 0
+    },
+    {
+      "event": { "kind": "focus_changed", "windowId": "terminal" },
+      "caption": "A terminal. The plot thickens.",
+      "duration": 1000
+    },
+    {
+      "event": {
+        "kind": "window_added",
+        "window": {
+          "id": "editor",
+          "title": "Text Editor",
+          "bundleId": "com.paneform.hero.text-editor",
+          "frame": { "x": 592, "y": 97, "width": 818, "height": 581 }
+        }
+      },
+      "duration": 0
+    },
+    {
+      "event": { "kind": "focus_changed", "windowId": "editor" },
+      "caption": "Three windows. One familiar pile-up.",
+      "duration": 1200
+    },
+    {
+      "command": "service start",
+      "caption": "Let your desktop take form.",
+      "duration": 1500,
+      "expect": { "wmRunning": true }
+    },
+    {
+      "event": { "kind": "focus_changed", "windowId": "browser" },
+      "caption": "Pick a pane. Leave the mouse alone.",
+      "duration": 850,
+      "expect": { "focusedWindow": "browser" }
+    },
+    {
+      "command": "window move right",
+      "caption": "Move right by intent, not by pixels. All pane. No pain.",
+      "duration": 1500,
+      "expect": { "focusedWindow": "browser" }
+    },
+    {
+      "event": { "kind": "focus_changed", "windowId": "editor" },
+      "caption": "Text Editor takes focus for the next move.",
+      "duration": 850,
+      "expect": { "focusedWindow": "editor" }
+    },
+    {
+      "command": "window move right",
+      "caption": "Editor, stage right. No window-wrangling required.",
+      "duration": 1500,
+      "expect": { "focusedWindow": "editor" }
+    },
+    {
+      "command": "focus-window terminal",
+      "caption": "Terminal takes focus for the workspace move.",
+      "duration": 1100,
+      "expect": { "focusedWindow": "terminal" }
+    },
+    {
+      "command": "workspace move-window T",
+      "caption": "Send the active pane to workspace T. Form, meet function.",
+      "duration": 1600,
+      "expect": {
+        "focusedWindow": "terminal",
+        "focusedWorkspace": "T",
+        "windows": { "terminal": { "workspace": "T" } }
+      }
+    }
+  ]
+}
