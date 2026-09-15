@@ -25,7 +25,7 @@ describe("social metadata", () => {
     ]) {
       expect(component).toContain(`"${field}"`);
     }
-    expect(component).toContain("https://paneform.com/social/paneform-wm.png");
+    expect(component).toContain("https://paneform.com/social/paneform-wm.png?v=2");
     expect(component).toContain("summary_large_image");
   });
 

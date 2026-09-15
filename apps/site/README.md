@@ -49,6 +49,14 @@ the Vercel adapter emits the actual HTTP 308 redirect.
 ## Sharing
 
 The landing and waitlist share `/social/paneform-wm.png`, a 1200x630 image with
-Open Graph and Twitter large-card metadata. Its editable SVG source is alongside
-the PNG; regenerate the PNG when changing the artwork. These assets and
-`/favicon.svg` remain public regardless of the playground flag.
+Open Graph and Twitter large-card metadata. With a local landing server running,
+regenerate it from the development-only `/wm/og/` route with
+`pnpm --filter @paneform/site render:og`.
+Set `WM_SCREENSHOT_URL` when the landing is not at `http://127.0.0.1:4192/wm/`.
+The renderer uses dark mode and reduced motion, waits for the actual demo to finish
+and the waitlist iframe/fonts to load, then captures the page without changing its
+window contents. `/wm/og/` is unavailable in all built deployments, including
+playground-enabled previews. It is only available through the development server.
+The image and `/favicon.svg` remain public regardless of the playground flag.
+Social metadata uses an image URL version (`?v=2`) so fresh scrapes can distinguish
+the approved dark screenshot from the previous artwork.

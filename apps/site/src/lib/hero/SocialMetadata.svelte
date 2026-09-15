@@ -5,8 +5,8 @@
     canonical,
   }: { title: string; description: string; canonical: string } = $props();
 
-  const image = "https://paneform.com/social/paneform-wm.png";
-  const imageAlt = "Paneform WM, every window in its place, illustrated with three tiled window panes.";
+  const image = "https://paneform.com/social/paneform-wm.png?v=2";
+  const imageAlt = "Paneform WM: A tiling window manager that just works, shown beside the app running on a MacBook.";
 </script>
 
 <svelte:head>

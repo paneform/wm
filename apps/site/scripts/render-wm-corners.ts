@@ -10,6 +10,8 @@ const url = process.env.WM_SCREENSHOT_URL ?? "http://127.0.0.1:4192/wm/";
 const outputDir = resolve(process.env.WM_SCREENSHOT_DIR ?? "/tmp/wm-corners");
 const chromePath =
   process.env.CHROME_PATH ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const socialMode = process.argv.includes("--social");
+const socialOutput = resolve("static/social/paneform-wm.png");
 
 type Target = { type: string; webSocketDebuggerUrl?: string };
 type CdpMessage = { id?: number; result?: unknown; error?: { message?: string } };
@@ -100,6 +102,7 @@ async function findTarget(endpoint: string): Promise<Target & { webSocketDebugge
 async function evaluate<T>(client: CdpClient, expression: string): Promise<T> {
   const response = await client.command<{ result?: { value?: T } }>("Runtime.evaluate", {
     expression,
+    awaitPromise: true,
     returnByValue: true,
   });
   if (!response.result || !("value" in response.result))
@@ -164,6 +167,46 @@ async function renderViewport(client: CdpClient, label: string, viewport: Viewpo
   await screenshot(client, resolve(outputDir, `${label}-right.png`), cornerClip("right", geometry));
 }
 
+async function renderSocial(client: CdpClient): Promise<void> {
+  await client.command("Emulation.setDeviceMetricsOverride", {
+    width: 1200,
+    height: 630,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await client.command("Emulation.setEmulatedMedia", {
+    media: "screen",
+    features: [
+      { name: "prefers-color-scheme", value: "dark" },
+      { name: "prefers-reduced-motion", value: "reduce" },
+    ],
+  });
+  await client.command("Page.navigate", { url: new URL("og/", url).href });
+  await evaluate(
+    client,
+    `(async () => {
+      for (let attempt = 0; attempt < 240; attempt += 1) {
+        const complete = [...document.querySelectorAll('[role="status"]')]
+          .some((element) => element.textContent?.includes('Demo complete'));
+        const frames = [...document.querySelectorAll('iframe')];
+        const framesReady = frames.every((frame) => {
+          try { return frame.contentDocument?.readyState === 'complete'; }
+          catch { return false; }
+        });
+        if (complete && framesReady && !document.querySelector('.paneform-splash')) {
+          await document.fonts.ready;
+          await Promise.all(frames.map((frame) => frame.contentDocument?.fonts.ready));
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          return true;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error('Timed out waiting for the completed OG scene');
+    })()`,
+  );
+  await screenshot(client, socialOutput);
+}
+
 async function render(): Promise<void> {
   await mkdir(outputDir, { recursive: true });
   const port = await freePort();
@@ -186,9 +229,14 @@ async function render(): Promise<void> {
   const client = new CdpClient(target.webSocketDebuggerUrl);
   try {
     await client.command("Page.enable");
-    await renderViewport(client, "desktop", { width: 1920, height: 1080 });
-    await renderViewport(client, "mobile", { width: 390, height: 844 });
-    process.stdout.write(`Wrote WM corner renders to ${outputDir}\n`);
+    if (socialMode) {
+      await renderSocial(client);
+      process.stdout.write(`Wrote social image to ${socialOutput}\n`);
+    } else {
+      await renderViewport(client, "desktop", { width: 1920, height: 1080 });
+      await renderViewport(client, "mobile", { width: 390, height: 844 });
+      process.stdout.write(`Wrote WM corner renders to ${outputDir}\n`);
+    }
   } finally {
     client.close();
     chrome.kill("SIGTERM");

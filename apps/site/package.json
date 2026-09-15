@@ -7,6 +7,7 @@
     "dev": "vite dev",
     "generate:hero-snapshot": "tsx scripts/generate-hero-snapshot.ts",
     "render:wm-corners": "tsx scripts/render-wm-corners.ts",
+    "render:og": "tsx scripts/render-wm-corners.ts --social",
     "prebuild": "pnpm generate:hero-snapshot",
     "build": "vite build",
     "preview": "vite preview",

@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 const host = "127.0.0.1";
 const outputDir = resolve(".vercel/output");
 const staticDir = resolve(outputDir, "static");
-const imageUrl = "https://paneform.com/social/paneform-wm.png";
+const imageUrl = "https://paneform.com/social/paneform-wm.png?v=2";
 const pageMetadata = [
   {
     path: "/wm/",
@@ -88,6 +88,7 @@ async function assertArtifacts(): Promise<void> {
     assertFile(resolve(staticDir, "social/paneform-wm.png")),
   ]);
   await assert.rejects(stat(resolve(staticDir, "wm/play")), { code: "ENOENT" });
+  await assert.rejects(stat(resolve(staticDir, "wm/og")), { code: "ENOENT" });
 
   const png = await readFile(resolve(staticDir, "social/paneform-wm.png"));
   assert.ok(
@@ -136,6 +137,15 @@ async function assertStatus(origin: string, path: string, status: number): Promi
 }
 
 async function assertPublicRoutes(origin: string): Promise<void> {
+  // The image source is development-only, even in an opted-in playground preview.
+  for (const path of [
+    "/wm/og",
+    "/wm/og/",
+    "/wm/og/__data.json?x-sveltekit-invalidated=000",
+    "/wm/%6fg/",
+  ]) {
+    await assertStatus(origin, path, 404);
+  }
   const root = await assertStatus(origin, "/", 200);
   assertRedirectDocument(await root.text());
   for (const metadata of pageMetadata) {
