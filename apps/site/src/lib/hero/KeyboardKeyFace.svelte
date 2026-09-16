@@ -203,12 +203,15 @@
     --key-shift-label: 0.82em;
     --key-alt-label: 0.62em;
     --key-named-label: 0.52em;
+    --key-radius: 0.16em;
+    --key-inset-depth: 0.08em;
+    --key-inset-blur: 0.16em;
     --key-legend-padding: 0.3em;
   }
 
   .key.screen .modifier-name { font-size: 0.52em; font-weight: var(--type-weight-regular); }
 
-  @media (max-width: 45rem) {
+  @container physical-keyboard (max-width: 24rem) {
     .key:not(.screen):is(
       [data-key="control-left"],
       [data-key="option-left"],

@@ -1,10 +1,12 @@
 <script lang="ts">
-  import type { ScenarioOsRules, Presentation, SimulationState } from "@paneform/layout-browser";
+  import type { ComparisonEnvironment, LinkedComparison, ScenarioOsRules, Presentation, SimulationState } from "@paneform/layout-browser";
 
   let {
     presentation,
     osRules,
     rememberedMacOsRules,
+    comparison,
+    rememberedLinkedComparison,
     state,
     busy = false,
     onpresentationchange,
@@ -18,6 +20,8 @@
     presentation: Presentation;
     osRules?: ScenarioOsRules | undefined;
     rememberedMacOsRules: Exclude<ScenarioOsRules, "none">;
+    comparison?: LinkedComparison | undefined;
+    rememberedLinkedComparison: LinkedComparison;
     state: SimulationState;
     busy?: boolean;
     onpresentationchange: (presentation: Presentation) => void;
@@ -46,6 +50,11 @@
     else if (value === "none") onsimulationchange("none");
     else onsimulationchange(rememberedMacOsRules);
   }
+
+  function updateEnvironment<K extends keyof ComparisonEnvironment>(side: keyof LinkedComparison, key: K, value: ComparisonEnvironment[K]) {
+    if (!comparison) return;
+    update("comparison", { ...comparison, [side]: { ...comparison[side], [key]: value } });
+  }
 </script>
 
 <details class="advanced">
@@ -57,7 +66,7 @@
       <div class="actions">
         {#if state.wmRunning === false}<button type="button" disabled={busy} onclick={onstart}>Start</button>{:else}<button type="button" disabled={busy} onclick={onstop}>Stop</button><button type="button" disabled={busy} onclick={onpause}>{state.paused ? "Resume" : "Pause"}</button>{/if}
       </div>
-      <label class="os-rules">OS constraints<select aria-label="Simulated OS constraints" disabled={busy} value={osRules === undefined ? "existing" : osRules === "none" ? "none" : "macos"} onchange={(event) => updateOsRules(event.currentTarget.value)}><option value="existing">Existing approximation</option><option value="macos">macOS measured profile</option><option value="none">No OS constraints</option></select></label>
+      {#if !comparison}<label class="os-rules">OS constraints<select aria-label="Simulated OS constraints" disabled={busy} value={osRules === undefined ? "existing" : osRules === "none" ? "none" : "macos"} onchange={(event) => updateOsRules(event.currentTarget.value)}><option value="existing">Existing approximation</option><option value="macos">macOS measured profile</option><option value="none">No OS constraints</option></select></label>{/if}
     </fieldset>
     <fieldset>
       <legend>Presentation</legend>
@@ -75,6 +84,26 @@
       {/each}
       <button type="button" disabled={busy || state.topology.length >= 16} onclick={onadddisplay}>Add display</button>
     </fieldset>
+    <fieldset class="linked-controls">
+      <legend>Linked simulations</legend>
+      <label><input type="checkbox" disabled={busy} checked={comparison !== undefined} onchange={(event) => update("comparison", event.currentTarget.checked ? rememberedLinkedComparison : undefined)} /> Link a second simulation</label>
+      <p class="hint">Both simulations receive the same recorded actions. Changing their settings resets playback, not your steps.</p>
+      {#if comparison}
+        <div class="environments">
+          {#each ["primary", "secondary"] as key}
+            {@const side = key as keyof LinkedComparison}
+            {@const environment = comparison[side]}
+            {@const position = side === "primary" ? "Left" : "Right"}
+            <fieldset>
+              <legend>{position} simulation</legend>
+              <label class="environment-field">Label<input aria-label={`${position} simulation label`} value={environment.label} maxlength="80" disabled={busy} onchange={(event) => updateEnvironment(side, "label", event.currentTarget.value)} /></label>
+              <label class="environment-field">Subtext<input aria-label={`${position} simulation subtext`} value={environment.subtext} maxlength="160" disabled={busy} onchange={(event) => updateEnvironment(side, "subtext", event.currentTarget.value)} /></label>
+              <label class="environment-field">OS rules<select aria-label={`${position} simulation OS rules`} value={environment.os === "none" ? "none" : "macos"} disabled={busy} onchange={(event) => updateEnvironment(side, "os", event.currentTarget.value === "none" ? "none" : rememberedMacOsRules)}><option value="none">Unconstrained</option><option value="macos">macOS</option></select></label>
+            </fieldset>
+          {/each}
+        </div>
+      {/if}
+    </fieldset>
   </div>
 </details>
 
@@ -86,6 +115,11 @@
   .checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; } label, .state { color: var(--color-page-secondary); font: 0.8rem/1.4 var(--type-family-system); }
   .actions, .display-row { display: flex; align-items: center; gap: 0.4rem; } .os-rules { display: grid; gap: 0.35rem; margin-top: 0.75rem; } .display-row { margin-bottom: 0.45rem; } code { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; }
   button, select { min-height: var(--control-target); border: 1px solid var(--color-line-strong); border-radius: var(--radius-control); padding: 0.45rem 0.65rem; background: var(--color-surface-base); color: inherit; } button:not(:disabled) { cursor: pointer; } button:disabled { opacity: 0.5; }
+  .linked-controls { grid-column: 1 / -1; border-top: 1px solid var(--color-line-default); padding-top: 1rem; }
+  .environments { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; margin-top: 1rem; }
+  .environment-field { display: grid; gap: 0.3rem; margin-bottom: 0.6rem; }
+  .environment-field input { min-width: 0; width: 100%; min-height: var(--control-target); border: 1px solid var(--color-line-strong); border-radius: var(--radius-control); padding: 0.45rem 0.65rem; background: var(--color-surface-base); color: var(--color-page-foreground); font: inherit; }
+  .hint { margin-block: 0.5rem; color: var(--color-page-secondary); font-size: 0.8rem; }
   :is(button, select, summary, input):focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
-  @media (max-width: 52rem) { .content { grid-template-columns: 1fr; } }
+  @media (max-width: 52rem) { .content, .environments { grid-template-columns: 1fr; } }
 </style>

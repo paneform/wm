@@ -19,6 +19,15 @@ describe("scenario URL sharing", () => {
         ...emptyPlaygroundScenario.presentation,
         devices: { "display:main": "display" },
         showDock: false,
+        showWindowSettings: false,
+        comparison: {
+          primary: { label: "", subtext: "", os: "none" },
+          secondary: {
+            label: "Authored macOS",
+            subtext: "Custom constraints",
+            os: { kind: "macos", horizontalFallback: 24 },
+          },
+        },
       },
       steps: [
         {
@@ -35,6 +44,8 @@ describe("scenario URL sharing", () => {
     expect(decoded?.simulation).toEqual({
       os: { kind: "macos", horizontalFallback: 48, bottomVisible: 64 },
     });
+    expect(decoded?.presentation?.showWindowSettings).toBe(false);
+    expect(decoded?.presentation?.comparison).toEqual(scenario.presentation?.comparison);
   });
 
   it("loads standard gzip payloads and leaves unrelated fragments alone", async () => {

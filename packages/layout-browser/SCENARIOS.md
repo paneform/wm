@@ -131,6 +131,16 @@ A step settles after the runner has awaited the input and all work scheduled by 
 
 `showKeyboard`, `showDock`, `showTopBar`, `allowMove`, `allowResize`, and `animate` all default to `true`. The keyboard option applies only to laptops; standalone displays never include a keyboard. Visibility options do not alter display work areas or other physical state. `animate: false` makes the player apply steps without key animations, window transitions, or presentation delays.
 
+`showWindowSettings` defaults to `true`. The **Show/Hide window settings** button controls the selected-window inspector independently of window selection. Closing the inspector switches this setting off: later clicks, moves, resizes, and dropdown selections do not reopen it. Showing it again displays the current selection. The setting is retained by resets, JSON export, and share URLs.
+
+### Comparison playback
+
+Set `presentation.comparison` to an object with `primary` and `secondary` environments to compare the same inputs in two independent sessions. Each environment requires a `label`, `subtext`, and `os` ruleset. Labels contain up to 80 characters; subtext contains up to 160 characters. Both default to empty in new linked simulations, and empty headings are hidden. Authored labels and subtexts are encoded with each environment's OS rules in exported JSON and share URLs. The legacy `"cooperative-macos"` value remains valid for shared URLs: it resolves to **CooperativeOS** with no OS constraints and **MacOS** with the document's explicit macOS profile, including overrides, or the default macOS profile otherwise. The environment object is designed so future platform descriptors can extend authoring without introducing special playback actions.
+
+In `/wm/play`, open **Advanced controls > Linked simulations**, enable **Link a second simulation**, and edit each environment's OS, label, and subtext. Changing these settings returns playback to the shared starting state while retaining all recorded steps. Desktop views appear side by side; narrow screens stack them. Both views accept interactions and use one shared input timeline. A move, resize, or inspector edit sends the originating pane's complete requested window frame to both sessions. This is an absolute input, not a relative movement applied independently to each result. Dragging and resizing are mirrored on release, not continuously during the pointer preview. Opening, closing, focusing, and WM commands also share one recording stream; resulting geometry and focus may differ.
+
+Both sessions settle before the timeline advances. Each step's `expect` assertions apply to both sessions, so geometry assertions that match only one OS stop playback. Any one-sided failure blocks further actions until reset. Reset recreates both sessions and cancels queued inputs and gestures from the prior session. Comparison mode disables **Use current layout as new start** because one shared starting scene cannot preserve two diverged results. Export and share retain the comparison setting and all recorded actions.
+
 ## Playground and authoring
 
 `/wm/play/` opens an empty laptop with its keyboard, dock, and top bar visible and the WM stopped. `/wm/play/hero/` uses the same player for the hero sequence. Both reuse the device shells and window gestures from `/wm/`.
@@ -139,7 +149,9 @@ The playground records interactions immediately against its original starting st
 
 Dock launches record one **Open App** step: a `window_added` event with `focus: true`. The simulator creates and focuses the window before settling that step, so replay does not stop with the new window behind the previous one. Omitting `focus` (or setting it to `false`) retains ordinary window-add behavior for background-window reproductions. Standalone `focus_changed` events remain available for independent focus changes.
 
-Clicking a window focuses it and opens its size limits beside the display. On narrow screens the inspector becomes a bounded, scrollable sheet. A blank limit is unspecified, not zero. Constraint edits are physical `window_changed` steps; configuration and presentation remain document-level settings.
+Clicking a window focuses and selects it. When **Show window settings** is enabled, its size limits appear beside the display. On narrow screens the inspector becomes a bounded, scrollable sheet. A blank limit is unspecified, not zero. Constraint edits are physical `window_changed` steps; configuration and presentation remain document-level settings.
+
+The simulated **Settings** app shows the same hotkey reference as the hero, even before Paneform starts. When a scenario supplies `config.keybinds`, Settings shows those configured bindings instead of the demo defaults, marks unsupported browser bindings, and treats an explicit empty record as no shortcuts. Settings is identified by its app bundle, so renaming its window does not remove the reference.
 
 **Add command** opens an empty, typed command builder. It first offers command groups, then only the valid subcommands and arguments for the selected path. Space accepts the highlighted token; Enter inserts a complete command into the local step drafts. For example, type `window move left` and press Enter. Window and display arguments use known references; workspace names and numbers are entered only in their appropriate slots. Quoted names preserve spaces and special characters.
 

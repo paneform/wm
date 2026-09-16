@@ -2,12 +2,13 @@
   import { tick, type Snippet } from "svelte";
   import { INSPECTOR_GUTTER, positionInspector, type InspectorPosition } from "./inspector-position.js";
 
-  let { displayId, refreshKey = 0, onclose, children }: { displayId: string | null; refreshKey?: number; onclose: () => void; children: Snippet } = $props();
+  let { displayId, scopeSelector, refreshKey = 0, onclose, children }: { displayId: string | null; scopeSelector?: string; refreshKey?: number; onclose: () => void; children: Snippet } = $props();
   let panel = $state<HTMLElement>();
   let position = $state<InspectorPosition | null>(null);
 
   $effect(() => {
     const requestedDisplayId = displayId;
+    const requestedScope = scopeSelector;
     const requestedRefreshKey = refreshKey;
     let cancelled = false;
     let frame = 0;
@@ -17,9 +18,11 @@
     const setup = async () => {
       await tick();
       if (cancelled || requestedDisplayId !== displayId || requestedRefreshKey !== refreshKey) return;
-      const wrappers = [...document.querySelectorAll<HTMLElement>(".stage [data-display-id]")];
+       const scope = requestedScope ? document.querySelector(requestedScope) : document;
+       if (!scope) return;
+       const wrappers = [...scope.querySelectorAll<HTMLElement>(".stage [data-display-id]")];
       const wrapper = wrappers.find((element) => element.dataset.displayId === requestedDisplayId) ?? wrappers[0];
-      const anchor = wrapper?.querySelector<HTMLElement>(".display-surface") ?? document.querySelector<HTMLElement>(".stage .display-surface");
+       const anchor = wrapper?.querySelector<HTMLElement>(".display-surface") ?? scope.querySelector<HTMLElement>(".stage .display-surface");
       if (!anchor || !panel) return;
       const panelElement = panel;
 

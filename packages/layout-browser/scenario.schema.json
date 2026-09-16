@@ -283,6 +283,127 @@
           "type": "object",
           "required": [],
           "properties": {
+            "comparison": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": ["cooperative-macos"]
+                },
+                {
+                  "type": "object",
+                  "required": ["primary", "secondary"],
+                  "properties": {
+                    "primary": {
+                      "type": "object",
+                      "required": ["label", "subtext", "os"],
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "description": "The comparison environment label.",
+                          "title": "maxLength(80)",
+                          "maxLength": 80
+                        },
+                        "subtext": {
+                          "type": "string",
+                          "description": "Optional supporting text for the comparison environment.",
+                          "title": "maxLength(160)",
+                          "maxLength": 160
+                        },
+                        "os": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": ["none"]
+                            },
+                            {
+                              "type": "object",
+                              "required": ["kind"],
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": ["macos"]
+                                },
+                                "horizontalFallback": {
+                                  "type": "number",
+                                  "description": "A positive finite OS constraint distance.",
+                                  "title": "between(5e-324, 10000)",
+                                  "minimum": 5e-324,
+                                  "maximum": 10000
+                                },
+                                "bottomVisible": {
+                                  "type": "number",
+                                  "description": "A positive finite OS constraint distance.",
+                                  "title": "between(5e-324, 10000)",
+                                  "minimum": 5e-324,
+                                  "maximum": 10000
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ],
+                          "description": "Optional simulated operating-system window constraints."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "secondary": {
+                      "type": "object",
+                      "required": ["label", "subtext", "os"],
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "description": "The comparison environment label.",
+                          "title": "maxLength(80)",
+                          "maxLength": 80
+                        },
+                        "subtext": {
+                          "type": "string",
+                          "description": "Optional supporting text for the comparison environment.",
+                          "title": "maxLength(160)",
+                          "maxLength": 160
+                        },
+                        "os": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": ["none"]
+                            },
+                            {
+                              "type": "object",
+                              "required": ["kind"],
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": ["macos"]
+                                },
+                                "horizontalFallback": {
+                                  "type": "number",
+                                  "description": "A positive finite OS constraint distance.",
+                                  "title": "between(5e-324, 10000)",
+                                  "minimum": 5e-324,
+                                  "maximum": 10000
+                                },
+                                "bottomVisible": {
+                                  "type": "number",
+                                  "description": "A positive finite OS constraint distance.",
+                                  "title": "between(5e-324, 10000)",
+                                  "minimum": 5e-324,
+                                  "maximum": 10000
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ],
+                          "description": "Optional simulated operating-system window constraints."
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            },
             "device": {
               "type": "string",
               "enum": ["laptop", "display"]
@@ -315,6 +436,9 @@
               "type": "boolean"
             },
             "showTopBar": {
+              "type": "boolean"
+            },
+            "showWindowSettings": {
               "type": "boolean"
             },
             "allowMove": {

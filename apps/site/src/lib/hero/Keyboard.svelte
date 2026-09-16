@@ -104,6 +104,7 @@
     position: relative;
     width: 100%;
     height: 100%;
+    container: physical-keyboard / inline-size;
     transform-style: preserve-3d;
   }
 
@@ -115,6 +116,12 @@
     height: var(--key-height);
     overflow: hidden;
     border-radius: var(--key-radius);
+    font-size: 3.2cqi;
+    --key-depth: 0.55cqi;
+    --key-radius: 0.6cqi;
+    --key-inset-depth: 0.2cqi;
+    --key-inset-blur: 0.4cqi;
+    --key-legend-padding: 0.45cqi;
   }
 
   .key-slot.arrow-up { border-radius: var(--key-radius) var(--key-radius) 0 0; }

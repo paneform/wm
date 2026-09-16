@@ -4,6 +4,7 @@
     parseScenario,
     parseScenarioCommand,
     type LayoutScenario,
+    type LinkedComparison,
     type ScenarioOsRules,
     type Presentation,
     type ScenarioStep,
@@ -35,7 +36,8 @@
   } from "./scenario-focus.js";
   import LocalConfig from "./LocalConfig.svelte";
   import { configuredKeybindIssues, createModifierTracker, eventToConfiguredCommand } from "./configured-keybinds.js";
-  import { createScenarioClient, type ScenarioClient } from "./scenario-client.js";
+  import { createLinkedScenarioClient, type LinkedScenarioClient, type LinkedScenarioState } from "./linked-scenario-client.js";
+  import { comparisonForScenario, defaultLinkedComparison } from "./comparison-config.js";
 
   let {
     initialScenario,
@@ -48,14 +50,19 @@
   const initialDocument = parseScenario({ ...suppliedDocument, steps: suppliedDocument.steps ?? [] });
   type MacOsDescriptor = Exclude<ScenarioOsRules, "none">;
   let scenario = $state<LayoutScenario>(initialDocument);
+  let rememberedLinkedComparison = $state<LinkedComparison>(comparisonForScenario(initialDocument) ?? defaultLinkedComparison);
   let rememberedMacOsRules = $state<MacOsDescriptor>(
     initialDocument.simulation !== undefined && initialDocument.simulation.os !== "none"
       ? initialDocument.simulation.os
       : { kind: "macos" },
   );
   let simulationState = $state<SimulationState>(structuredClone(initialDocument.state));
+  let comparisonState = $state<SimulationState | null>(null);
+  type Pane = "primary" | "comparison";
+  let selectedPane = $state<Pane>("primary");
+  let stageRoot = $state<HTMLElement>();
   let documentText = $state(JSON.stringify(initialDocument, null, 2));
-  let session: ScenarioClient | null = null;
+  let session: LinkedScenarioClient | null = null;
   let sessionAbort: AbortController | null = null;
   let generation = 0;
   let inputEpoch = $state(0);
@@ -64,9 +71,8 @@
   let stepIndex = $state(-1);
   let running = $state(false);
   let busy = $state(false);
-  let preservingSetup = $state(false);
   let complete = $state(false);
-  let sessionMatchesCursor = true;
+  let sessionMatchesCursor = $state(true);
   let error = $state("");
   let notice = $state("Ready.");
   let selectedWindowId = $state<string | null>(null);
@@ -83,9 +89,15 @@
   const steps = $derived(scenario.steps ?? []);
   const currentStep = $derived(stepIndex >= 0 ? steps[stepIndex] : undefined);
   const selectedWindow = $derived(
-    simulationState.windows.find(({ id }) => id === selectedWindowId) ?? null,
+    stateForPane(selectedPane).windows.find(({ id }) => id === selectedWindowId) ?? null,
   );
   const presentation = $derived<Presentation>(scenario.presentation ?? {});
+  const showWindowSettings = $derived(presentation.showWindowSettings ?? true);
+  const linkedComparison = $derived(comparisonForScenario(scenario));
+  const comparing = $derived(linkedComparison !== undefined);
+  const panes = $derived<{ id: Pane; label: string; subtext: string; state: SimulationState }[]>(linkedComparison
+    ? [{ id: "primary", ...linkedComparison.primary, state: simulationState }, { id: "comparison", ...linkedComparison.secondary, state: comparisonState ?? simulationState }]
+    : [{ id: "primary", label: "", subtext: "", state: simulationState }]);
   const keybindIssues = $derived(configuredKeybindIssues(scenario.config?.keybinds ?? {}));
   const modifierTracker = createModifierTracker();
   const keyboard = createKeyboardController({
@@ -98,6 +110,18 @@
     },
     onError: (cause) => (error = messageFor(cause)),
   });
+
+  function stateForPane(pane: Pane): SimulationState {
+    return pane === "comparison" ? comparisonState ?? simulationState : simulationState;
+  }
+
+  function updateStates(states: LinkedScenarioState) {
+    simulationState = states.primary;
+    comparisonState = states.comparison;
+    if (states.comparison === null) selectedPane = "primary";
+    if (selectedWindowId && !stateForPane(selectedPane).windows.some(({ id }) => id === selectedWindowId))
+      selectedWindowId = null;
+  }
 
   function messageFor(cause: unknown): string {
     try {
@@ -160,30 +184,26 @@
   async function replaceSession(
     nextScenario: LayoutScenario,
     message = "Scenario loaded.",
-    preserveInputs = false,
     resetMacOsMemory = false,
   ): Promise<boolean> {
     hashLoadGeneration += 1;
     const nextGeneration = ++generation;
-    if (!preserveInputs) inputEpoch += 1;
+    inputEpoch += 1;
     sessionAbort?.abort();
     const abort = new AbortController();
     sessionAbort = abort;
     stopPlayback();
     busy = true;
-    preservingSetup = preserveInputs;
     notice = "Loading playground...";
     error = "";
     const previous = session;
-    let candidate: ScenarioClient | null = null;
+    let candidate: LinkedScenarioClient | null = null;
     session = null;
     try {
       await previous?.dispose().catch(() => undefined);
       if (nextGeneration !== generation) return false;
-      candidate = await createScenarioClient(
+      candidate = await createLinkedScenarioClient(
         $state.snapshot(nextScenario),
-        undefined,
-        undefined,
         abort.signal,
       );
       const nextState = await candidate.snapshot();
@@ -197,12 +217,14 @@
       if (nextScenario.simulation !== undefined && nextScenario.simulation.os !== "none")
         rememberedMacOsRules = nextScenario.simulation.os;
       else if (resetMacOsMemory) rememberedMacOsRules = { kind: "macos" };
-      simulationState = nextState;
+      const nextComparison = comparisonForScenario(nextScenario);
+      if (nextComparison !== undefined) rememberedLinkedComparison = nextComparison;
+      else if (resetMacOsMemory) rememberedLinkedComparison = defaultLinkedComparison;
+      updateStates(nextState);
       documentText = JSON.stringify(nextScenario, null, 2);
       stepIndex = -1;
       complete = false;
       sessionMatchesCursor = true;
-      selectedWindowId = selectedWindowId && nextState.windows.some(({ id }) => id === selectedWindowId) ? selectedWindowId : null;
       notice = message;
       return true;
     } catch (cause) {
@@ -212,7 +234,6 @@
     } finally {
       if (nextGeneration === generation) {
         busy = false;
-        preservingSetup = false;
       }
     }
   }
@@ -230,7 +251,6 @@
          await replaceSession(
            next,
            shared ? "Shared scenario loaded from this URL." : "Playground ready.",
-           false,
            true,
          );
     } catch (cause) {
@@ -248,17 +268,15 @@
     try {
       const state = await current.apply($state.snapshot(step));
       if (current !== session) return null;
-      simulationState = state;
-      if (selectedWindowId && !state.windows.some(({ id }) => id === selectedWindowId))
-        selectedWindowId = null;
-      return state;
+      updateStates(state);
+      return state.primary;
     } catch (cause) {
       if (current === session) {
         sessionMatchesCursor = false;
         error = messageFor(cause);
         try {
           const updated = await current.snapshot();
-          if (current === session) simulationState = updated;
+          if (current === session) updateStates(updated);
         } catch {
           // Keep the last usable state if the worker itself failed.
         }
@@ -268,13 +286,13 @@
   }
 
   async function performSetup(stepsToRecord: readonly ScenarioStep[]) {
-    if (running || (busy && !preservingSetup)) return;
+    if (running || busy) return;
     if (hasStepDrafts) {
       notice = "Apply your step changes before changing the desktop.";
       return;
     }
     const first = stepsToRecord[0];
-    if (stepsToRecord.length === 1 && first && "event" in first && first.event.kind === "focus_changed" && simulationState.focusedWindow === first.event.windowId) {
+    if (!comparing && stepsToRecord.length === 1 && first && "event" in first && first.event.kind === "focus_changed" && simulationState.focusedWindow === first.event.windowId) {
       const id = first.event.windowId;
       const target = simulationState.windows.find((window) => window.id === id);
       const workspace = target?.workspace === undefined ? "1" : target.workspace;
@@ -322,7 +340,7 @@
   }
 
   async function advance(): Promise<boolean> {
-    if (!session || complete || busy) return false;
+    if (!session || complete || busy || !sessionMatchesCursor) return false;
     const current = session;
     const expectedGeneration = generation;
     const nextIndex = stepIndex + 1;
@@ -386,11 +404,11 @@
     void replaceSession(
       scenario,
       "Returned to the starting layout. New actions will be recorded before the first step.",
-      true,
     );
   }
 
   function rebase() {
+    if (comparing) return;
     const next = parseScenario({
       ...scenario,
       state: $state.snapshot(simulationState),
@@ -409,7 +427,7 @@
         notice = "Steps updated. Continue from the current layout.";
         return true;
       }
-      return await replaceSession(next, "Steps changed. Playback reset to the starting layout.", true);
+      return await replaceSession(next, "Steps changed. Playback reset to the starting layout.");
     } catch (cause) {
       error = messageFor(cause);
       return false;
@@ -427,7 +445,16 @@
 
   function updatePresentation(nextPresentation: Presentation) {
     try {
-      scenario = parseScenario({ ...scenario, presentation: nextPresentation });
+      const next = parseScenario({ ...scenario, presentation: nextPresentation });
+      if (JSON.stringify(nextPresentation.comparison) !== JSON.stringify(presentation.comparison)) {
+        if (hasStepDrafts || running || busy || pendingEdits > 0) {
+          notice = "Pause playback and apply step changes before linking simulations.";
+          return;
+        }
+        void replaceSession(next, "Linked simulations updated. Playback reset; recorded steps kept.");
+        return;
+      }
+      scenario = next;
       panelRevision += 1;
       documentText = JSON.stringify(scenario, null, 2);
     } catch (cause) {
@@ -488,23 +515,24 @@
     await applySetup({ event: { kind: "focus_changed", windowId: id }, caption: `Focus ${title}.` });
   }
 
-  function selectWindow(id: string, displayId?: string) {
+  function selectWindow(id: string, displayId?: string, pane: Pane = "primary") {
+    selectedPane = pane;
     selectedWindowId = id;
     selectedDisplayId = displayId ?? null;
-    if (running || (busy && !preservingSetup)) return;
+    if (running || busy) return;
     void focusWindow(id);
   }
 
   function closeInspector() {
     const id = selectedWindowId;
-    selectedWindowId = null;
-    selectedDisplayId = null;
-    const windowElement = [...document.querySelectorAll<HTMLElement>("[data-window-id]")].find((element) => element.dataset.windowId === id);
+    updatePresentation({ ...presentation, showWindowSettings: false });
+    const paneRoot = stageRoot?.querySelector<HTMLElement>(`[data-simulation-pane="${selectedPane}"]`);
+    const windowElement = [...(paneRoot?.querySelectorAll<HTMLElement>("[data-window-id]") ?? [])].find((element) => element.dataset.windowId === id);
     windowElement?.querySelector<HTMLElement>(".window-titlebar")?.focus({ preventScroll: true });
   }
 
-  async function changeWindow(id: string, frame: SimulationWindow["frame"]) {
-    const window = simulationState.windows.find((candidate) => candidate.id === id);
+  async function changeWindow(id: string, frame: SimulationWindow["frame"], pane: Pane = "primary") {
+    const window = stateForPane(pane).windows.find((candidate) => candidate.id === id);
     if (!window) return;
     await applySetup({ event: { kind: "window_changed", window: { ...physicalWindow(window), frame } } });
   }
@@ -513,22 +541,23 @@
     await applySetup({ event: { kind: "window_removed", windowId: id } });
   }
 
-  async function activate(appId: string, displayId?: string) {
+  async function activate(appId: string, displayId?: string, pane: Pane = "primary") {
     if (appId === "com.paneform.wm") {
       await service("start");
       return;
     }
     await enqueueSetup(async () => {
-      const existing = simulationState.windows.find(({ bundleId }) => bundleId === appId);
+      const state = stateForPane(pane);
+      const existing = state.windows.find(({ bundleId }) => bundleId === appId);
       if (existing) {
         const title = existing.title ?? existing.id;
         await performSetup([{ event: { kind: "focus_changed", windowId: existing.id }, caption: `Focus ${title}.` }]);
         return;
       }
-      const display = simulationState.topology.find(({ id }) => id === displayId) ?? simulationState.topology[0];
+      const display = state.topology.find(({ id }) => id === displayId) ?? state.topology[0];
       if (!display) return;
       const workArea = display.workArea ?? display.frame;
-      const allocated = nextPlayWindowId(scenario, simulationState.windows.map(({ id }) => id), openSequence);
+      const allocated = nextPlayWindowId(scenario, state.windows.map(({ id }) => id), openSequence);
       openSequence = allocated.sequence;
       const offset = ((openSequence - 1) % 6) * 36;
       const app = HERO_APPS.find(({ bundleId }) => bundleId === appId);
@@ -538,7 +567,7 @@
       const added: SimulationWindow = { id: allocated.id, title: app?.title ?? "Window", bundleId: appId, frame: { x: workArea.x + Math.min(40 + offset, Math.max(0, workArea.width - width)), y: workArea.y + Math.min(40 + offset, Math.max(0, workArea.height - height)), width, height } };
       const window = maxWidth === undefined ? added : { ...added, constraints: { maxWidth } };
       const launchSteps: ScenarioStep[] = [];
-      if (simulationState.wmRunning !== false && !simulationState.paused && display.workspace !== null && simulationState.focusedWorkspace !== display.workspace)
+      if (state.wmRunning !== false && !state.paused && display.workspace !== null && state.focusedWorkspace !== display.workspace)
         launchSteps.push({ command: `workspace focus ${quoteCommandToken(display.workspace)}` });
       launchSteps.push({ event: { kind: "window_added", window: physicalWindow(window), focus: true }, caption: `Open ${window.title ?? "Window"}` });
       await performSetup(launchSteps);
@@ -560,7 +589,7 @@
         throw new Error("Scenario JSON must be 1 MiB or smaller.");
       const loaded = parseScenario(JSON.parse(documentText));
       const next = parseScenario({ ...loaded, steps: loaded.steps ?? [] });
-      void replaceSession(next, undefined, false, true);
+      void replaceSession(next, undefined, true);
     } catch (cause) {
       error = messageFor(cause);
       notice = "Fix the JSON or validation error, then load it again.";
@@ -603,6 +632,7 @@
   });
 
   onMount(() => {
+    const detachKeyboard = stageRoot ? keyboard.attach(stageRoot) : undefined;
     const handleHash = () => void loadHash(location.hash);
     window.addEventListener("keydown", modifierTracker.keydown, true);
     window.addEventListener("keyup", modifierTracker.keyup, true);
@@ -617,6 +647,7 @@
       hashLoadGeneration += 1;
       sessionAbort?.abort();
       stopPlayback();
+      detachKeyboard?.();
       keyboard.stop();
       modifierTracker.reset();
       window.removeEventListener("keydown", modifierTracker.keydown, true);
@@ -634,37 +665,48 @@
 </script>
 
 <section class="player" aria-labelledby="play-heading" aria-busy={busy}>
-  <header class="intro"><div><p class="eyebrow">Paneform playground</p><h1 id="play-heading">{title}</h1></div><p>{description}</p></header>
+  <header class="intro"><div><p class="eyebrow">Paneform playground</p><h1 id="play-heading">{linkedComparison?.primary.label && linkedComparison.secondary.label ? `${linkedComparison.primary.label} vs ${linkedComparison.secondary.label}` : title}</h1></div><p>{comparing ? "One recording, two simulations. Actions on either side are sent to both." : description}</p></header>
   <div class="showcase">
-    {#key inputEpoch}<ScenarioStage
-      state={simulationState}
-      {presentation}
-      controller={keyboard}
-      interactive={!running && (!busy || preservingSetup)}
-      selectable
-      onactivate={(app, display) => void activate(app, display)}
-      onselectwindow={selectWindow}
-      onclosewindow={(id) => void closeWindow(id)}
-      onmovewindow={(id, point) => { const window = simulationState.windows.find((item) => item.id === id); if (window) return changeWindow(id, { ...window.frame, ...point }); }}
-      onresizewindow={(id, frame) => changeWindow(id, frame)}
-      onfocusworkspace={(name, display) => void focusWorkspace(name, display)}
-      onshortcut={handleShortcut}
-    />{/key}
+    <div class="simulation-panes" class:comparing bind:this={stageRoot}>
+      {#key inputEpoch}{#each panes as pane (pane.id)}
+        <div class="simulation-pane" data-simulation-pane={pane.id}>
+          {#if comparing && (pane.label || pane.subtext)}<header class="pane-heading">{#if pane.label}<h2>{pane.label}</h2>{/if}{#if pane.subtext}<p>{pane.subtext}</p>{/if}</header>{/if}
+          <ScenarioStage
+            state={pane.state}
+            {presentation}
+            controller={keyboard}
+            keybinds={scenario.config?.keybinds}
+            attachKeyboard={false}
+            label={comparing ? `${pane.label || (pane.id === "primary" ? "Left simulation" : "Right simulation")} interactive displays` : "Interactive scenario displays"}
+            interactive={!running && !busy && sessionMatchesCursor}
+            selectable
+            onactivate={(app, display) => void activate(app, display, pane.id)}
+            onselectwindow={(id, display) => selectWindow(id, display, pane.id)}
+            onclosewindow={(id) => void closeWindow(id)}
+            onmovewindow={(id, point) => { const window = pane.state.windows.find((item) => item.id === id); if (window) return changeWindow(id, { ...window.frame, ...point }, pane.id); }}
+            onresizewindow={(id, frame) => changeWindow(id, frame, pane.id)}
+            onfocusworkspace={(name, display) => void focusWorkspace(name, display)}
+            onshortcut={handleShortcut}
+          />
+        </div>
+      {/each}{/key}
+    </div>
     <div class="caption" aria-live="polite"><span>{stepIndex < 0 ? "Start" : `${stepIndex + 1} / ${steps.length}`}</span><strong>{currentStep?.caption ?? "Starting layout"}</strong>{#if currentStep}<code>{"command" in currentStep ? currentStep.command : currentStep.event.kind}</code>{/if}</div>
   </div>
 
-  {#if selectedWindow}
-    <FloatingWindowPanel displayId={selectedDisplayId} refreshKey={inputEpoch + panelRevision} onclose={closeInspector}>
+  {#if showWindowSettings && selectedWindow}
+    <FloatingWindowPanel displayId={selectedDisplayId} scopeSelector={`[data-simulation-pane="${selectedPane}"]`} refreshKey={inputEpoch + panelRevision} onclose={closeInspector}>
       <WindowInspector window={selectedWindow} editable={!busy && !running} onsave={saveWindow} onclose={closeInspector} />
     </FloatingWindowPanel>
   {/if}
 
   <div class="controls" aria-label="Playground controls">
-    <button class="primary" type="button" disabled={(busy && !running) || complete || steps.length === 0 || hasStepDrafts || pendingEdits > 0} onclick={() => void play()}>{running ? "Pause playback" : "Play"}</button>
-    <button type="button" disabled={busy || running || complete || steps.length === 0 || hasStepDrafts || pendingEdits > 0} onclick={() => void advance()}>Step</button>
+    <button class="primary" type="button" disabled={(busy && !running) || complete || steps.length === 0 || hasStepDrafts || pendingEdits > 0 || !sessionMatchesCursor} onclick={() => void play()}>{running ? "Pause playback" : "Play"}</button>
+    <button type="button" disabled={busy || running || complete || steps.length === 0 || hasStepDrafts || pendingEdits > 0 || !sessionMatchesCursor} onclick={() => void advance()}>Step</button>
       <button type="button" onclick={returnToStart}>Return to start</button>
-    {#if stepIndex >= 0}<button type="button" onclick={rebase}>Use current layout as new start</button>{/if}
-    <label class="window-picker" for="inspect-window">Window<select id="inspect-window" value={selectedWindowId ?? ""} onchange={(event) => { selectedWindowId = event.currentTarget.value || null; selectedDisplayId = null; }}><option value="">Inspect a window</option>{#each simulationState.windows as window (window.id)}<option value={window.id}>{window.title ?? window.id}</option>{/each}</select></label>
+    {#if stepIndex >= 0 && !comparing}<button type="button" onclick={rebase}>Use current layout as new start</button>{/if}
+    <button type="button" aria-pressed={showWindowSettings} onclick={() => updatePresentation({ ...presentation, showWindowSettings: !showWindowSettings })}>{showWindowSettings ? "Hide" : "Show"} window settings</button>
+    <label class="window-picker" for="inspect-window">Window{linkedComparison ? ` on ${selectedPane === "primary" ? linkedComparison.primary.label || "left simulation" : linkedComparison.secondary.label || "right simulation"}` : ""}<select id="inspect-window" value={selectedWindowId ?? ""} onchange={(event) => { selectedWindowId = event.currentTarget.value || null; selectedDisplayId = null; }}><option value="">Inspect a window</option>{#each stateForPane(selectedPane).windows as window (window.id)}<option value={window.id}>{window.title ?? window.id}</option>{/each}</select></label>
     <span class="status" aria-live="polite">{notice}</span>
   </div>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
@@ -678,8 +720,10 @@
     {presentation}
     osRules={scenario.simulation?.os}
     {rememberedMacOsRules}
+    comparison={linkedComparison}
+    {rememberedLinkedComparison}
     state={simulationState}
-    busy={busy || running || pendingEdits > 0}
+    busy={busy || running || pendingEdits > 0 || hasStepDrafts}
     onpresentationchange={updatePresentation}
     onsimulationchange={updateSimulation}
     onstart={() => void service("start")}
@@ -702,9 +746,16 @@
 </section>
 
 <style>
-  .player { width: min(100% - 2 * var(--page-gutter), 88rem); margin-inline: auto; padding-block: 2rem; }
+  .player { width: min(100% - 2 * clamp(0.5rem, 2vw, 2rem), 120rem); margin-inline: auto; padding-block: 1rem; }
   .intro { display: grid; grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.8fr); align-items: end; gap: 3rem; margin-bottom: 1.5rem; } .eyebrow { margin: 0 0 0.6rem; color: var(--rp-foam); font-size: var(--type-size-label); font-weight: 650; letter-spacing: var(--type-tracking-label); text-transform: uppercase; } h1 { margin: 0; font-size: clamp(2rem, 4vw, 3.5rem); line-height: 1; } .intro > p { margin: 0; color: var(--color-page-secondary); }
   .showcase { overflow: hidden; border: 1px solid var(--color-line-default); border-radius: 1rem; background: radial-gradient(circle at 50% 20%, color-mix(in srgb, var(--rp-iris) 10%, transparent), transparent 55%), var(--color-surface-base); }
+  .simulation-panes.comparing { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .simulation-pane { min-width: 0; }
+  .comparing .simulation-pane + .simulation-pane { border-inline-start: 1px solid var(--color-line-default); }
+  .pane-heading { padding: 1rem 1rem 0; text-align: center; }
+  .pane-heading h2 { margin: 0; font-size: clamp(1.2rem, 2.5vw, 1.8rem); letter-spacing: -0.03em; overflow-wrap: anywhere; }
+  .pane-heading p { margin: 0.35rem 0 0; color: var(--color-page-secondary); font-size: 0.8rem; }
+  @media (max-width: 48rem) { .simulation-panes.comparing { grid-template-columns: minmax(0, 1fr); } .comparing .simulation-pane + .simulation-pane { border-inline-start: 0; border-block-start: 1px solid var(--color-line-default); } }
   .caption { min-height: 4.5rem; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 1rem; border-top: 1px solid var(--color-line-default); padding: 0.8rem 1.1rem; } .caption > span { color: var(--rp-foam); font-size: var(--type-size-label); text-transform: uppercase; } code { color: var(--rp-rose); font-size: 0.75rem; }
   .controls, .editor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem; } .controls { margin-block: 1rem; } .status { flex: 1; min-width: 14rem; color: var(--color-page-secondary); text-align: right; }
   button, .editor-actions a { min-height: var(--control-target); border: 1px solid var(--color-line-strong); border-radius: var(--radius-control); padding: 0.6rem 0.85rem; background: var(--color-surface-raised); color: inherit; font-weight: 650; cursor: pointer; } button.primary { border-color: var(--color-action-background); background: var(--color-action-background); color: var(--color-action-foreground); } button:disabled { cursor: not-allowed; opacity: 0.5; }

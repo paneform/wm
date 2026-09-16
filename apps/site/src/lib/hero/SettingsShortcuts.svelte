@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { commandPaths } from "@paneform/layout";
+  import { commandPaths, type Keybinds } from "@paneform/layout";
   import { heroKeyboardChords, keyboardKeys, type KeyboardKey } from "$lib/design/tokens.js";
+  import { configuredKeybindIssues } from "$lib/play/configured-keybinds.js";
   import KeyboardKeyFace from "./KeyboardKeyFace.svelte";
   import { HERO_WORKSPACES } from "./workspace-model.js";
 
+  let { keybinds }: { keybinds?: Keybinds | undefined } = $props();
   const id = $props.id();
   let dismissed = $state<string | null>(null);
   const keyById = new Map(keyboardKeys.map((key) => [key.id, key]));
@@ -24,6 +26,18 @@
     );
     if (!path?.description) throw new Error(`Missing command help: ${prefix}`);
     return path.description;
+  }
+  function configuredHelp(command: string): string {
+    const parts = command.trim().split(/\s+/u);
+    const path = commandPaths.find(({ tokens, minimumTokens }) =>
+      parts.length >= (minimumTokens ?? tokens.length) &&
+      parts.length <= tokens.length &&
+      parts.every((part, index) => {
+        const token = tokens[index];
+        return token?.kind === "slot" || token?.value === part;
+      }),
+    );
+    return path?.description ?? command;
   }
   type Binding = {
     modifiers: KeyboardKey[];
@@ -54,6 +68,12 @@
       help: help("workspace focus <workspace>"),
     },
     {
+      id: "move-workspace-display",
+      bindings: [singleBinding([key("lshift"), key("rshift")], key("tab"))],
+      action: "move workspace to next display",
+      help: help("workspace move next"),
+    },
+    {
       id: "move-workspace",
       bindings: [
         rangeBinding([key("lshift"), key("rshift")], [workspaceKeys[0], workspaceKeys[1]], "0–9"),
@@ -78,20 +98,35 @@
       };
     }),
   ];
+  const configuredRows = $derived.by(() => {
+    if (keybinds === undefined) return [];
+    const issues = new Map(
+      configuredKeybindIssues(keybinds).map((issue) => [`${issue.chord}\0${issue.action}`, issue.reason]),
+    );
+    return Object.entries(keybinds).map(([chord, action], index) => ({
+      id: `configured-${index}`,
+      chord,
+      action,
+      help: configuredHelp(action),
+      issue: issues.get(`${chord}\0${action}`),
+    }));
+  });
 </script>
 
 <!-- The scroll region is focusable so keyboard users can scroll it. -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <section class="shortcuts" aria-label="Keyboard shortcuts" tabindex="0">
   <h2>Keyboard shortcuts</h2>
-  <p class="intro">Workspace keys exclude {excluded}.<br />L ⇧ and R ⇧ mean left and right Shift.</p>
+  {#if keybinds === undefined}<p class="intro">Workspace keys exclude {excluded}.<br />L ⇧ and R ⇧ mean left and right Shift.</p>{/if}
   <table>
     <thead><tr><th scope="col">Hotkey</th><th scope="col">Action</th></tr></thead>
     <tbody>
-      {#each rows as row}
+      {#each keybinds === undefined ? rows : configuredRows as row}
         <tr>
           <td class="bindings-cell">
-            <span class="bindings">
+            {#if "chord" in row}
+              <code class="configured-chord">{row.chord}</code>
+            {:else}<span class="bindings">
               {#each row.bindings as binding}
                 <span class="chord">
                   <span class="modifiers">
@@ -111,17 +146,18 @@
                   </span>
                 </span>
               {/each}
-            </span>
+            </span>{/if}
           </td>
           <td class="action-cell">
             <button type="button" class="action" aria-describedby={`${id}-${row.id}`}
               onpointerenter={() => dismissed = null} onfocus={() => dismissed = null}
               onkeydown={(event) => { if (event.key === "Escape") { dismissed = row.id; event.stopPropagation(); } }}
-            >{row.action}</button>
-            <span class="tooltip" class:dismissed={dismissed === row.id} id={`${id}-${row.id}`} role="tooltip">{row.help}</span>
+            >{#if "chord" in row}<code class="configured-command" class:unsupported={row.issue}>{row.action}</code>{:else}{row.action}{/if}</button>
+            <span class="tooltip" class:dismissed={dismissed === row.id} id={`${id}-${row.id}`} role="tooltip">{"issue" in row && row.issue ? `Unsupported in the playground: ${row.issue}` : row.help}</span>
           </td>
         </tr>
       {/each}
+      {#if keybinds !== undefined && configuredRows.length === 0}<tr><td colspan="2" class="empty">No keyboard shortcuts configured.</td></tr>{/if}
     </tbody>
   </table>
 </section>
@@ -140,6 +176,9 @@
   .chord { display: flex; max-width: 100%; flex-wrap: wrap; align-items: center; gap: 0.3em; font-size: 1em; --key-named-label: 0.72em; }
   .modifiers, .alternative { display: inline-flex; flex: none; align-items: center; gap: 0.3em; }
   .plus { color: var(--color-page-secondary); }
+  .configured-chord, .configured-command { color: inherit; font: inherit; }
+  .configured-command.unsupported { color: var(--rp-gold); text-decoration: underline dotted; }
+  .empty { color: var(--color-page-secondary); }
   .action-cell { position: relative; min-width: 0; overflow-wrap: anywhere; }
   .action { max-width: 100%; border: 0; padding: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: help; text-decoration: underline dotted var(--rp-muted); text-underline-offset: 0.3em; }
   .action:hover, .action:focus-visible { color: var(--rp-rose); }

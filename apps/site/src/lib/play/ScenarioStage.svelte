@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Keybinds } from "@paneform/layout";
   import type { Presentation, SimulationState } from "@paneform/layout-browser";
   import { onMount } from "svelte";
   import DesktopDisplay from "$lib/desktop/DesktopDisplay.svelte";
@@ -9,6 +10,7 @@
   import type { AppIcon, DockItem, Frame, SurfaceWindow } from "$lib/desktop/desktop-model.js";
   import { HERO_APPS } from "$lib/hero/hero-model.js";
   import Keyboard from "$lib/hero/Keyboard.svelte";
+  import SettingsShortcuts from "$lib/hero/SettingsShortcuts.svelte";
   import type { KeyboardController } from "$lib/hero/keyboard-controller.js";
   import { windowsForDisplay } from "./projection.js";
 
@@ -16,6 +18,8 @@
     state,
     presentation = {},
     controller,
+    attachKeyboard = true,
+    label = "Interactive scenario displays",
     interactive = true,
     selectable = false,
     onactivate,
@@ -26,10 +30,13 @@
     onresizewindow,
     onfocusworkspace,
     onshortcut,
+    keybinds,
   }: {
     state: SimulationState;
     presentation?: Presentation;
     controller: KeyboardController;
+    attachKeyboard?: boolean;
+    label?: string;
     interactive?: boolean;
     selectable?: boolean;
     onactivate?: (appId: string, displayId?: string) => void;
@@ -40,6 +47,7 @@
     onresizewindow?: (id: string, frame: Frame) => Promise<void> | void;
     onfocusworkspace?: (name: string, displayId?: string) => void;
     onshortcut?: (event: KeyboardEvent) => void;
+    keybinds?: Keybinds | undefined;
   } = $props();
 
   // oxlint-disable-next-line no-unassigned-vars -- Svelte assigns this through bind:this.
@@ -91,16 +99,24 @@
     return presentation.devices?.[id] ?? presentation.device ?? "laptop";
   }
 
-  onMount(() => (stageElement ? controller.attach(stageElement) : undefined));
+  function isSettingsWindow(window: SurfaceWindow): boolean {
+    const source = state.windows.find(({ id }) => id === window.id);
+    return source?.bundleId === "com.apple.systempreferences" ||
+      (source?.bundleId === undefined && window.title === "Settings");
+  }
+
+  onMount(() => (attachKeyboard && stageElement ? controller.attach(stageElement) : undefined));
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -- This scoped keyboard region must receive physical key events. -->
-<section class="stage" bind:this={stageElement} role="application" tabindex="0" aria-label="Interactive scenario displays" onkeydowncapture={(event) => onshortcut?.(event)}>
+<section class="stage" bind:this={stageElement} role="application" tabindex="0" aria-label={label} onkeydowncapture={(event) => onshortcut?.(event)}>
   {#each state.topology as display (display.id)}
     {@const laptop = deviceFor(display.id) === "laptop"}
     <div class:laptop class="device" data-display-id={display.id} style:--ratio={display.frame.width / display.frame.height}>
       {#snippet screenSnippet()}
+        {#snippet settingsBody()}<SettingsShortcuts {keybinds} />{/snippet}
         <WindowSurface
+          contentForWindow={(window) => isSettingsWindow(window) ? settingsBody : undefined}
           windows={surfaceWindows(display)}
           viewport={display.frame}
           focusedWindowId={state.focusedWindow ?? null}
@@ -140,11 +156,11 @@
 </div>
 
 <style>
-  .stage { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 25rem), 1fr)); align-items: center; gap: clamp(2rem, 5vw, 5rem); min-height: 24rem; padding: 1.5rem clamp(0.75rem, 3vw, 2rem); outline: none; }
+  .stage { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 25rem), 1fr)); align-items: center; gap: clamp(1rem, 3vw, 3rem); padding: 0.5rem clamp(0.5rem, 1.5vw, 1.5rem); outline: none; }
   .stage:focus-visible { box-shadow: inset 0 0 0 2px var(--color-focus-ring); }
-  .device { position: relative; width: min(100%, 42rem, calc(44svh * var(--ratio))); margin-inline: auto; }
-  .device.laptop { width: min(100%, 38rem, calc(56svh / 1.18)); aspect-ratio: 1 / 1.18; }
+  .device { position: relative; width: min(100%, 60rem, calc(60svh * var(--ratio))); margin-inline: auto; }
+  .device.laptop { width: min(100%, 60rem, calc(70svh / 1.1)); aspect-ratio: 1 / 1.1; }
   .device.laptop :global(.laptop-device) { --laptop-pivot: 1; position: absolute; inset: auto 0 0; }
   .text-alternative { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  @media (max-width: 42rem) { .stage { min-height: 18rem; padding-block: 1rem; } }
+  @media (min-width: 64rem) and (min-height: 40rem) { .device.laptop { aspect-ratio: 1 / 1.05; } }
 </style>

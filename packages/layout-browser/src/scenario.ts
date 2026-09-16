@@ -235,7 +235,25 @@ const PresentationDevicesSchema = Schema.Record({
   jsonSchema: { maxProperties: 16 },
 });
 
+export const ComparisonEnvironmentSchema = Schema.Struct({
+  label: boundedString(80, "The comparison environment label."),
+  subtext: boundedString(160, "Optional supporting text for the comparison environment."),
+  os: OsRulesSchema,
+});
+export type ComparisonEnvironment = typeof ComparisonEnvironmentSchema.Encoded;
+
+export const LinkedComparisonSchema = Schema.Struct({
+  primary: ComparisonEnvironmentSchema,
+  secondary: ComparisonEnvironmentSchema,
+});
+export type LinkedComparison = typeof LinkedComparisonSchema.Encoded;
+
 export const PresentationSchema = Schema.Struct({
+  comparison: Schema.optional(
+    Schema.Union(Schema.Literal("cooperative-macos"), LinkedComparisonSchema),
+  ).annotations({
+    description: "Request two linked playback sessions with independently configured OS rules.",
+  }),
   device: Schema.optionalWith(Schema.Literal("laptop", "display"), {
     default: () => "laptop" as const,
   }),
@@ -245,6 +263,7 @@ export const PresentationSchema = Schema.Struct({
   }),
   showDock: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   showTopBar: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  showWindowSettings: Schema.optional(Schema.Boolean),
   allowMove: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   allowResize: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   animate: Schema.optionalWith(Schema.Boolean, { default: () => true }),

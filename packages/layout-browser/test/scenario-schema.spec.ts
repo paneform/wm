@@ -108,15 +108,21 @@ describe("layout scenario schema", () => {
     expect(
       parseScenario({
         ...base(),
-        presentation: { devices: { "display:main": "display" } },
+        presentation: {
+          comparison: "cooperative-macos",
+          devices: { "display:main": "display" },
+          showWindowSettings: false,
+        },
         config: { experiments: { directionalMoveGroups: true } },
       }),
     ).toMatchObject({
       presentation: {
+        comparison: "cooperative-macos",
         device: "laptop",
         showKeyboard: true,
         showDock: true,
         showTopBar: true,
+        showWindowSettings: false,
         allowMove: true,
         allowResize: true,
         animate: true,
@@ -124,6 +130,57 @@ describe("layout scenario schema", () => {
       config: { experiments: { directionalMoveGroups: true } },
       state: { wmRunning: true },
     });
+  });
+
+  it("rejects unknown comparison modes", () => {
+    expect(() =>
+      parseScenario({ ...base(), presentation: { comparison: "competitive-macos" } }),
+    ).toThrow();
+  });
+
+  it("accepts configurable linked comparison environments", () => {
+    const comparison = {
+      primary: { label: "Strict", subtext: "first", os: { kind: "macos" as const } },
+      secondary: { label: "Free", subtext: "second", os: "none" as const },
+    };
+    expect(
+      parseScenario({ ...base(), presentation: { comparison } }).presentation?.comparison,
+    ).toEqual(comparison);
+    expect(
+      parseScenario({
+        ...base(),
+        presentation: {
+          comparison: {
+            primary: { label: "x".repeat(80), subtext: "x".repeat(160), os: "none" },
+            secondary: { label: "Same OS", subtext: "", os: "none" },
+          },
+        },
+      }).presentation?.comparison,
+    ).toBeDefined();
+    const blank = {
+      primary: { label: "", subtext: "", os: "none" as const },
+      secondary: { label: "", subtext: "", os: { kind: "macos" as const } },
+    };
+    expect(
+      parseScenario({ ...base(), presentation: { comparison: blank } }).presentation,
+    ).toMatchObject({ comparison: blank });
+  });
+
+  it.each([
+    ["long label", { label: "x".repeat(81), subtext: "", os: "none" }],
+    ["long subtext", { label: "Valid", subtext: "x".repeat(161), os: "none" }],
+    ["missing label", { subtext: "", os: "none" }],
+    ["missing subtext", { label: "Valid", os: "none" }],
+    ["missing OS", { label: "Valid", subtext: "" }],
+  ])("rejects comparison environment with %s", (_name, environment) => {
+    expect(() =>
+      parseScenario({
+        ...base(),
+        presentation: {
+          comparison: { primary: environment, secondary: environment },
+        },
+      }),
+    ).toThrow();
   });
 
   it.each([
