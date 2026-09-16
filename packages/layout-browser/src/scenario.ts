@@ -34,6 +34,25 @@ const dimension = Schema.Number.pipe(
   Schema.between(Number.MIN_VALUE, 10_000_000),
   Schema.annotations({ description: "A positive finite screen dimension." }),
 );
+const osRuleOverride = Schema.Number.pipe(
+  Schema.between(Number.MIN_VALUE, 10_000),
+  Schema.annotations({ description: "A positive finite OS constraint distance." }),
+);
+
+export const OsRulesSchema = Schema.Union(
+  Schema.Literal("none"),
+  Schema.Struct({
+    kind: Schema.Literal("macos"),
+    horizontalFallback: Schema.optional(osRuleOverride),
+    bottomVisible: Schema.optional(osRuleOverride),
+  }),
+).annotations({ description: "Optional simulated operating-system window constraints." });
+export type ScenarioOsRules = typeof OsRulesSchema.Encoded;
+
+export const SimulationOptionsSchema = Schema.Struct({
+  os: OsRulesSchema,
+}).annotations({ description: "Optional platform simulation behavior." });
+export type SimulationOptions = typeof SimulationOptionsSchema.Encoded;
 
 const FrameSchema = Schema.Struct({
   x: coordinate,
@@ -271,6 +290,7 @@ export const LayoutScenarioSchema = Schema.Struct({
   ),
   config: Schema.optional(PortableConfigSchema),
   presentation: Schema.optional(PresentationSchema),
+  simulation: Schema.optional(SimulationOptionsSchema),
   state: SimulationStateSchema,
   steps: Schema.optional(Schema.Array(ScenarioStepSchema).pipe(Schema.maxItems(500))),
 }).annotations({

@@ -3,6 +3,7 @@ import { createEngine } from "@paneform/layout";
 import type { Clock, Command, ConfigSource, Engine, WindowId } from "@paneform/layout";
 import { mountLayoutRenderer, type LayoutRenderer } from "./host.js";
 import { createWebPlatformSim, type WebPlatformSim } from "./sim/web-platform.js";
+import type { OsRuleset } from "./sim/os-rules.js";
 
 const activeSimulators = new WeakMap<HTMLElement, LayoutSimulator>();
 const simulatorReservations = new WeakMap<HTMLElement, symbol>();
@@ -55,6 +56,7 @@ export interface LayoutSimulator extends Omit<LayoutRenderer, "stop"> {
 
 export interface LayoutSimulatorOptions {
   seed?: number;
+  osRules?: OsRuleset;
 }
 
 export async function createLayoutSimulator(
@@ -67,7 +69,7 @@ export async function createLayoutSimulator(
   if (simulatorReservations.get(container) !== reservation) {
     throw new Error("layout simulator startup superseded");
   }
-  const sim = createWebPlatformSim({ seed: options.seed ?? 1337 });
+  const sim = createWebPlatformSim({ seed: options.seed ?? 1337, osRules: options.osRules });
   const seedable = seedWorld(sim);
   let engine: Engine | null = null;
   let renderer: LayoutRenderer | null = null;

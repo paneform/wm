@@ -1,4 +1,5 @@
 import { Effect, Stream } from "effect";
+import type { OsGeometryRequest, OsRuleset } from "./os-rules.js";
 import {
   PlatformError,
   type DisplayId,
@@ -116,6 +117,8 @@ export interface UpdateWindowSpec {
 export interface WebPlatformSimOptions {
   seed?: number | undefined;
   displays?: readonly DisplaySpec[] | undefined;
+  /** Omission preserves the original adapter-only offscreen approximation. */
+  osRules?: OsRuleset | undefined;
 }
 
 export interface GroundTruthWindow {
@@ -526,6 +529,18 @@ export function createWebPlatformSim(options: WebPlatformSimOptions = {}): WebPl
 
   const workAreasAll = (): Frame[] => displays.map((d) => d.spec.workArea);
 
+  const applyOsRules = (
+    w: SimWindow,
+    requested: Frame,
+    operation: OsGeometryRequest["operation"],
+  ): Frame =>
+    options.osRules?.applyGeometry({
+      previous: { ...(operation === "external" ? w.frame : (w.target ?? w.frame)) },
+      requested: { ...requested },
+      displays: sortedDisplays(),
+      operation,
+    }) ?? requested;
+
   const applyOffscreenRefusal = (frame: Frame): Frame => {
     const observations = sortedDisplays();
     const touchesAny = observations.some((d) => intersectsArea(frame, d.frame));
@@ -538,27 +553,28 @@ export function createWebPlatformSim(options: WebPlatformSimOptions = {}): WebPl
 
   const applyPositionWrite = (w: SimWindow, point: Point): Frame => {
     if (w.personality.kind === "unmovable") return { ...w.frame };
-    let next: Frame = { ...w.frame, x: point.x, y: point.y };
+    let next: Frame = { ...(w.target ?? w.frame), x: point.x, y: point.y };
     if (w.personality.kind === "workAreaClamp") {
       next = clampFrameIntoWorkArea(next, workAreasAll());
     }
-    return applyOffscreenRefusal(next);
+    return options.osRules === undefined ? applyOffscreenRefusal(next) : next;
   };
 
   const applySizeWrite = (w: SimWindow, size: Size): Frame => {
     if (w.personality.kind === "unmovable") return { ...w.frame };
     if (w.personality.kind === "fixedSize") return { ...w.frame };
+    const frame = w.target ?? w.frame;
     const constrained = clampSizeToConstraints(size, w.personality.constraints);
     if (w.personality.anchor === "center") {
       // Reanchoring app: origin shifts so the visual center stays put.
       return {
-        x: Math.round(w.frame.x + (w.frame.width - constrained.width) / 2),
-        y: Math.round(w.frame.y + (w.frame.height - constrained.height) / 2),
+        x: Math.round(frame.x + (frame.width - constrained.width) / 2),
+        y: Math.round(frame.y + (frame.height - constrained.height) / 2),
         width: constrained.width,
         height: constrained.height,
       };
     }
-    return { ...w.frame, width: constrained.width, height: constrained.height };
+    return { ...frame, width: constrained.width, height: constrained.height };
   };
 
   interface WritePart {
@@ -585,7 +601,7 @@ export function createWebPlatformSim(options: WebPlatformSimOptions = {}): WebPl
           settleWindow(w);
           return yield* failWith("rejected", "window refuses all size changes");
         }
-        const nextFrame = part.apply();
+        const nextFrame = applyOsRules(w, part.apply(), part.component);
         if (isAnimated(w.personality)) {
           w.target = nextFrame;
         } else {
@@ -736,7 +752,8 @@ export function createWebPlatformSim(options: WebPlatformSimOptions = {}): WebPl
   const driftWindow = (id: WindowId, dx: number, dy: number): void => {
     const w = windows.get(id);
     if (w === undefined) return;
-    w.frame = { ...w.frame, x: w.frame.x + dx, y: w.frame.y + dy };
+    w.frame = applyOsRules(w, { ...w.frame, x: w.frame.x + dx, y: w.frame.y + dy }, "external");
+    w.target = null;
     w.initialFrame = { ...w.frame };
     dispatch({ kind: "window_changed", window: observationOf(w) });
   };
@@ -744,7 +761,8 @@ export function createWebPlatformSim(options: WebPlatformSimOptions = {}): WebPl
   const nudgeWindow = (id: WindowId, frame: Partial<Frame>): void => {
     const w = windows.get(id);
     if (w === undefined) return;
-    w.frame = { ...w.frame, ...frame };
+    w.frame = applyOsRules(w, { ...w.frame, ...frame }, "external");
+    w.target = null;
     dispatch({ kind: "window_changed", window: observationOf(w) });
   };
 
@@ -757,7 +775,7 @@ export function createWebPlatformSim(options: WebPlatformSimOptions = {}): WebPl
   const updateWindow = (id: WindowId, spec: UpdateWindowSpec): void => {
     const window = windows.get(id);
     if (window === undefined) throw new Error(`Unknown simulated window: ${id}`);
-    window.frame = { ...spec.frame };
+    window.frame = applyOsRules(window, spec.frame, "external");
     window.target = null;
     window.title = spec.title ?? window.title;
     window.bundleId = spec.bundleId ?? window.bundleId;

@@ -12,6 +12,9 @@ describe("scenario URL sharing", () => {
   it("round-trips a complete scenario, presentation, and Unicode captions", async () => {
     const scenario = parseScenario({
       ...emptyPlaygroundScenario,
+      simulation: {
+        os: { kind: "macos", horizontalFallback: 48, bottomVisible: 64 },
+      },
       presentation: {
         ...emptyPlaygroundScenario.presentation,
         devices: { "display:main": "display" },
@@ -27,7 +30,11 @@ describe("scenario URL sharing", () => {
     });
     const fragment = await encodeScenarioFragment(scenario);
     expect(fragment).toMatch(/^#scenario=gz\.[A-Za-z0-9_-]+$/);
-    expect(await decodeScenarioFragment(fragment)).toEqual(scenario);
+    const decoded = await decodeScenarioFragment(fragment);
+    expect(decoded).toEqual(scenario);
+    expect(decoded?.simulation).toEqual({
+      os: { kind: "macos", horizontalFallback: 48, bottomVisible: 64 },
+    });
   });
 
   it("loads standard gzip payloads and leaves unrelated fragments alone", async () => {
@@ -59,6 +66,7 @@ describe("scenario URL sharing", () => {
     const scenario = parseScenario(emptyPlaygroundScenario);
     expect(scenario.state.windows).toEqual([]);
     expect(scenario.state.wmRunning).toBe(false);
+    expect(scenario.simulation).toEqual({ os: { kind: "macos" } });
     expect(scenario.steps).toBeUndefined();
     expect(scenario.presentation).toMatchObject({
       device: "laptop",

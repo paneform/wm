@@ -420,6 +420,64 @@ describe("portable scenario runner", () => {
     }
   });
 
+  it.each([
+    { wmRunning: false, paused: false },
+    { wmRunning: true, paused: true },
+  ])(
+    "applies explicit macOS rules to external window changes with running=$wmRunning paused=$paused",
+    async (mode) => {
+      const displayFrame = { x: 0, y: 0, width: 1000, height: 800 };
+      const workArea = { x: 0, y: 24, width: 1000, height: 724 };
+      const initialFrame = { x: -300, y: -200, width: 200, height: 100 };
+      const session = await createScenarioSession({
+        simulation: { os: { kind: "macos" } },
+        state: {
+          topology: [{ id: "display:main", frame: displayFrame, workArea, workspace: "1" }],
+          windows: [{ id: "A", frame: initialFrame }],
+          focusedWindow: "A",
+          focusedWorkspace: "1",
+          ...mode,
+        },
+      });
+      try {
+        expect((await session.snapshot()).windows[0]?.frame).toEqual(initialFrame);
+        const changed = await session.apply({
+          event: {
+            kind: "window_changed",
+            window: { id: "A", frame: { x: 0, y: -100, width: 200, height: 100 } },
+          },
+        });
+        expect(changed.windows[0]?.frame.y).toBe(24);
+
+        const bottom = await session.apply({
+          event: {
+            kind: "window_changed",
+            window: { id: "A", frame: { x: 0, y: 800, width: 200, height: 100 } },
+          },
+        });
+        expect(bottom.windows[0]?.frame.y).toBe(748);
+
+        const fallback = await session.apply({
+          event: {
+            kind: "window_changed",
+            window: { id: "A", frame: { x: -200, y: 24, width: 200, height: 100 } },
+          },
+        });
+        expect(fallback.windows[0]?.frame.x).toBe(-160);
+
+        const onePoint = await session.apply({
+          event: {
+            kind: "window_changed",
+            window: { id: "A", frame: { x: -199, y: 24, width: 200, height: 100 } },
+          },
+        });
+        expect(onePoint.windows[0]?.frame.x).toBe(-199);
+      } finally {
+        await session.dispose();
+      }
+    },
+  );
+
   it("keeps live errors recoverable and applies rapid inputs in FIFO order", async () => {
     const session = await createScenarioSession(base);
     try {

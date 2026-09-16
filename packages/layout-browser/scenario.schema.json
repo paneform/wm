@@ -330,6 +330,48 @@
           "additionalProperties": false,
           "description": "Optional UI-only playback and device-shell choices."
         },
+        "simulation": {
+          "type": "object",
+          "required": ["os"],
+          "properties": {
+            "os": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": ["none"]
+                },
+                {
+                  "type": "object",
+                  "required": ["kind"],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": ["macos"]
+                    },
+                    "horizontalFallback": {
+                      "type": "number",
+                      "description": "A positive finite OS constraint distance.",
+                      "title": "between(5e-324, 10000)",
+                      "minimum": 5e-324,
+                      "maximum": 10000
+                    },
+                    "bottomVisible": {
+                      "type": "number",
+                      "description": "A positive finite OS constraint distance.",
+                      "title": "between(5e-324, 10000)",
+                      "minimum": 5e-324,
+                      "maximum": 10000
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Optional simulated operating-system window constraints."
+            }
+          },
+          "additionalProperties": false,
+          "description": "Optional platform simulation behavior."
+        },
         "state": {
           "type": "object",
           "required": ["topology", "windows"],

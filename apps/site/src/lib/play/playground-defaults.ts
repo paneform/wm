@@ -10,6 +10,7 @@ export const playgroundDesktopPreset = {
 };
 
 export const emptyPlaygroundScenario = {
+  simulation: { os: { kind: "macos" } },
   presentation: {
     device: "laptop",
     showKeyboard: true,

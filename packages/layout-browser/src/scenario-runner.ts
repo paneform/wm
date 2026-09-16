@@ -12,6 +12,8 @@ import {
   type SimulationWindow,
 } from "./scenario.js";
 import { createScenarioRuntime } from "./scenario-runtime.js";
+import { createMacOsRules } from "./sim/macos-rules.js";
+import { unconstrainedOsRules } from "./sim/os-rules.js";
 import {
   createWebPlatformSim,
   type AddWindowSpec,
@@ -129,6 +131,12 @@ export async function createScenarioSession(input: unknown): Promise<ScenarioSes
   const sim = createWebPlatformSim({
     displays: displaySpecs(scenario.state.topology),
     seed: 0x50414e45,
+    osRules:
+      scenario.simulation === undefined
+        ? undefined
+        : scenario.simulation.os === "none"
+          ? unconstrainedOsRules
+          : createMacOsRules(scenario.simulation.os),
   });
   const members = new Map<string, ScenarioMember>();
   const aliases = new Map<string, string>();

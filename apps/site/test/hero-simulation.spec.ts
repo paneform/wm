@@ -11,6 +11,7 @@ import {
 import { createDemoRunner } from "../src/lib/hero/demo-runner.js";
 import { createActionArbiter } from "../src/lib/hero/action-arbiter.js";
 import { fastForwardHeroSimulation } from "../src/lib/hero/hero-snapshot.js";
+import { unconstrainedOsRules } from "@paneform/layout-browser";
 
 describe("hero simulation", () => {
   it.each([false, true])("focuses an existing window with Paneform running=%s", async (running) => {
@@ -219,25 +220,41 @@ describe("hero simulation", () => {
   });
 
   it.each([
-    { x: -900, y: 120 },
-    { x: 1800, y: 120 },
-    { x: 180, y: -700 },
-    { x: 180, y: 1000 },
-  ])("preserves a stopped physical drag offscreen at $x,$y", async (point) => {
-    const simulation = await createHeroSimulation();
-    try {
-      expect((await simulation.activateApp("Browser")).ok).toBe(true);
+    [
+      { x: -900, y: 120 },
+      { x: -816, y: 120 },
+    ],
+    [
+      { x: 1800, y: 120 },
+      { x: 1472, y: 120 },
+    ],
+    [
+      { x: 180, y: -700 },
+      { x: 180, y: 44 },
+    ],
+    [
+      { x: 180, y: 1000 },
+      { x: 180, y: 930 },
+    ],
+  ])(
+    "applies the macOS boundary to a stopped physical drag at $0.x,$0.y",
+    async (point, expected) => {
+      const simulation = await createHeroSimulation();
+      try {
+        expect((await simulation.activateApp("Browser")).ok).toBe(true);
 
-      const result = await simulation.moveWindow("Browser", point);
+        const result = await simulation.moveWindow("Browser", point);
 
-      expect(result.ok).toBe(true);
-      expect(
-        result.snapshot.state.windows.find(({ id }) => id === result.snapshot.apps.Browser)?.frame,
-      ).toMatchObject(point);
-    } finally {
-      await simulation.dispose();
-    }
-  });
+        expect(result.ok).toBe(true);
+        expect(
+          result.snapshot.state.windows.find(({ id }) => id === result.snapshot.apps.Browser)
+            ?.frame,
+        ).toMatchObject(expected);
+      } finally {
+        await simulation.dispose();
+      }
+    },
+  );
 
   it("keeps a pre-launch window at its resized frame", async () => {
     const simulation = await createHeroSimulation();
@@ -256,7 +273,7 @@ describe("hero simulation", () => {
     }
   });
 
-  it("preserves a stopped physical resize fully offscreen", async () => {
+  it("applies the macOS boundary to a stopped physical resize", async () => {
     const simulation = await createHeroSimulation();
     try {
       expect((await simulation.activateApp("Browser")).ok).toBe(true);
@@ -267,6 +284,19 @@ describe("hero simulation", () => {
       expect(result.ok).toBe(true);
       expect(
         result.snapshot.state.windows.find(({ id }) => id === result.snapshot.apps.Browser)?.frame,
+      ).toEqual({ x: -360, y: 44, width: 400, height: 300 });
+    } finally {
+      await simulation.dispose();
+    }
+  });
+
+  it("allows offscreen pre-launch geometry when OS rules are unconstrained", async () => {
+    const simulation = await createHeroSimulation(unconstrainedOsRules);
+    try {
+      expect((await simulation.activateApp("Browser")).ok).toBe(true);
+      const frame = { x: -900, y: -700, width: 400, height: 300 };
+      expect(
+        (await simulation.resizeWindow("Browser", frame)).snapshot.state.windows[0]?.frame,
       ).toEqual(frame);
     } finally {
       await simulation.dispose();

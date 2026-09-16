@@ -1,11 +1,14 @@
 <script lang="ts">
-  import type { Presentation, SimulationState } from "@paneform/layout-browser";
+  import type { ScenarioOsRules, Presentation, SimulationState } from "@paneform/layout-browser";
 
   let {
     presentation,
+    osRules,
+    rememberedMacOsRules,
     state,
     busy = false,
     onpresentationchange,
+    onsimulationchange,
     onstart,
     onstop,
     onpause,
@@ -13,9 +16,12 @@
     onremovedisplay,
   }: {
     presentation: Presentation;
+    osRules?: ScenarioOsRules | undefined;
+    rememberedMacOsRules: Exclude<ScenarioOsRules, "none">;
     state: SimulationState;
     busy?: boolean;
     onpresentationchange: (presentation: Presentation) => void;
+    onsimulationchange: (osRules: ScenarioOsRules | undefined) => void;
     onstart: () => void;
     onstop: () => void;
     onpause: () => void;
@@ -34,6 +40,12 @@
   function updateDevice(id: string, device: "laptop" | "display") {
     update("devices", { ...presentation.devices, [id]: device });
   }
+
+  function updateOsRules(value: string) {
+    if (value === "existing") onsimulationchange(undefined);
+    else if (value === "none") onsimulationchange("none");
+    else onsimulationchange(rememberedMacOsRules);
+  }
 </script>
 
 <details class="advanced">
@@ -45,6 +57,7 @@
       <div class="actions">
         {#if state.wmRunning === false}<button type="button" disabled={busy} onclick={onstart}>Start</button>{:else}<button type="button" disabled={busy} onclick={onstop}>Stop</button><button type="button" disabled={busy} onclick={onpause}>{state.paused ? "Resume" : "Pause"}</button>{/if}
       </div>
+      <label class="os-rules">OS constraints<select aria-label="Simulated OS constraints" disabled={busy} value={osRules === undefined ? "existing" : osRules === "none" ? "none" : "macos"} onchange={(event) => updateOsRules(event.currentTarget.value)}><option value="existing">Existing approximation</option><option value="macos">macOS measured profile</option><option value="none">No OS constraints</option></select></label>
     </fieldset>
     <fieldset>
       <legend>Presentation</legend>
@@ -71,7 +84,7 @@
   .content { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; border-top: 1px solid var(--color-line-default); padding: 1rem; }
   fieldset { min-width: 0; margin: 0; border: 0; padding: 0; } legend { margin-bottom: 0.6rem; font-weight: 650; }
   .checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; } label, .state { color: var(--color-page-secondary); font: 0.8rem/1.4 var(--type-family-system); }
-  .actions, .display-row { display: flex; align-items: center; gap: 0.4rem; } .display-row { margin-bottom: 0.45rem; } code { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .actions, .display-row { display: flex; align-items: center; gap: 0.4rem; } .os-rules { display: grid; gap: 0.35rem; margin-top: 0.75rem; } .display-row { margin-bottom: 0.45rem; } code { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; }
   button, select { min-height: var(--control-target); border: 1px solid var(--color-line-strong); border-radius: var(--radius-control); padding: 0.45rem 0.65rem; background: var(--color-surface-base); color: inherit; } button:not(:disabled) { cursor: pointer; } button:disabled { opacity: 0.5; }
   :is(button, select, summary, input):focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
   @media (max-width: 52rem) { .content { grid-template-columns: 1fr; } }

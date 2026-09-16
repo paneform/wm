@@ -11,6 +11,7 @@ import {
 
 const scenario = parseScenario({
   config: { defaults: { gap: 0 } },
+  simulation: { os: { kind: "macos", horizontalFallback: 48, bottomVisible: 64 } },
   state: {
     topology: [{ id: "main", frame: { x: 0, y: 0, width: 1200, height: 800 }, workspace: "1" }],
     windows: [
@@ -27,6 +28,7 @@ describe("focus while editing a played scenario", () => {
   it("inserts focus at the current cursor and preserves the baseline and remaining steps", async () => {
     const next = insertFocusStep(scenario, 0, "B");
     expect(next.scenario.state).toEqual(scenario.state);
+    expect(next.scenario.simulation).toEqual(scenario.simulation);
     expect(next.scenario.steps).toEqual([scenario.steps?.[0], next.step, scenario.steps?.[1]]);
     const session = await createScenarioSession(scenario);
     try {

@@ -8,6 +8,7 @@ describe("hero play scenario", () => {
     const scenario = parseHeroScenario();
     expect(scenario.state.windows).toHaveLength(0);
     expect(scenario.state.wmRunning).toBe(false);
+    expect(scenario.simulation).toEqual({ os: { kind: "macos" } });
     expect(source.steps.map((step: { command?: string }) => step.command).filter(Boolean)).toEqual([
       "service start",
       "window move right",

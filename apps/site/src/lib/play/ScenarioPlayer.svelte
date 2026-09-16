@@ -4,6 +4,7 @@
     parseScenario,
     parseScenarioCommand,
     type LayoutScenario,
+    type ScenarioOsRules,
     type Presentation,
     type ScenarioStep,
     type ScenarioEvent,
@@ -45,7 +46,13 @@
   const maximumDocumentLength = 1024 * 1024;
   const suppliedDocument = structuredClone(untrack(() => initialScenario));
   const initialDocument = parseScenario({ ...suppliedDocument, steps: suppliedDocument.steps ?? [] });
+  type MacOsDescriptor = Exclude<ScenarioOsRules, "none">;
   let scenario = $state<LayoutScenario>(initialDocument);
+  let rememberedMacOsRules = $state<MacOsDescriptor>(
+    initialDocument.simulation !== undefined && initialDocument.simulation.os !== "none"
+      ? initialDocument.simulation.os
+      : { kind: "macos" },
+  );
   let simulationState = $state<SimulationState>(structuredClone(initialDocument.state));
   let documentText = $state(JSON.stringify(initialDocument, null, 2));
   let session: ScenarioClient | null = null;
@@ -150,7 +157,12 @@
     });
   }
 
-  async function replaceSession(nextScenario: LayoutScenario, message = "Scenario loaded.", preserveInputs = false): Promise<boolean> {
+  async function replaceSession(
+    nextScenario: LayoutScenario,
+    message = "Scenario loaded.",
+    preserveInputs = false,
+    resetMacOsMemory = false,
+  ): Promise<boolean> {
     hashLoadGeneration += 1;
     const nextGeneration = ++generation;
     if (!preserveInputs) inputEpoch += 1;
@@ -182,6 +194,9 @@
       session = candidate;
       candidate = null;
       scenario = nextScenario;
+      if (nextScenario.simulation !== undefined && nextScenario.simulation.os !== "none")
+        rememberedMacOsRules = nextScenario.simulation.os;
+      else if (resetMacOsMemory) rememberedMacOsRules = { kind: "macos" };
       simulationState = nextState;
       documentText = JSON.stringify(nextScenario, null, 2);
       stepIndex = -1;
@@ -212,7 +227,12 @@
        if (hashGeneration !== hashLoadGeneration) return;
        const loaded = shared ?? structuredClone(initialDocument);
        const next = parseScenario({ ...loaded, steps: loaded.steps ?? [] });
-        await replaceSession(next, shared ? "Shared scenario loaded from this URL." : "Playground ready.");
+         await replaceSession(
+           next,
+           shared ? "Shared scenario loaded from this URL." : "Playground ready.",
+           false,
+           true,
+         );
     } catch (cause) {
       if (hashGeneration === hashLoadGeneration) {
         error = messageFor(cause);
@@ -415,6 +435,22 @@
     }
   }
 
+  function updateSimulation(os: ScenarioOsRules | undefined) {
+    if (hasStepDrafts || running || busy || pendingEdits > 0) {
+      notice = "Pause playback and apply step changes before changing simulation.";
+      return;
+    }
+    try {
+      const next = parseScenario({
+        ...scenario,
+        simulation: os === undefined ? undefined : { os },
+      });
+      void replaceSession(next, "Simulation changed. Playback reset to the starting layout.");
+    } catch (cause) {
+      error = messageFor(cause);
+    }
+  }
+
   async function service(action: "start" | "stop") {
     await applySetup({ command: `service ${action}` });
   }
@@ -524,7 +560,7 @@
         throw new Error("Scenario JSON must be 1 MiB or smaller.");
       const loaded = parseScenario(JSON.parse(documentText));
       const next = parseScenario({ ...loaded, steps: loaded.steps ?? [] });
-      void replaceSession(next);
+      void replaceSession(next, undefined, false, true);
     } catch (cause) {
       error = messageFor(cause);
       notice = "Fix the JSON or validation error, then load it again.";
@@ -640,9 +676,12 @@
 
   <AdvancedControls
     {presentation}
+    osRules={scenario.simulation?.os}
+    {rememberedMacOsRules}
     state={simulationState}
     busy={busy || running || pendingEdits > 0}
     onpresentationchange={updatePresentation}
+    onsimulationchange={updateSimulation}
     onstart={() => void service("start")}
     onstop={() => void service("stop")}
     onpause={() => void togglePause()}

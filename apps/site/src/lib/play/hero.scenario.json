@@ -1,6 +1,7 @@
 {
   "$schema": "https://paneform.com/wm/play/scenario.schema.json",
   "config": { "defaults": { "gap": 16 } },
+  "simulation": { "os": { "kind": "macos" } },
   "presentation": {
     "device": "laptop",
     "showKeyboard": true,

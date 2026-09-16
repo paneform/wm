@@ -1,5 +1,10 @@
 import { createEngine, type Command, type Engine, type StateSnapshot } from "@paneform/layout";
-import { createWebPlatformSim, type WebPlatformSim } from "@paneform/layout-browser";
+import {
+  createWebPlatformSim,
+  macOsRules,
+  type OsRuleset,
+  type WebPlatformSim,
+} from "@paneform/layout-browser";
 import { Effect, Stream } from "effect";
 import { desktopDisplayPreset, laptopDisplayPreset } from "../desktop/display-presets.js";
 import {
@@ -146,10 +151,13 @@ const appWindow = (
   return spec;
 };
 
-export async function createHeroSimulation(): Promise<HeroSimulation> {
+export async function createHeroSimulation(
+  osRules: OsRuleset = macOsRules,
+): Promise<HeroSimulation> {
   const sim = createWebPlatformSim({
     seed: HERO_SEED,
     displays: [macBookDisplay],
+    osRules,
   });
   let engine: Engine | null = null;
   const makeEngine = () =>

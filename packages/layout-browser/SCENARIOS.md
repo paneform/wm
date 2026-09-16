@@ -45,7 +45,7 @@ Use the published `@paneform/layout-browser/scenario.schema.json` file in an edi
 
 ## State
 
-`state` is required. `config`, `presentation`, and `steps` are optional. `$schema` is only an editor hint and does not change runtime behavior.
+`state` is required. `config`, `simulation`, `presentation`, and `steps` are optional. `$schema` is only an editor hint and does not change runtime behavior.
 
 Portable documents are limited to 100 initial or live windows, 16 displays, and 500 steps. Configuration is limited to 100 workspaces, 16 display entries, 100 assignment matchers per workspace, and 500 key bindings. An expectation can name at most 100 windows.
 
@@ -60,6 +60,60 @@ An omitted `wmRunning` value means `true` for existing scenarios. When it is `fa
 Window constraints are simulated platform truth. They are not preloaded as layout-engine knowledge. Each minimum or maximum is optional and independent, and missing constraints remain unmodeled. A minimum cannot exceed the corresponding maximum.
 
 Frames and size limits use logical screen points, not device pixels. The primary display's top-left is the origin; positive Y points down. Other displays and offscreen windows may have negative coordinates. An omitted work area uses the full display frame, and an omitted scale defaults to 1. Initial frames may fall outside supplied size limits; importing does not clamp them.
+
+## OS simulation
+
+OS rules run in the physical simulator, not the layout engine. They apply to manual moves and resizes while Paneform is stopped or paused, and to each component of engine geometry writes. The engine sees the effective geometry through its normal platform adapter; it is not given advance knowledge of the rules.
+
+Select the macOS profile in a portable scenario:
+
+```json
+"simulation": {
+  "os": { "kind": "macos", "horizontalFallback": 40, "bottomVisible": 52 }
+}
+```
+
+Both distances are optional, positive logical-point values up to 10000. Use `"simulation": { "os": "none" }` to disable OS constraints. Application personalities, such as fixed sizes and minimum dimensions on adapter writes, remain independent. Omitting `simulation` preserves the older behavior for existing scenarios: an adapter position write that completely misses all screens returns to a corner with a 1-by-52-point overlap; external edits are unconstrained. That older approximation is not the measured macOS profile.
+
+New playground scenes and the landing-page hero use macOS rules. The playground's **Advanced controls > OS constraints** selector resets playback to the original starting state when changed, clearing old engine knowledge. JSON export, share links, and replay retain the selected profile. Initial imported frames are always preserved exactly, including out-of-bounds frames; rules apply on subsequent moves/resizes, not on import or window creation. Display changes update the rules' context on the next geometry request rather than moving windows immediately.
+
+### Injecting a ruleset
+
+The simulator accepts a separately defined `OsRuleset` object. It contains a name and a deterministic `applyGeometry` function receiving the previous frame, candidate frame, current displays, and operation (`position`, `size`, or `external`). Return a new effective frame without modifying the inputs. Application size responses run before the OS stage on adapter writes. External edits enter the OS stage directly. No engine instance is required.
+
+```ts
+import {
+  createWebPlatformSim,
+  createMacOsRules,
+  unconstrainedOsRules,
+  type OsRuleset,
+} from "@paneform/layout-browser";
+
+const rules: OsRuleset = createMacOsRules({ bottomVisible: 64 });
+const sim = createWebPlatformSim({ osRules: rules });
+const unrestricted = createWebPlatformSim({ osRules: unconstrainedOsRules });
+```
+
+`macOsRules` is the reusable default macOS object. `createLayoutSimulator` also accepts `osRules`, and the site's `createHeroSimulation` accepts a ruleset directly. Another OS can supply its own object without changing the simulator or layout engine. Portable JSON contains only a profile descriptor; the session factory resolves it to an object, so executable rules are never loaded from shared scenario data. A new portable OS profile would also need a schema and resolver entry.
+
+### Measured behavior and limits
+
+The default macOS profile models the Messages boundary probes recorded on August 21, 2026, not every macOS application or AX write sequence:
+
+| Probe                           | Requested                    | Observed                  |
+| ------------------------------- | ---------------------------- | ------------------------- |
+| Built-in display, 1512 by 982   | Window top above usable area | Top at 32                 |
+| Sidecar at x=1512, 1302 by 1024 | Window top above display     | Top at 0                  |
+| Messages, width 660             | x=-659 or x=2813             | Accepted, 1 point visible |
+| Messages, width 660             | x=-660 or x=2814             | 40 points visible         |
+| Messages, height 320, built-in  | y=931 or below               | y=930, 52 points visible  |
+| Messages, height 320, Sidecar   | y=973 or below               | y=972, 52 points visible  |
+
+Sources are the local investigation records `wm-8ipb`, `wm-ykgq`, `wm-tqkk`, and `wm-i6nr`. Later probes (`wm-ysdj`) recorded 64-point bottom visibility for other apps; configure `bottomVisible` for those cases. These values are logical points, independent of display pixel density.
+
+The model uses each display's `workArea.y` as its top floor across the full display width. It does not model a camera-shaped collision region or hard-code 32 points. The hero's 44-point camera band therefore remains a presentation-specific work area, not a native measurement. A frame with positive horizontal overlap is accepted; a fully concealed frame snaps back by `horizontalFallback`. Bottom visibility is capped by the window and display height. Window dimensions themselves are not changed by this profile.
+
+For multiple displays, a placement legal on any display is retained. Otherwise the model chooses greatest intersection area, then nearest window-center-to-display distance; ties follow the simulator's stable display order. Accepting any legal placement keeps repeated corrections stable on staggered displays. These selection rules, tiny/oversized-window behavior, and sub-point overlaps are deterministic modeling choices, not measured macOS guarantees. Empty topology leaves geometry unchanged. App-specific AX ordering effects, fullscreen behavior, native resizing limits, and compositor decorations are not reproduced by this profile.
 
 ## Steps and events
 

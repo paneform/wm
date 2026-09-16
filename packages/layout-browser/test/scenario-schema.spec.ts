@@ -126,6 +126,28 @@ describe("layout scenario schema", () => {
     });
   });
 
+  it.each([
+    undefined,
+    "none" as const,
+    { kind: "macos" as const },
+    { kind: "macos" as const, horizontalFallback: 40, bottomVisible: 52 },
+  ])("accepts simulation OS rules %j", (os) => {
+    const input = os === undefined ? base() : { ...base(), simulation: { os } };
+    expect(parseScenario(input).simulation?.os).toEqual(os);
+  });
+
+  it.each([
+    {},
+    { os: "macos" },
+    { os: { kind: "windows" } },
+    { os: { kind: "macos", horizontalFallback: 0 } },
+    { os: { kind: "macos", horizontalFallback: Number.POSITIVE_INFINITY } },
+    { os: { kind: "macos", bottomVisible: -1 } },
+    { os: { kind: "macos", bottomVisible: 10_001 } },
+  ])("rejects invalid simulation options %j", (simulation) => {
+    expect(() => parseScenario({ ...base(), simulation })).toThrow();
+  });
+
   it("allows presentation overrides for displays introduced by later topology", () => {
     expect(() =>
       parseScenario({
