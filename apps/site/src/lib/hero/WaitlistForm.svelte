@@ -27,7 +27,7 @@
 
 <div class="waitlist" class:compact>
   <form action={waitlistEndpoint} method="post" onsubmit={submit} aria-busy={pending}>
-    <label class:visually-hidden={compact} for="waitlist-email">Get notified when wm is ready.</label>
+    <label for="waitlist-email">Get notified when paneform wm launches.</label>
     <input type="hidden" name="userGroup" value={waitlistGroup} />
     <input type="hidden" name="mailingLists" value={waitlistMailingList} />
     <div class="fields">
@@ -53,7 +53,6 @@
     .fields input, .fields button { flex: 1 0 100%; width: 100%; max-width: none; }
     .fields button { padding-inline: clamp(var(--space-2), calc((100cqi - 13ch - 2px) / 2), 1rem); }
   }
-  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .fields { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); }
   input, button { min-height: var(--control-target); border: var(--stroke-hairline) solid var(--color-line-default); border-radius: var(--radius-control); padding-inline: var(--space-3); font: inherit; font-size: var(--type-size-control); }
   input { flex: 1 1 20ch; width: auto; max-width: 30ch; min-width: min(100%, calc(20ch + var(--space-3) * 2 + 2px)); background: transparent; color: var(--color-page-foreground); }
@@ -65,5 +64,9 @@
   p:not(:empty) { margin-top: var(--space-2); }
   #waitlist-error { color: var(--rp-rose); }
   .privacy { margin-top: var(--space-2); }
+  .compact label { font-size: var(--type-size-label); margin-bottom: var(--space-1); }
+  .compact .fields { flex-wrap: nowrap; }
+  .compact input { flex: 1 1 0; width: 0; min-width: 0; max-width: none; }
+  .compact button { flex: 0 0 auto; width: auto; padding-inline: var(--space-3); }
   input:focus-visible, button:focus-visible { outline: var(--stroke-strong) solid var(--color-focus-ring); outline-offset: var(--space-1); }
 </style>

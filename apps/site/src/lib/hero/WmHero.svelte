@@ -802,8 +802,11 @@
 		</p>
 	</section>
   <footer id="waitlist-signup" class="stage-controls" onfocusin={() => { if (lifecycle === "autoplay" || lifecycle === "paused") pauseDemo(false); }}>
-    <p>Your desktop, organized. Coming first to Mac.</p>
-    {#if lifecycle === "failed"}<p role="status">{status}</p>{/if}
+    <div class="footer-info">
+      <p>Your desktop, organized. Coming first to Mac.</p>
+      <p class="creator-credit">Crafted with care by <a href="https://allandeutsch.com">Allan Deutsch</a> <a class="bluesky-link" href="https://bsky.app/profile/allandeutsch.com" aria-label="Allan Deutsch on Bluesky">🦋</a></p>
+      {#if lifecycle === "failed"}<p role="status">{status}</p>{/if}
+    </div>
     <div class="footer-form"><WaitlistForm compact /></div>
   </footer>
 </main>
@@ -847,7 +850,7 @@
   .hero-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: var(--space-5) var(--page-gutter); }
   .wordmark { width: min(11rem, 42vw); }
   .wordmark :global(svg) { width: 100%; }
-  .footer-form { width: min(100%, 30rem); min-width: 0; }
+  .footer-form { width: 100%; max-width: 26rem; min-width: 0; justify-self: end; }
   .stage { --laptop-intro-wide-width: 68%; --laptop-intro-wide-left: 16%; --laptop-intro-wide-top: 44%; }
   .stage :global(.scene) { width: min(100%, 130cqh); aspect-ratio: 1.3; margin: auto; --laptop-solo-width: 68%; --laptop-solo-top: 44%; }
 
@@ -925,11 +928,12 @@
 
 	.stage-controls {
 		z-index: var(--layer-controls);
-		display: flex;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
 		align-items: center;
 		justify-content: space-between;
-		gap: var(--space-4);
-		padding: var(--space-3) var(--page-gutter) var(--space-4);
+		gap: var(--space-3) var(--space-6);
+		padding: var(--space-3) var(--page-gutter);
 		border-block-start: var(--stroke-hairline) solid
 			var(--color-line-default);
 		color: var(--color-page-quiet);
@@ -939,6 +943,12 @@
 	.stage-controls p {
 		margin: 0;
 	}
+	.footer-info { min-width: 0; line-height: 1.5; }
+	.creator-credit { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35em; }
+	.creator-credit a { color: inherit; text-underline-offset: 0.2em; }
+	.creator-credit a:hover { color: var(--color-page-foreground); }
+	.creator-credit a:focus-visible { outline: var(--stroke-strong) solid var(--color-focus-ring); outline-offset: var(--space-1); }
+	.bluesky-link { display: inline-flex; align-items: center; justify-content: center; min-width: 1.5rem; min-height: 1.5rem; text-decoration: none; }
 	.visually-hidden {
 		position: absolute;
 		width: 1px;
@@ -976,12 +986,13 @@
     }
   }
 
-	@media (max-width: 45rem) {
-		.footer-form { width: min(100%, 30rem); }
+	@media (max-width: 42rem) {
+		.footer-form { grid-row: 1; justify-self: center; }
 		.stage-controls {
-			align-items: center;
+			justify-items: center;
 			text-align: center;
-			flex-direction: column;
+			grid-template-columns: minmax(0, 1fr);
 		}
+		.creator-credit { justify-content: center; }
 	}
 </style>
