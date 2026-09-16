@@ -39,7 +39,7 @@
       </button>
     </div>
   </form>
-  <p id="waitlist-status" role="status">{submitted ? "You're on the list! We'll let you know when it's your turn to experience window bliss." : ""}</p>
+  <p id="waitlist-status" role="status">{submitted ? "Click the link in your email to confirm your spot." : ""}</p>
   <p id="waitlist-error" role="alert">{error}</p>
   {#if !compact}<p class="privacy">We won’t share your email.</p>{/if}
 </div>
