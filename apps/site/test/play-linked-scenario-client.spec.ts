@@ -307,6 +307,32 @@ describe("linked scenario client", () => {
     expect(await replay()).toEqual(await replay());
   });
 
+  it("replays the same recorded drag offscreen on CooperativeOS and clamped on macOS", async () => {
+    const client = await createLinkedScenarioClient(scenario(), undefined, createRealClient);
+    try {
+      const moved = await client.apply({
+        event: {
+          kind: "window_dragged",
+          windowId: "A",
+          displayId: "main",
+          startFrame: state.windows[0]!.frame,
+          from: { x: 350, y: 120 },
+          to: { x: -650, y: -680 },
+          duration: 600,
+        },
+      });
+      expect(moved.primary.windows[0]?.frame).toEqual({
+        x: -900,
+        y: -700,
+        width: 500,
+        height: 400,
+      });
+      expect(moved.comparison?.windows[0]?.frame).not.toEqual(moved.primary.windows[0]?.frame);
+    } finally {
+      await client.dispose();
+    }
+  });
+
   it("replays the full comparison preset repeatably and accepts a MacOS-source frame", async () => {
     const replay = async () => {
       const client = await createLinkedScenarioClient(

@@ -12,6 +12,23 @@ describe("step editor reorder", () => {
     expect(reordered[1]).toBe(first);
   });
 
+  it("reorders a recorded drag without rewriting its editable gesture", () => {
+    const event = {
+      kind: "window_dragged" as const,
+      windowId: "A",
+      displayId: "main",
+      startFrame: { x: 20, y: 30, width: 400, height: 300 },
+      from: { x: 220, y: 50 },
+      to: { x: -300, y: -200 },
+      duration: 600,
+    };
+    const drag = { step: { event }, eventText: JSON.stringify(event, null, 2) };
+    const reordered = reorderItem([{ step: { command: "state" }, eventText: "" }, drag], 1, 0);
+
+    expect(reordered[0]).toBe(drag);
+    expect(reordered[0]?.eventText).toBe(drag.eventText);
+  });
+
   it("does not lose or duplicate items when moving across a page boundary", () => {
     const drafts = Array.from({ length: 21 }, (_, index) => ({ index }));
 

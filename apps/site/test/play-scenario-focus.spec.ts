@@ -1,4 +1,4 @@
-import { createScenarioSession, parseScenario, runScenario } from "@paneform/layout-browser";
+import { createScenarioSession, parseScenario, runScenario, type SimulationState } from "@paneform/layout-browser";
 import { describe, expect, it } from "vitest";
 import {
   insertFocusStep,
@@ -7,6 +7,8 @@ import {
   mergeRecordedSteps,
   nextPlayWindowId,
   preservesExecutedSteps,
+  proportionalRail,
+  sceneChanged,
 } from "../src/lib/play/scenario-focus.js";
 
 const scenario = parseScenario({
@@ -44,6 +46,71 @@ describe("focus while editing a played scenario", () => {
   it("does not record an unknown window or invalid cursor", () => {
     expect(() => insertFocusStep(scenario, 0, "missing")).toThrow();
     expect(() => insertFocusStep(scenario, -2, "A")).toThrow();
+  });
+});
+
+describe("proportional scrub rail", () => {
+  it("puts the starting state at zero and each resolved step at the end of its own stretch", () => {
+    const rail = proportionalRail([1_000, 3_000]);
+    expect(rail.stops).toEqual([0, 25, 100]);
+  });
+
+  it("spreads stops evenly when every duration is zero", () => {
+    const rail = proportionalRail([0, 0, 0]);
+    expect(rail.stops[0]).toBe(0);
+    expect(rail.stops[1]).toBeCloseTo(100 / 3);
+    expect(rail.stops[2]).toBeCloseTo(200 / 3);
+    expect(rail.stops[3]).toBeCloseTo(100);
+  });
+
+  it("never leaves track after the last pip", () => {
+    const rail = proportionalRail([500, 1_500, 2_000]);
+    expect(rail.stops.at(-1)).toBe(100);
+  });
+
+  it("clamps out-of-range stops to the rail ends", () => {
+    const rail = proportionalRail([1_000]);
+    expect(rail.positionAt(-1)).toBe(0);
+    expect(rail.positionAt(0)).toBe(0);
+    expect(rail.positionAt(1)).toBe(100);
+    expect(rail.positionAt(9)).toBe(100);
+    expect(proportionalRail([]).positionAt(0)).toBe(0);
+  });
+});
+
+describe("scene change detection", () => {
+  const state = (overrides: Partial<SimulationState> = {}): SimulationState => ({
+    topology: [],
+    windows: [{ id: "A", frame: { x: 0, y: 0, width: 10, height: 10 }, workspace: "1" }],
+    focusedWindow: "A",
+    focusedWorkspace: "1",
+    ...overrides,
+  });
+  const panes = (primary: SimulationState, comparison: SimulationState | null = null) => ({
+    primary,
+    comparison,
+  });
+
+  it("records nothing when every pane already shows the applied value", () => {
+    const scene = panes(state(), state({ focusedWindow: "B" }));
+    expect(sceneChanged(scene, structuredClone(scene))).toBe(false);
+  });
+
+  it("records when the primary pane, the comparison pane, or both change", () => {
+    const scene = panes(state(), state({ focusedWindow: "B" }));
+    expect(sceneChanged(scene, panes(state({ focusedWindow: "B" }), scene.comparison))).toBe(true);
+    expect(sceneChanged(scene, panes(scene.primary, state()))).toBe(true);
+  });
+
+  it("judges an unlinked player by its primary pane alone", () => {
+    expect(sceneChanged(panes(state()), panes(state()))).toBe(false);
+    expect(sceneChanged(panes(state()), panes(state({ focusedWindow: "B" })))).toBe(true);
+  });
+
+  it("records an attempt whose reset geometry differs from the requested value", () => {
+    const requested = state({ windows: [{ id: "A", frame: { x: 0, y: 0, width: 10, height: 10 }, workspace: "1" }] });
+    const reset = state({ windows: [{ id: "A", frame: { x: 0, y: 44, width: 10, height: 10 }, workspace: "1" }] });
+    expect(sceneChanged(panes(requested), panes(reset))).toBe(true);
   });
 });
 
@@ -261,6 +328,36 @@ describe("interactive actions after playback", () => {
       insertScenarioStep(original, 0, { event: { kind: "window_removed", windowId: "B" } }),
     ).toThrow();
     expect(original.steps).toHaveLength(2);
+  });
+
+  it("inserts a drag while validating its window and display references", () => {
+    const drag = {
+      event: {
+        kind: "window_dragged" as const,
+        windowId: "B",
+        displayId: "main",
+        startFrame: scenario.state.windows[1]!.frame,
+        from: { x: 900, y: 20 },
+        to: { x: -300, y: -200 },
+        duration: 600,
+      },
+      caption: "Attempt offscreen",
+    };
+    const inserted = insertScenarioStep(scenario, 0, drag);
+    expect(inserted.scenario.steps).toEqual([scenario.steps![0], drag, scenario.steps![1]]);
+    expect(() =>
+      insertScenarioStep(
+        parseScenario({
+          ...scenario,
+          steps: [{ event: { kind: "window_removed", windowId: "B" } }],
+        }),
+        0,
+        drag,
+      ),
+    ).toThrow();
+    expect(() =>
+      insertScenarioStep(scenario, 0, { ...drag, event: { ...drag.event, displayId: "future" } }),
+    ).toThrow();
   });
 
   it("retains the live cursor for appended steps, but not edits to executed steps", () => {

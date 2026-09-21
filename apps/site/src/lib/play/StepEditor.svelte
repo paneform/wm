@@ -223,6 +223,20 @@
       case "focus_changed": return { kind, windowId: window?.id ?? null };
       case "window_added": return { kind, window: { id: nextWindowId(), frame: { x: 80, y: 80, width: 640, height: 480 } } };
       case "window_changed": return { kind, window: window ? { id: window.id, frame: window.frame } : { id: "window", frame: { x: 80, y: 80, width: 640, height: 480 } } };
+      case "window_dragged": {
+        const startFrame = window?.frame ?? { x: 80, y: 80, width: 640, height: 480 };
+        const x = startFrame.x + startFrame.width / 2;
+        const y = startFrame.y + 20;
+        return {
+          kind,
+          windowId: window?.id ?? "window",
+          displayId: scenario.state.topology[0]?.id ?? "display",
+          startFrame,
+          from: { x, y },
+          to: { x: x + 100, y },
+          duration: 300,
+        };
+      }
       case "window_removed": return { kind, windowId: window?.id ?? "window" };
       case "topology_changed": return { kind, topology: scenario.state.topology.map(({ workspace: _workspace, ...display }) => display) };
       case "space_changed": return { kind };
@@ -252,6 +266,7 @@
       case "focus_changed":
       case "window_added":
       case "window_changed":
+      case "window_dragged":
       case "window_removed":
       case "topology_changed":
       case "sleep":
@@ -401,7 +416,7 @@
           {/if}
         {:else}
           <label>Event kind<select disabled={disabled} value={draft.step.event.kind} onchange={(event) => selectEventKind(index, event.currentTarget.value)}>
-            {#each ["focus_changed", "window_added", "window_changed", "window_removed", "topology_changed", "sleep", "wake", "space_changed"] as kind}<option value={kind}>{kind}</option>{/each}
+            {#each ["focus_changed", "window_added", "window_changed", "window_dragged", "window_removed", "topology_changed", "sleep", "wake", "space_changed"] as kind}<option value={kind}>{kind}</option>{/each}
           </select></label>
           <label>Event JSON<textarea disabled={disabled} maxlength={maximumEventLength} spellcheck="false" value={draft.eventText} oninput={(event) => updateEventText(index, event.currentTarget.value)}></textarea></label>
         {/if}

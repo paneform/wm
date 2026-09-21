@@ -37,6 +37,11 @@ describe("OS comparison demo preset", () => {
       },
     });
     expect(preset.state.wmRunning).toBe(false);
+    expect(
+      preset.steps
+        ?.slice(1)
+        .every((step) => "event" in step && step.event.kind === "window_dragged"),
+    ).toBe(true);
 
     const [unconstrained, macos] = await Promise.all([replay("none"), replay({ kind: "macos" })]);
     expect(unconstrained).toHaveLength(7);

@@ -1,4 +1,58 @@
-import { parseScenario, type LayoutScenario, type ScenarioStep } from "@paneform/layout-browser";
+import {
+  parseScenario,
+  type LayoutScenario,
+  type ScenarioStep,
+  type SimulationState,
+} from "@paneform/layout-browser";
+
+/**
+ * The two pane scenes an action is applied to. Actions are recorded only when
+ * they change at least one scene; applying a value the scene already has is a
+ * no-op, while a rejected attempt that resets geometry still changes it.
+ */
+export interface PaneStates {
+  primary: SimulationState;
+  comparison: SimulationState | null;
+}
+
+/** An action that leaves both pane scenes untouched records nothing. */
+export function sceneChanged(before: PaneStates, after: PaneStates): boolean {
+  return (
+    JSON.stringify(before.primary) !== JSON.stringify(after.primary) ||
+    JSON.stringify(before.comparison) !== JSON.stringify(after.comparison)
+  );
+}
+
+/** Playback falls back to this duration for steps without an explicit one. */
+export const defaultStepDuration = 1_200;
+
+export interface RailGeometry {
+  readonly stops: readonly number[];
+  positionAt(stop: number): number;
+}
+
+/**
+ * Scrub-rail geometry: pips mark resolved states, so the starting state sits at
+ * zero, each step's pip sits at the end of its own stretch (spacing reflects
+ * durations), and no track follows the last pip. Percentages of the rail width.
+ */
+export function proportionalRail(durations: readonly number[]): RailGeometry {
+  const total = durations.reduce((sum, value) => sum + value, 0);
+  const stops: number[] = [0];
+  let elapsed = 0;
+  for (const duration of durations) {
+    elapsed += total > 0 ? duration : 1;
+    stops.push((elapsed / (total > 0 ? total : durations.length)) * 100);
+  }
+  return {
+    stops,
+    positionAt: (stop) => {
+      if (stop < 0) return 0;
+      if (stop >= stops.length) return 100;
+      return stops[stop]!;
+    },
+  };
+}
 
 export function insertScenarioStep(scenario: LayoutScenario, cursor: number, step: ScenarioStep) {
   return { ...insertScenarioSteps(scenario, cursor, [step]), step };

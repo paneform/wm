@@ -12,6 +12,16 @@ describe("scenario URL sharing", () => {
   it("round-trips a complete scenario, presentation, and Unicode captions", async () => {
     const scenario = parseScenario({
       ...emptyPlaygroundScenario,
+      state: {
+        ...emptyPlaygroundScenario.state,
+        windows: [
+          {
+            id: "window:editor",
+            frame: { x: 100, y: 80, width: 640, height: 480 },
+          },
+        ],
+        focusedWindow: "window:editor",
+      },
       simulation: {
         os: { kind: "macos", horizontalFallback: 48, bottomVisible: 64 },
       },
@@ -31,6 +41,18 @@ describe("scenario URL sharing", () => {
       },
       steps: [
         {
+          event: {
+            kind: "window_dragged",
+            windowId: "window:editor",
+            displayId: "display:main",
+            startFrame: { x: 100, y: 80, width: 640, height: 480 },
+            from: { x: 420, y: 100 },
+            to: { x: -800, y: -300 },
+            duration: 600,
+          },
+          caption: "Raw attempted gesture",
+        },
+        {
           command: "service start",
           caption: "Focus: caf\u00e9, \u7a97, \ud83e\ude9f",
           expect: { wmRunning: true },
@@ -46,6 +68,7 @@ describe("scenario URL sharing", () => {
     });
     expect(decoded?.presentation?.showWindowSettings).toBe(false);
     expect(decoded?.presentation?.comparison).toEqual(scenario.presentation?.comparison);
+    expect(decoded?.steps?.[0]).toEqual(scenario.steps?.[0]);
   });
 
   it("loads standard gzip payloads and leaves unrelated fragments alone", async () => {

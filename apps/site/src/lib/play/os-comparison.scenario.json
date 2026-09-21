@@ -22,7 +22,7 @@
       {
         "id": "display:main",
         "frame": { "x": 0, "y": 0, "width": 1512, "height": 982 },
-        "workArea": { "x": 0, "y": 44, "width": 1512, "height": 938 },
+        "workArea": { "x": 0, "y": 44, "width": 1512, "height": 794 },
         "scale": 2,
         "primary": true,
         "workspace": "1"
@@ -50,66 +50,78 @@
     },
     {
       "event": {
-        "kind": "window_changed",
-        "window": {
-          "id": "window:browser",
-          "frame": { "x": 120, "y": -100, "width": 620, "height": 420 }
-        }
+        "kind": "window_dragged",
+        "windowId": "window:browser",
+        "displayId": "display:main",
+        "startFrame": { "x": 446, "y": 220, "width": 620, "height": 420 },
+        "from": { "x": 756, "y": 240 },
+        "to": { "x": 430, "y": -80 },
+        "duration": 600
       },
       "caption": "Up past the camera.",
       "duration": 1500
     },
     {
       "event": {
-        "kind": "window_changed",
-        "window": {
-          "id": "window:browser",
-          "frame": { "x": 446, "y": 220, "width": 620, "height": 420 }
-        }
+        "kind": "window_dragged",
+        "windowId": "window:browser",
+        "displayId": "display:main",
+        "startFrame": { "x": 120, "y": -100, "width": 620, "height": 420 },
+        "from": { "x": 430, "y": -80 },
+        "to": { "x": 756, "y": 240 },
+        "duration": 600
       },
       "caption": "Back to center.",
       "duration": 1500
     },
     {
       "event": {
-        "kind": "window_changed",
-        "window": {
-          "id": "window:browser",
-          "frame": { "x": -700, "y": 220, "width": 620, "height": 420 }
-        }
+        "kind": "window_dragged",
+        "windowId": "window:browser",
+        "displayId": "display:main",
+        "startFrame": { "x": 446, "y": 220, "width": 620, "height": 420 },
+        "from": { "x": 756, "y": 240 },
+        "to": { "x": -390, "y": 240 },
+        "duration": 600
       },
       "caption": "Now vanish left.",
       "duration": 1500
     },
     {
       "event": {
-        "kind": "window_changed",
-        "window": {
-          "id": "window:browser",
-          "frame": { "x": 446, "y": 220, "width": 620, "height": 420 }
-        }
+        "kind": "window_dragged",
+        "windowId": "window:browser",
+        "displayId": "display:main",
+        "startFrame": { "x": -700, "y": 220, "width": 620, "height": 420 },
+        "from": { "x": -390, "y": 240 },
+        "to": { "x": 756, "y": 240 },
+        "duration": 600
       },
       "caption": "Center stage again.",
       "duration": 1500
     },
     {
       "event": {
-        "kind": "window_changed",
-        "window": {
-          "id": "window:browser",
-          "frame": { "x": 446, "y": 982, "width": 620, "height": 420 }
-        }
+        "kind": "window_dragged",
+        "windowId": "window:browser",
+        "displayId": "display:main",
+        "startFrame": { "x": 446, "y": 220, "width": 620, "height": 420 },
+        "from": { "x": 756, "y": 240 },
+        "to": { "x": 756, "y": 1002 },
+        "duration": 600
       },
       "caption": "Drop below the desk.",
       "duration": 1500
     },
     {
       "event": {
-        "kind": "window_changed",
-        "window": {
-          "id": "window:browser",
-          "frame": { "x": 446, "y": 220, "width": 620, "height": 420 }
-        }
+        "kind": "window_dragged",
+        "windowId": "window:browser",
+        "displayId": "display:main",
+        "startFrame": { "x": 446, "y": 982, "width": 620, "height": 420 },
+        "from": { "x": 756, "y": 1002 },
+        "to": { "x": 756, "y": 240 },
+        "duration": 600
       },
       "caption": "Safe at home.",
       "duration": 1500
