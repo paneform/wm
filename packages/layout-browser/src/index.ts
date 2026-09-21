@@ -14,3 +14,4 @@ export { createMacOsRules, macOsRules, type MacOsRulesOptions } from "./sim/maco
 export * from "./scenario.js";
 export * from "./scenario-runner.js";
 export * from "./scenario-commands.js";
+export * from "./window-drag.js";

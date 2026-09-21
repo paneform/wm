@@ -12,6 +12,10 @@ describe("@paneform/layout-browser public entry", () => {
         "runScenario",
         "parseScenario",
         "scenarioJsonSchema",
+        "WindowDragSchema",
+        "windowDragFrame",
+        "windowDragPointer",
+        "windowDragTargetFrame",
       ]),
     );
   });

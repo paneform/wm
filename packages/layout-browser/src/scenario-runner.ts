@@ -12,6 +12,7 @@ import {
   type SimulationWindow,
 } from "./scenario.js";
 import { createScenarioRuntime } from "./scenario-runtime.js";
+import { windowDragTargetFrame } from "./window-drag.js";
 import { createMacOsRules } from "./sim/macos-rules.js";
 import { unconstrainedOsRules } from "./sim/os-rules.js";
 import {
@@ -319,6 +320,11 @@ export async function createScenarioSession(input: unknown): Promise<ScenarioSes
           ...windowSpec(member.window),
           frame: event.window.frame,
         });
+        break;
+      }
+      case "window_dragged": {
+        const member = requireMember(members, event.windowId);
+        sim.updateWindow(member.nativeId, { frame: windowDragTargetFrame(event) });
         break;
       }
       case "window_removed": {

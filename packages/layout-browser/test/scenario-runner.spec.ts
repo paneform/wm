@@ -19,6 +19,69 @@ const base = {
 describe("portable scenario runner", () => {
   it.each([
     { wmRunning: false, paused: false },
+    { wmRunning: true, paused: true },
+    { wmRunning: true, paused: false },
+  ])("executes a drag as one release with running=$wmRunning paused=$paused", async (mode) => {
+    const startFrame = base.state.windows[0].frame;
+    const target = { ...startFrame, x: 113, y: 88 };
+    const drag = {
+      event: {
+        kind: "window_dragged" as const,
+        windowId: "A",
+        displayId: "display:main",
+        startFrame,
+        from: { x: 5, y: 7 },
+        to: { x: 105, y: 107 },
+        duration: 60_000,
+      },
+    };
+    const changed = {
+      event: { kind: "window_changed" as const, window: { id: "A", frame: target } },
+    };
+    const state = { ...base.state, ...mode };
+    const dragged = await runScenario({ ...base, state, steps: [drag] });
+    const manuallyChanged = await runScenario({ ...base, state, steps: [changed] });
+    expect(dragged).toEqual(manuallyChanged);
+    if (!mode.wmRunning || mode.paused)
+      expect(dragged.windows.find(({ id }) => id === "A")?.frame).toEqual(target);
+  });
+
+  it.each(["none" as const, { kind: "macos" as const }])(
+    "replays drag releases deterministically with OS profile %j",
+    async (os) => {
+      const input = {
+        simulation: { os },
+        state: {
+          topology: [{ id: "display:main", frame, workspace: "1" }],
+          windows: [{ id: "A", frame: { x: 20, y: 20, width: 200, height: 100 } }],
+          wmRunning: false,
+        },
+        steps: [
+          {
+            event: {
+              kind: "window_dragged" as const,
+              windowId: "A",
+              displayId: "display:main",
+              startFrame: { x: 20, y: 20, width: 200, height: 100 },
+              from: { x: 0, y: 0 },
+              to: { x: -500, y: -500 },
+              duration: 500,
+            },
+          },
+        ],
+      } satisfies LayoutScenario;
+      expect(await runScenario(input)).toEqual(await runScenario(input));
+      const result = await runScenario(input);
+      expect(result.windows[0]?.frame).toEqual(
+        os === "none"
+          ? { x: -480, y: -480, width: 200, height: 100 }
+          : { x: -160, y: 0, width: 200, height: 100 },
+      );
+    },
+  );
+
+  it.each([
+    { wmRunning: false, paused: false },
     { wmRunning: true, paused: false },
     { wmRunning: true, paused: true },
   ])(

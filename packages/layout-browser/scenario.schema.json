@@ -1292,6 +1292,136 @@
                       },
                       {
                         "type": "object",
+                        "required": [
+                          "kind",
+                          "windowId",
+                          "displayId",
+                          "startFrame",
+                          "from",
+                          "to",
+                          "duration"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["window_dragged"]
+                          },
+                          "windowId": {
+                            "type": "string",
+                            "description": "a string matching the pattern ^(?!__proto__$).*$",
+                            "title": "minLength(1)",
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "pattern": "^(?!__proto__$).*$"
+                          },
+                          "displayId": {
+                            "type": "string",
+                            "description": "a string matching the pattern ^(?!__proto__$).*$",
+                            "title": "minLength(1)",
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "pattern": "^(?!__proto__$).*$"
+                          },
+                          "startFrame": {
+                            "type": "object",
+                            "required": ["x", "y", "width", "height"],
+                            "properties": {
+                              "x": {
+                                "type": "number",
+                                "description": "A finite screen coordinate.",
+                                "title": "between(-10000000, 10000000)",
+                                "minimum": -10000000,
+                                "maximum": 10000000
+                              },
+                              "y": {
+                                "type": "number",
+                                "description": "A finite screen coordinate.",
+                                "title": "between(-10000000, 10000000)",
+                                "minimum": -10000000,
+                                "maximum": 10000000
+                              },
+                              "width": {
+                                "type": "number",
+                                "description": "A positive finite screen dimension.",
+                                "title": "between(5e-324, 10000000)",
+                                "minimum": 5e-324,
+                                "maximum": 10000000
+                              },
+                              "height": {
+                                "type": "number",
+                                "description": "A positive finite screen dimension.",
+                                "title": "between(5e-324, 10000000)",
+                                "minimum": 5e-324,
+                                "maximum": 10000000
+                              }
+                            },
+                            "additionalProperties": false,
+                            "description": "A physical screen rectangle.",
+                            "examples": [
+                              {
+                                "x": 80,
+                                "y": 60,
+                                "width": 960,
+                                "height": 720
+                              }
+                            ]
+                          },
+                          "from": {
+                            "type": "object",
+                            "required": ["x", "y"],
+                            "properties": {
+                              "x": {
+                                "type": "number",
+                                "description": "A finite screen coordinate.",
+                                "title": "between(-10000000, 10000000)",
+                                "minimum": -10000000,
+                                "maximum": 10000000
+                              },
+                              "y": {
+                                "type": "number",
+                                "description": "A finite screen coordinate.",
+                                "title": "between(-10000000, 10000000)",
+                                "minimum": -10000000,
+                                "maximum": 10000000
+                              }
+                            },
+                            "additionalProperties": false,
+                            "description": "A bounded pointer position in screen coordinates."
+                          },
+                          "to": {
+                            "type": "object",
+                            "required": ["x", "y"],
+                            "properties": {
+                              "x": {
+                                "type": "number",
+                                "description": "A finite screen coordinate.",
+                                "title": "between(-10000000, 10000000)",
+                                "minimum": -10000000,
+                                "maximum": 10000000
+                              },
+                              "y": {
+                                "type": "number",
+                                "description": "A finite screen coordinate.",
+                                "title": "between(-10000000, 10000000)",
+                                "minimum": -10000000,
+                                "maximum": 10000000
+                              }
+                            },
+                            "additionalProperties": false,
+                            "description": "A bounded pointer position in screen coordinates."
+                          },
+                          "duration": {
+                            "type": "number",
+                            "description": "The finite attempted drag duration in milliseconds.",
+                            "title": "between(1, 60000)",
+                            "minimum": 1,
+                            "maximum": 60000
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
                         "required": ["kind", "windowId"],
                         "properties": {
                           "kind": {

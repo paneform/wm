@@ -64,6 +64,24 @@ const FrameSchema = Schema.Struct({
   examples: [{ x: 80, y: 60, width: 960, height: 720 }],
 });
 
+const PointSchema = Schema.Struct({
+  x: coordinate,
+  y: coordinate,
+}).annotations({ description: "A bounded pointer position in screen coordinates." });
+
+export const WindowDragSchema = Schema.Struct({
+  windowId: id,
+  displayId: id,
+  startFrame: FrameSchema,
+  from: PointSchema,
+  to: PointSchema,
+  duration: Schema.Number.pipe(
+    Schema.between(1, 60_000),
+    Schema.annotations({ description: "The finite attempted drag duration in milliseconds." }),
+  ),
+}).annotations({ description: "An attempted straight-line window drag." });
+export type WindowDrag = typeof WindowDragSchema.Encoded;
+
 const PartialFrameSchema = Schema.Struct({
   x: Schema.optional(coordinate),
   y: Schema.optional(coordinate),
@@ -144,6 +162,7 @@ export const ScenarioEventSchema = Schema.Union(
     }),
   }),
   Schema.Struct({ kind: Schema.Literal("window_changed"), window: EventWindowSchema }),
+  Schema.Struct({ kind: Schema.Literal("window_dragged"), ...WindowDragSchema.fields }),
   Schema.Struct({ kind: Schema.Literal("window_removed"), windowId: id }),
   Schema.Struct({ kind: Schema.Literal("focus_changed"), windowId: Schema.NullOr(id) }),
   Schema.Struct({
@@ -422,6 +441,11 @@ function validateScenario(scenario: DecodedLayoutScenario): void {
   const possibleDisplays = new Set(initialDisplayIds);
   const workspaces = new Set<string>();
 
+  for (const step of scenario.steps ?? []) {
+    if ("event" in step && step.event.kind === "topology_changed")
+      for (const display of step.event.topology) possibleDisplays.add(display.id);
+  }
+
   assertUnique(initialWindowIds, "initial window ids");
   assertUnique(initialDisplayIds, "initial display ids");
   const displayWorkspaces = scenario.state.topology
@@ -473,6 +497,17 @@ function validateScenario(scenario: DecodedLayoutScenario): void {
           requireReference(windows, event.window.id, `step ${index + 1} event`);
           validateConstraints(event.window, `step ${index + 1} window constraints`);
           break;
+        case "window_dragged": {
+          requireReference(windows, event.windowId, `step ${index + 1} event`);
+          requireReference(possibleDisplays, event.displayId, `step ${index + 1} event`);
+          const x = event.startFrame.x + event.to.x - event.from.x;
+          const y = event.startFrame.y + event.to.y - event.from.y;
+          if (!Number.isFinite(x) || x < -10_000_000 || x > 10_000_000)
+            throw new Error(`step ${index + 1} drag target x exceeds coordinate bound`);
+          if (!Number.isFinite(y) || y < -10_000_000 || y > 10_000_000)
+            throw new Error(`step ${index + 1} drag target y exceeds coordinate bound`);
+          break;
+        }
         case "window_removed":
           requireReference(windows, event.windowId, `step ${index + 1} event`);
           windows.delete(event.windowId);

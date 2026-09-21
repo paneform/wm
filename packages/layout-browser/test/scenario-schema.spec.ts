@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { parseScenario, scenarioJsonSchema, type LayoutScenario } from "../src/scenario.js";
+import { windowDragFrame, windowDragPointer, windowDragTargetFrame } from "../src/window-drag.js";
 import {
   describeScenarioCommandTokens,
   parseScenarioCommand,
@@ -24,6 +25,70 @@ const base = () => ({
 });
 
 describe("layout scenario schema", () => {
+  it("interpolates a clamped straight-line drag without changing dimensions", () => {
+    const drag = {
+      windowId: "terminal",
+      displayId: "display:main",
+      startFrame: { x: 100, y: 200, width: 640, height: 480 },
+      from: { x: 30, y: 50 },
+      to: { x: 90, y: 80 },
+      duration: 25,
+    } as const;
+    expect(windowDragPointer(drag, -1)).toEqual(drag.from);
+    expect(windowDragPointer(drag, 0.5)).toEqual({ x: 60, y: 65 });
+    expect(windowDragPointer(drag, 2)).toEqual(drag.to);
+    expect(windowDragFrame(drag, 0.5)).toEqual({
+      x: 130,
+      y: 215,
+      width: 640,
+      height: 480,
+    });
+    expect(windowDragTargetFrame(drag)).toEqual({
+      x: 160,
+      y: 230,
+      width: 640,
+      height: 480,
+    });
+  });
+
+  it("validates portable drag references, duration, and derived coordinates", () => {
+    const drag = {
+      kind: "window_dragged" as const,
+      windowId: "terminal",
+      displayId: "display:future",
+      startFrame: frame,
+      from: { x: 10, y: 10 },
+      to: { x: 30, y: 40 },
+      duration: 25,
+    };
+    expect(() =>
+      parseScenario({
+        ...base(),
+        steps: [
+          { event: drag },
+          { event: { kind: "topology_changed", topology: [{ id: "display:future", frame }] } },
+        ],
+      }),
+    ).not.toThrow();
+
+    for (const event of [
+      { ...drag, windowId: "missing" },
+      { ...drag, displayId: "missing" },
+      { ...drag, duration: 0 },
+      { ...drag, duration: 60_001 },
+      { ...drag, duration: Number.POSITIVE_INFINITY },
+      {
+        ...drag,
+        displayId: "display:main",
+        startFrame: { ...frame, x: 10_000_000 },
+        from: { x: -10_000_000, y: 0 },
+        to: { x: 10_000_000, y: 0 },
+      },
+    ]) {
+      expect(() => parseScenario({ ...base(), steps: [{ event }] })).toThrow();
+    }
+  });
+
   it("validates optional focus-on-add as a boolean on window creation only", () => {
     const window = { id: "new", frame };
     expect(
