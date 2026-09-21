@@ -7,11 +7,11 @@ macOS sidecar. It listens on `127.0.0.1:17832`, loads
 
 The canonical config path is
 `${XDG_CONFIG_HOME:-~/.config}/paneform/wm/config.jsonc`. `WM_CONFIG` overrides
-it when set. Existing installations continue to load
-`${XDG_CONFIG_HOME:-~/.config}/wm/config.jsonc` only while the canonical file is
-absent. To migrate, create the `paneform/wm` directory and move the legacy file
-there while the service is stopped. Once the canonical file exists, it always
-wins; no config is copied or overwritten automatically.
+it when set. The former `${XDG_CONFIG_HOME:-~/.config}/wm/config.jsonc`
+fallback has been removed; that path is no longer consulted. Existing
+installations must create the `paneform/wm` directory and move their config
+there while the service is stopped. No config is copied or overwritten
+automatically.
 
 `wm.app` is the single installed application and permission identity. Its native
 executable dispatches CLI commands, hosts the daemon, and provides native system
@@ -28,7 +28,6 @@ Architectural rationale, including the native hotkey-monitor latency decision,
 is recorded in [`docs/design-decisions.md`](../design-decisions.md).
 
 ```sh
-scripts/create-local-signing-identity.sh
 swift build -c release --package-path packages/platform-macos/sidecar
 scripts/package-local-wm-app.sh
 wm service install
@@ -56,11 +55,21 @@ protocol pipes. That child also runs the SketchyBar publisher, which converts
 TypeScript state to the existing bar snapshot shape and triggers
 `wm_workspace_change` after atomic snapshot writes.
 
+Packaging defaults to `Developer ID Application: Allan Deutsch (WCW44PJWTC)` using the
+normal keychain search list. It fails if that identity is unavailable or ambiguous;
+it does not fall back to a local identity. Keep the signing identity consistent across
+upgrades so existing macOS privacy grants continue to match the app.
+
+For explicitly local signing, run `scripts/create-local-signing-identity.sh` and set
+`WM_CODESIGN_IDENTITY="WM Local Code Signing"` when packaging. This changes the app's
+identity and may require new privacy grants.
+
 The bootstrap creates the fixed local identity `WM Local Code Signing`; it never creates
 an identity from `WM_CODESIGN_IDENTITY`. Its private key is encrypted while staged and
 imported as non-exportable into `~/Library/Keychains/wm-local-signing.keychain-db`.
 macOS asks for that dedicated Keychain's password during creation. Before packaging,
-unlock `wm-local-signing` in Keychain Access; the package script relocks it on exit.
+unlock `wm-local-signing` in Keychain Access when using that local identity; the package
+script relocks it on exit.
 The Keychain locks after five minutes, on sleep, and immediately after the script exits,
 so the identity is unavailable outside an explicit packaging run. Delete the dedicated
 Keychain and remove its user trust setting through Keychain Access when it is no longer
@@ -74,7 +83,7 @@ temporary artifacts; after an interrupted bootstrap, remove any abandoned
 
 Packaging resolves exactly one valid identity and signs by certificate fingerprint.
 Set `WM_CODESIGN_IDENTITY` to an exact certificate name or fingerprint and optionally
-set `WM_CODESIGN_KEYCHAIN` when an Apple identity is available. Local signing gives
+set `WM_CODESIGN_KEYCHAIN` to select a specific keychain. Local signing gives
 development builds a stable designated requirement, but it does not replace Developer
 ID signing or notarization for distribution.
 

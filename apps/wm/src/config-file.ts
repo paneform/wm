@@ -42,9 +42,7 @@ export function stripJsonc(text: string): string {
 export function resolveConfigPath(env: NodeJS.ProcessEnv = process.env): string {
   if (env["WM_CONFIG"]) return env["WM_CONFIG"];
   const xdg = env["XDG_CONFIG_HOME"] ?? `${env["HOME"] ?? "~"}/.config`;
-  const canonical = `${xdg}/paneform/wm/config.jsonc`;
-  const legacy = `${xdg}/wm/config.jsonc`;
-  return !fs.existsSync(canonical) && fs.existsSync(legacy) ? legacy : canonical;
+  return `${xdg}/paneform/wm/config.jsonc`;
 }
 
 /**

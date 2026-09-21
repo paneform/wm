@@ -107,18 +107,15 @@ describe("resolveConfigPath", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  test("prefers the canonical config and falls back only to an existing legacy config", () => {
+  test("always uses the canonical path even when only a legacy config exists", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "wm-config-path-"));
-    const canonical = path.join(root, "paneform/wm/config.jsonc");
     const legacy = path.join(root, "wm/config.jsonc");
     fs.mkdirSync(path.dirname(legacy), { recursive: true });
     fs.writeFileSync(legacy, "{}\n");
 
-    expect(resolveConfigPath({ XDG_CONFIG_HOME: root })).toBe(legacy);
-
-    fs.mkdirSync(path.dirname(canonical), { recursive: true });
-    fs.writeFileSync(canonical, "{}\n");
-    expect(resolveConfigPath({ XDG_CONFIG_HOME: root })).toBe(canonical);
+    expect(resolveConfigPath({ XDG_CONFIG_HOME: root })).toBe(
+      path.join(root, "paneform/wm/config.jsonc"),
+    );
 
     fs.rmSync(root, { recursive: true, force: true });
   });
