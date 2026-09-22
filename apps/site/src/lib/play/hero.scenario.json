@@ -29,6 +29,7 @@
     {
       "event": {
         "kind": "window_added",
+        "focus": true,
         "window": {
           "id": "terminal",
           "title": "Terminal",
@@ -40,12 +41,9 @@
       "duration": 1000
     },
     {
-      "event": { "kind": "focus_changed", "windowId": "terminal" },
-      "duration": 0
-    },
-    {
       "event": {
         "kind": "window_added",
+        "focus": true,
         "window": {
           "id": "browser",
           "title": "Browser",
@@ -57,12 +55,9 @@
       "duration": 1000
     },
     {
-      "event": { "kind": "focus_changed", "windowId": "browser" },
-      "duration": 0
-    },
-    {
       "event": {
         "kind": "window_added",
+        "focus": true,
         "window": {
           "id": "editor",
           "title": "Text Editor",
@@ -70,10 +65,6 @@
           "frame": { "x": 592, "y": 97, "width": 818, "height": 581 }
         }
       },
-      "duration": 0
-    },
-    {
-      "event": { "kind": "focus_changed", "windowId": "editor" },
       "caption": "Three windows. One familiar pile-up.",
       "duration": 1200
     },
@@ -120,6 +111,7 @@
     {
       "event": {
         "kind": "window_added",
+        "focus": true,
         "window": {
           "id": "waitlist",
           "title": "Waitlist",
@@ -128,11 +120,7 @@
         }
       },
       "caption": "The waitlist wants in.",
-      "duration": 1000
-    },
-    {
-      "event": { "kind": "focus_changed", "windowId": "waitlist" },
-      "duration": 0,
+      "duration": 1000,
       "expect": { "focusedWindow": "waitlist" }
     },
     {
@@ -148,6 +136,7 @@
     {
       "event": {
         "kind": "window_added",
+        "focus": true,
         "window": {
           "id": "settings",
           "title": "Settings",
@@ -155,10 +144,6 @@
           "frame": { "x": 240, "y": 120, "width": 723, "height": 500 }
         }
       },
-      "duration": 0
-    },
-    {
-      "event": { "kind": "focus_changed", "windowId": "settings" },
       "caption": "And Settings, right at home on the new pane.",
       "duration": 1200,
       "expect": { "focusedWindow": "settings", "focusedWorkspace": "W" }
