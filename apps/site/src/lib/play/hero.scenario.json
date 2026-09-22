@@ -30,6 +30,23 @@
       "event": {
         "kind": "window_added",
         "window": {
+          "id": "terminal",
+          "title": "Terminal",
+          "bundleId": "com.paneform.hero.terminal",
+          "frame": { "x": 243, "y": 153, "width": 690, "height": 596 }
+        }
+      },
+      "caption": "A terminal. The plot thickens.",
+      "duration": 1000
+    },
+    {
+      "event": { "kind": "focus_changed", "windowId": "terminal" },
+      "duration": 0
+    },
+    {
+      "event": {
+        "kind": "window_added",
+        "window": {
           "id": "browser",
           "title": "Browser",
           "bundleId": "com.paneform.hero.browser",
@@ -40,21 +57,8 @@
       "duration": 1000
     },
     {
-      "event": {
-        "kind": "window_added",
-        "window": {
-          "id": "terminal",
-          "title": "Terminal",
-          "bundleId": "com.paneform.hero.terminal",
-          "frame": { "x": 243, "y": 153, "width": 690, "height": 596 }
-        }
-      },
+      "event": { "kind": "focus_changed", "windowId": "browser" },
       "duration": 0
-    },
-    {
-      "event": { "kind": "focus_changed", "windowId": "terminal" },
-      "caption": "A terminal. The plot thickens.",
-      "duration": 1000
     },
     {
       "event": {
@@ -76,20 +80,8 @@
     {
       "command": "service start",
       "caption": "Let your desktop take form.",
-      "duration": 1500,
+      "duration": 1200,
       "expect": { "wmRunning": true }
-    },
-    {
-      "event": { "kind": "focus_changed", "windowId": "browser" },
-      "caption": "Pick a pane. Leave the mouse alone.",
-      "duration": 850,
-      "expect": { "focusedWindow": "browser" }
-    },
-    {
-      "command": "window move right",
-      "caption": "Move right by intent, not by pixels. All pane. No pain.",
-      "duration": 1500,
-      "expect": { "focusedWindow": "browser" }
     },
     {
       "event": { "kind": "focus_changed", "windowId": "editor" },
@@ -100,6 +92,12 @@
     {
       "command": "window move right",
       "caption": "Editor, stage right. No window-wrangling required.",
+      "duration": 1500,
+      "expect": { "focusedWindow": "editor" }
+    },
+    {
+      "command": "window move left",
+      "caption": "Second thoughts? Move it back. The layout keeps up.",
       "duration": 1500,
       "expect": { "focusedWindow": "editor" }
     },
@@ -118,6 +116,52 @@
         "focusedWorkspace": "T",
         "windows": { "terminal": { "workspace": "T" } }
       }
+    },
+    {
+      "event": {
+        "kind": "window_added",
+        "window": {
+          "id": "waitlist",
+          "title": "Waitlist",
+          "bundleId": "com.paneform.hero.waitlist",
+          "frame": { "x": 300, "y": 200, "width": 640, "height": 400 }
+        }
+      },
+      "caption": "The waitlist wants in.",
+      "duration": 1000
+    },
+    {
+      "event": { "kind": "focus_changed", "windowId": "waitlist" },
+      "duration": 0,
+      "expect": { "focusedWindow": "waitlist" }
+    },
+    {
+      "command": "workspace move-window W",
+      "caption": "Give the waitlist a workspace of its own.",
+      "duration": 1600,
+      "expect": {
+        "focusedWindow": "waitlist",
+        "focusedWorkspace": "W",
+        "windows": { "waitlist": { "workspace": "W" } }
+      }
+    },
+    {
+      "event": {
+        "kind": "window_added",
+        "window": {
+          "id": "settings",
+          "title": "Settings",
+          "bundleId": "com.apple.systempreferences",
+          "frame": { "x": 240, "y": 120, "width": 723, "height": 500 }
+        }
+      },
+      "duration": 0
+    },
+    {
+      "event": { "kind": "focus_changed", "windowId": "settings" },
+      "caption": "And Settings, right at home on the new pane.",
+      "duration": 1200,
+      "expect": { "focusedWindow": "settings", "focusedWorkspace": "W" }
     }
   ]
 }

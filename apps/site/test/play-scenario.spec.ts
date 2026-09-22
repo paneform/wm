@@ -12,9 +12,10 @@ describe("hero play scenario", () => {
     expect(source.steps.map((step: { command?: string }) => step.command).filter(Boolean)).toEqual([
       "service start",
       "window move right",
-      "window move right",
+      "window move left",
       "focus-window terminal",
       "workspace move-window T",
+      "workspace move-window W",
     ]);
   });
 
@@ -26,30 +27,33 @@ describe("hero play scenario", () => {
         if (
           "command" in result.step &&
           result.step.command === "window move right" &&
-          result.state.focusedWindow === "browser"
-        ) {
-          expect(result.state.windows.find(({ id }) => id === "browser")!.frame.x).toBeGreaterThan(
-            state.windows.find(({ id }) => id === "browser")!.frame.x,
-          );
-        }
-        if (
-          "command" in result.step &&
-          result.step.command === "window move right" &&
           result.state.focusedWindow === "editor"
         ) {
           expect(result.state.windows.find(({ id }) => id === "editor")!.frame.x).toBeGreaterThan(
             state.windows.find(({ id }) => id === "editor")!.frame.x,
           );
         }
+        if (
+          "command" in result.step &&
+          result.step.command === "window move left" &&
+          result.state.focusedWindow === "editor"
+        ) {
+          expect(result.state.windows.find(({ id }) => id === "editor")!.frame.x).toBeLessThan(
+            state.windows.find(({ id }) => id === "editor")!.frame.x,
+          );
+        }
         state = result.state;
       }
-      expect(state.focusedWindow).toBe("terminal");
+      expect(state.focusedWindow).toBe("settings");
+      expect(state.focusedWorkspace).toBe("W");
       expect(
         Object.fromEntries(state.windows.map((window) => [window.id, window.workspace])),
       ).toEqual({
-        browser: "1",
         terminal: "T",
+        browser: "1",
         editor: "1",
+        waitlist: "W",
+        settings: "W",
       });
     } finally {
       await session.dispose();
