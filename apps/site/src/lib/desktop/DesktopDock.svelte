@@ -1,4 +1,5 @@
 <script lang="ts">
+  import CursorArrow from "./CursorArrow.svelte";
   import DockIcon from "./DockIcon.svelte";
   import { measureDock, type DockMetrics } from "./dock-layout.js";
   import type { DockItem, Frame } from "./desktop-model.js";
@@ -72,7 +73,7 @@
     <button type="button" data-app={item.id} aria-label={`${item.open ? "Focus" : "Open"} ${item.title}`} aria-describedby={tooltipId} aria-disabled={!interactive} disabled={!interactive} tabindex={interactive ? undefined : -1} class:paneform-icon-button={item.icon === "paneform"} class:hovered={hoveredApp === item.id || cursorApp === item.id} onclick={(event) => { event.stopPropagation(); if (interactive) onactivate?.(item.id); }}>
       <span class="dock-icon"><DockIcon icon={item.icon} /></span>
       <span class="dock-tooltip" id={tooltipId} role="tooltip">{item.icon === "paneform" ? "paneform wm" : item.title}</span>
-      {#if cursorApp === item.id}<span class="dock-cursor" aria-hidden="true"></span>{/if}
+      {#if cursorApp === item.id}<span class="dock-cursor" aria-hidden="true"><CursorArrow /></span>{/if}
       <i class:open={item.open}></i>
     </button>
   {/each}
@@ -93,6 +94,7 @@
   button i { position: absolute; inset: calc(100% + var(--dock-padding) / 2) auto auto 50%; width: calc(var(--stroke-strong) * 1.5); aspect-ratio: 1; border-radius: 50%; background: transparent; transform: translate(-50%, -50%); pointer-events: none; } button i.open { background: var(--color-page-secondary); opacity: 0.9; }
   .dock-tooltip { position: absolute; z-index: 2; inset: auto auto calc(100% + var(--space-2)) 50%; width: max-content; padding: 0.2rem 0.45rem; border: var(--stroke-hairline) solid var(--color-line-default); border-radius: 999px; background: color-mix(in srgb, var(--color-surface-base) 94%, transparent); box-shadow: 0 var(--space-1) var(--space-2) color-mix(in srgb, var(--rp-base) 24%, transparent); color: var(--color-page-foreground); font: var(--type-weight-medium) min(0.6875rem, 1.6cqw)/1 var(--type-family-system); letter-spacing: 0; opacity: 0; pointer-events: none; transform: translate(-50%, var(--space-1)); transition: opacity var(--motion-feedback) var(--easing-standard), transform var(--motion-feedback) var(--easing-standard); }
   button:hover .dock-tooltip, button:focus-visible .dock-tooltip, button.hovered .dock-tooltip { opacity: 1; transform: translate(-50%, 0); }
-  .dock-cursor { position: absolute; z-index: 3; inset: 34% auto auto 38%; width: min(58%, var(--cursor-size)); aspect-ratio: 1; border: var(--stroke-hairline) solid var(--color-page-background); background: var(--color-window-focus); clip-path: polygon(0 0, 80% 68%, 50% 73%, 37% 100%); pointer-events: none; animation: dock-cursor-click var(--motion-cursor-slot) var(--easing-standard) both; }
-  @keyframes dock-cursor-click { 0% { opacity: 0; transform: translate(-80%, -80%) rotate(-18deg) scale(0.82); } 35%, 62% { opacity: 1; transform: translate(0) rotate(-18deg) scale(1); } 48% { opacity: 1; transform: translate(0) rotate(-18deg) scale(0.86); } 100% { opacity: 0; transform: translate(0) rotate(-18deg) scale(1); } }
+  .dock-cursor { position: absolute; z-index: 3; inset: 34% auto auto 38%; width: min(58%, var(--cursor-size)); color: var(--color-page-foreground); pointer-events: none; animation: dock-cursor-click var(--motion-cursor-slot) var(--easing-standard) both; }
+  .dock-cursor :global(svg) { width: 100%; }
+  @keyframes dock-cursor-click { 0% { opacity: 0; transform: translate(-80%, -80%) scale(0.82); } 35%, 62% { opacity: 1; transform: translate(0) scale(1); } 48% { opacity: 1; transform: translate(0) scale(0.86); } 100% { opacity: 0; transform: translate(0) scale(1); } }
 </style>

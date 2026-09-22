@@ -1,4 +1,5 @@
 <script lang="ts">
+  import CursorArrow from "$lib/desktop/CursorArrow.svelte";
   import type { Frame } from "$lib/desktop/desktop-model.js";
   import type { WindowDragPreview } from "$lib/desktop/window-drag-types.js";
 
@@ -85,19 +86,18 @@
 {#if metrics}
   <div class="drag-pointer phase-{preview.phase}" style:transform={position} aria-hidden="true">
     <span class="press-ring"></span>
-    <svg viewBox="0 0 24 30" aria-hidden="true"><path d="M2 2v21l5.7-5.2 4 9.2 4-1.8-4-8.8H20z" /></svg>
+    <CursorArrow />
     <span class="phase-badge">{preview.phase}</span>
   </div>
 {/if}
 
 <style>
   .drag-pointer { position: absolute; z-index: 100; inset: 0 auto auto 0; width: 0; height: 0; pointer-events: none; color: var(--color-page-foreground); }
-  svg { position: absolute; top: -2px; left: -2px; width: 1.35rem; overflow: visible; filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.45)); }
-  path { fill: var(--color-page-background); stroke: currentColor; stroke-linejoin: round; stroke-width: 1.5; }
+  .drag-pointer :global(svg) { position: absolute; top: -2px; left: -2px; width: 1.35rem; }
   .press-ring { position: absolute; width: 2rem; aspect-ratio: 1; border: 2px solid currentColor; border-radius: 50%; transform: translate(-50%, -50%) scale(0.75); opacity: 0; }
   .phase-badge { position: absolute; top: 1.5rem; left: 1.1rem; border: 1px solid currentColor; border-radius: 999px; padding: 0.2rem 0.45rem; background: var(--color-page-background); color: var(--color-page-foreground); font-size: 0.65rem; font-weight: 700; line-height: 1; text-transform: uppercase; white-space: nowrap; box-shadow: 0 2px 8px rgb(0 0 0 / 0.2); }
   .phase-pressed .press-ring, .phase-dragging .press-ring { opacity: 0.65; transform: translate(-50%, -50%) scale(1); }
-  .phase-pressed svg, .phase-dragging svg { transform: translate(1px, 1px); }
+  .phase-pressed :global(svg), .phase-dragging :global(svg) { transform: translate(1px, 1px); }
   .phase-released .press-ring { opacity: 0.8; animation: release 220ms ease-out both; }
   .phase-settling { opacity: 0.72; }
   @keyframes release { from { transform: translate(-50%, -50%) scale(0.7); } to { transform: translate(-50%, -50%) scale(1.5); opacity: 0; } }
