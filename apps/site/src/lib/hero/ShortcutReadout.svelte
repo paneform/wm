@@ -119,7 +119,8 @@
   .shortcut-readout {
     position: absolute;
     z-index: var(--layer-shortcut-readout);
-    inset: auto 0 calc(var(--dock-screen-bottom) + var(--dock-icon-size) + 1.15rem);
+    inset: 50% 0 auto;
+    transform: translateY(-50%);
     width: max-content;
     max-width: calc(100% - 0.5rem);
     margin-inline: auto;

@@ -3,6 +3,7 @@
 	import { onMount, tick } from "svelte";
 
 	import {
+		parseScenarioCommand,
 		type ScenarioSession,
 		type ScenarioStep,
 		type SimulationState,
@@ -192,10 +193,14 @@
 
 	function chordForStep(step: ScenarioStep) {
 		if (!("command" in step)) return null;
-		const command = step.command.trim();
+		const requested = parseScenarioCommand(step.command);
+		const requestedKey = JSON.stringify(requested);
 		return (
 			heroKeyboardChords.find(
-				(candidate) => keyboardCommand(candidate.command) === command,
+				(candidate) =>
+					JSON.stringify(
+						parseScenarioCommand(keyboardCommand(candidate.command)),
+					) === requestedKey,
 			) ?? null
 		);
 	}
