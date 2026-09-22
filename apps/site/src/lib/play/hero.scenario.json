@@ -102,7 +102,7 @@
       "expect": { "focusedWindow": "editor" }
     },
     {
-      "command": "focus-window terminal",
+      "command": "window focus up",
       "caption": "Terminal takes focus for the workspace move.",
       "duration": 1100,
       "expect": { "focusedWindow": "terminal" }

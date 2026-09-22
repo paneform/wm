@@ -13,7 +13,7 @@ describe("hero play scenario", () => {
       "service start",
       "window move right",
       "window move left",
-      "focus-window terminal",
+      "window focus up",
       "workspace move-window T",
       "workspace move-window W",
     ]);
