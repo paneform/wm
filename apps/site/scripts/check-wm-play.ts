@@ -1542,20 +1542,18 @@ async function checkMarketingPage(client: CdpClient): Promise<void> {
     workstation: boolean;
     laptop: boolean;
     keyboard: boolean;
-    desktop: boolean;
   }>(
     client,
     "reduced-motion WM hero shell",
     `(() => ({
       workstation: Boolean(document.querySelector('.scene')),
       laptop: Boolean(document.querySelector('.laptop-device')),
-      keyboard: Boolean(document.querySelector('.keyboard')),
-      desktop: Boolean(document.querySelector('.desktop-display'))
+      keyboard: Boolean(document.querySelector('.keyboard'))
     }))()`,
   );
   assert(
-    shell.workstation && shell.laptop && shell.keyboard && shell.desktop,
-    "WM hero is missing workstation, laptop, 3D keyboard, or desktop shell",
+    shell.workstation && shell.laptop && shell.keyboard,
+    "WM hero is missing workstation, laptop, or 3D keyboard shell",
   );
   await screenshot(client, "wm-reduced-motion.png");
 }

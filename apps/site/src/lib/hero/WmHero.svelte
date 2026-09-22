@@ -3,33 +3,25 @@
 	import { onMount, tick } from "svelte";
 
 	import {
+		type ScenarioSession,
+		type ScenarioStep,
+		type SimulationState,
+		type SimulationWindow,
+	} from "@paneform/layout-browser";
+
+	import {
 		heroKeyboardChords,
 		keyboardKeys,
-		primaryKeyboardChord,
 		tokens,
 		type HeroCommand,
 	} from "$lib/design/tokens.js";
+	import { parseHeroScenario } from "$lib/play/hero-scenario.js";
 	import Workstation, { type ScenePhase } from "./Workstation.svelte";
 	import PaneformWordmark from "./PaneformWordmark.svelte";
 	import WaitlistForm from "./WaitlistForm.svelte";
-	import type { ActionArbiter } from "./action-arbiter.js";
-	import type { DemoRunner, DemoRunResult } from "./demo-runner.js";
-	import type { DemoCue } from "./demo-timeline.js";
-	import type {
-		HeroActionResult,
-		HeroCommittedSnapshot,
-		HeroSimulation,
-		HeroWindowFrame,
-	} from "./create-hero-simulation.js";
-	import type { HeroAppTitle, HeroWorkspace } from "./hero-model.js";
-	import {
-		browserKeyboardScheduler,
-		createKeyboardController,
-	} from "./keyboard-controller.js";
-	import type {
-		SimulationClient,
-		SimulationSession,
-	} from "./simulation-client.js";
+	import type { Frame } from "../desktop/desktop-model.js";
+	import { keyboardCommand, browserKeyboardScheduler, createKeyboardController } from "./keyboard-controller.js";
+	import { MACBOOK_DISPLAY_ID, HERO_APPS, type HeroAppTitle, type HeroWorkspace } from "./hero-model.js";
 
 
 	type Lifecycle =
@@ -39,24 +31,20 @@
 		| "paused"
 		| "interactive"
 		| "failed";
+	type PlaybackOutcome = "completed" | "aborted" | "paused";
 	interface PendingBootstrap {
-		client: SimulationClient | null;
+		session: ScenarioSession | null;
 	}
 
-	let measuredWorkArea: HeroWindowFrame | null = null;
-	async function updateWorkArea(area: HeroWindowFrame) {
-		measuredWorkArea = area;
-		const current = session;
-		if (!current) return;
-		const result = await current.simulation.updateMacBookWorkArea(area);
-		if (current !== session) return;
-		if (result.ok) snapshot = result.snapshot;
-		else failInteractive();
-	}
+	const scenario = parseHeroScenario();
+	const steps: readonly ScenarioStep[] = scenario.steps ?? [];
+	const cursorLeadMs = 400;
+
+	let measuredWorkArea: Frame | null = null;
 	let stage = $state<HTMLElement>();
 	let lifecycle = $state<Lifecycle>("static");
 	let phase = $state<ScenePhase>("closed");
-	let snapshot = $state<HeroCommittedSnapshot | null>(null);
+	let simulationState = $state<SimulationState | null>(null);
 	let status = $state("Preparing the interactive demo.");
 	let liveStatus = $state("");
 	let cursorApp = $state<HeroAppTitle | null>(null);
@@ -65,25 +53,27 @@
 	let paneformLayoutApplied = $state(true);
 	let pendingDockApp = $state<HeroAppTitle | null>(null);
 	let stageVisible = $state(false);
-	let client: SimulationClient | null = null;
-	let session: SimulationSession | null = null;
-	let runner: DemoRunner | null = null;
-	let activeRun: Promise<DemoRunResult> | null = null;
+	let session: ScenarioSession | null = null;
+	let playbackToken = 0;
+	let playbackAbort: AbortController | null = null;
+	let stepCursor = 0;
+	let openSequence = 0;
 	let started = false;
 	let observer: IntersectionObserver | null = null;
 	let lifecycleGeneration = 0;
 	let pausedByVisibility = false;
 	let fastForwarding = false;
 	let paneformSplashGeneration = 0;
-	const commandGates = new Map<
-		string,
-		{
-			triggered: Promise<void>;
-			committed: Promise<void>;
-			resolveTriggered(): void;
-			resolveCommitted(): void;
-		}
-	>();
+
+	async function updateWorkArea(area: Frame) {
+		measuredWorkArea = area;
+		const current = session;
+		if (!current) return;
+		current.sim.updateWorkArea(MACBOOK_DISPLAY_ID, area);
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		if (current !== session) return;
+		simulationState = await current.snapshot();
+	}
 
 	const ready = $derived(
 		lifecycle === "autoplay" ||
@@ -123,14 +113,16 @@
 
 	onNavigate(async () => {
 		lifecycleGeneration += 1;
-		runner?.abort();
+		playbackToken += 1;
+		playbackAbort?.abort();
 		cursorApp = null;
-		await client?.dispose();
+		const current = session;
+		session = null;
+		await current?.dispose();
 	});
 
 	function settleHardware() {
-		const external = snapshot?.state.topology.length === 2;
-		phase = external ? "complete" : "desktop";
+		phase = "desktop";
 	}
 
 	function showPaneformSplash() {
@@ -141,7 +133,7 @@
 		setTimeout(() => {
 			if (generation === paneformSplashGeneration)
 				paneformSplashMinimumElapsed = true;
-		}, 1500);
+		}, 1000);
 	}
 
 	async function markPaneformLayoutApplied() {
@@ -158,20 +150,28 @@
 		paneformLayoutApplied = true;
 	}
 
+	function stopPlayback() {
+		playbackToken += 1;
+		playbackAbort?.abort();
+		keyboard.releaseAll({ source: "script" });
+		hidePaneformSplash();
+	}
+
 	function failInteractive() {
-		runner?.abort();
+		const current = session;
+		stopPlayback();
 		cursorApp = null;
 		lifecycle = "failed";
 		phase = "complete";
-		snapshot = null;
+		simulationState = null;
 		session = null;
 		status = "Interactive demo unavailable";
-		void client?.dispose();
+		void current?.dispose();
 	}
 
 	function pauseDemo(automatic: boolean) {
 		if (lifecycle !== "autoplay") return;
-		runner?.pause();
+		stopPlayback();
 		pausedByVisibility = automatic;
 		lifecycle = "paused";
 		status = "Demo paused.";
@@ -180,181 +180,118 @@
 	async function refresh(): Promise<boolean> {
 		const current = session;
 		if (!current) return false;
-		const next = await current.simulation.snapshot();
-		if (current !== session || current !== client?.current()) return false;
-		if (!next.valid) {
-			failInteractive();
-			return false;
-		}
-		snapshot = next;
+		const next = await current.snapshot();
+		if (current !== session) return false;
+		simulationState = next;
 		return true;
 	}
 
-	function commandGate(cue: DemoCue) {
-		let resolveTriggered = () => {};
-		let resolveCommitted = () => {};
-		const gate = {
-			triggered: new Promise<void>(
-				(resolve) => (resolveTriggered = resolve),
-			),
-			committed: new Promise<void>(
-				(resolve) => (resolveCommitted = resolve),
-			),
-			resolveTriggered: () => resolveTriggered(),
-			resolveCommitted: () => resolveCommitted(),
-		};
-		commandGates.set(cue.id, gate);
-		return gate;
+	function delay(ms: number): Promise<void> {
+		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 
-	function cuePresentation(cue: DemoCue, signal: AbortSignal): Promise<void> {
-		switch (cue.action.type) {
-			case "present":
-				if (cue.action.name === "open-lid") phase = "opening";
-				if (cue.action.name === "signal-lock") phase = "signal";
-				if (cue.action.name === "desktop") phase = "desktop";
-				if (cue.action.name === "monitor-enter") phase = "monitor";
-				if (cue.action.name === "power-on") phase = "powered";
-				if (cue.action.name === "complete") phase = "complete";
-				return Promise.resolve();
-			case "connect-display":
-				phase = "connected";
-				return Promise.resolve();
-			case "activate-app":
-				cursorApp = cue.action.app;
-				return Promise.resolve();
-			case "move-window": {
-				cursorApp = null;
-				const gate = commandGate(cue);
-				return keyboard.chord({
-					keys: [
-						"lshift",
-						"rshift",
-						cue.action.workspace.toLowerCase(),
-					],
-					preHold: tokens.motion.chordPrelude,
-					hold: tokens.motion.chordHold,
-					pressStagger: tokens.motion.chordStagger,
-					releaseStagger: tokens.motion.keyReleaseStagger,
-					source: "script",
-					signal,
-					onTrigger: () => {
-						gate.resolveTriggered();
-						return gate.committed;
-					},
-				});
-			}
-			case "launch-wm":
-				cursorApp = "Paneform";
-				return Promise.resolve();
-			case "move-direction":
-			case "focus-direction": {
-				cursorApp = null;
-				const gate = commandGate(cue);
-				const command: HeroCommand = cue.action.type === "move-direction"
-					? { type: "moveDirection", direction: cue.action.direction }
-					: { type: "focusDirection", direction: cue.action.direction };
-				const chord = primaryKeyboardChord(heroKeyboardChords, command);
-				if (!chord) throw new Error(`Missing keyboard chord for ${cue.action.type}`);
-				return keyboard.chord({
-					keys: chord.keys,
-					preHold:
-						cue.action.type === "move-direction"
-							? tokens.motion.chordPrelude
-							: tokens.motion.twoKeyPrelude,
-					hold:
-						cue.action.type === "move-direction"
-							? tokens.motion.chordHold
-							: tokens.motion.twoKeyHold,
-					pressStagger: tokens.motion.chordStagger,
-					releaseStagger: tokens.motion.keyReleaseStagger,
-					source: "script",
-					signal,
-					onTrigger: () => {
-						gate.resolveTriggered();
-						return gate.committed;
-					},
-				});
-			}
-			case "move-workspace-display": {
-				const gate = commandGate(cue);
-				return keyboard.chord({
-					keys: ["lshift", "rshift", "tab"],
-					preHold: tokens.motion.chordPrelude,
-					hold: tokens.motion.chordHold,
-					pressStagger: tokens.motion.chordStagger,
-					releaseStagger: tokens.motion.keyReleaseStagger,
-					source: "script",
-					signal,
-					onTrigger: () => {
-						gate.resolveTriggered();
-						return gate.committed;
-					},
-				});
-			}
-			case "focus-workspace": {
-				const gate = commandGate(cue);
-				return keyboard.chord({
-					keys: ["rshift", cue.action.workspace.toLowerCase()],
-					preHold: tokens.motion.twoKeyPrelude,
-					hold: tokens.motion.twoKeyHold,
-					releaseStagger: tokens.motion.keyReleaseStagger,
-					source: "script",
-					signal,
-					onTrigger: () => {
-						gate.resolveTriggered();
-						return gate.committed;
-					},
-				});
-			}
-			default:
-				return Promise.resolve();
-		}
+	function chordForStep(step: ScenarioStep) {
+		if (!("command" in step)) return null;
+		const command = step.command.trim();
+		return (
+			heroKeyboardChords.find(
+				(candidate) => keyboardCommand(candidate.command) === command,
+			) ?? null
+		);
 	}
 
-	async function createRunner(current: SimulationSession) {
-		const { createDemoRunner } = await import("./demo-runner.js");
-		return createDemoRunner({
-			includeSettings: !matchMedia("(max-width: 45rem)").matches,
-			simulation: current.simulation,
-			arbiter: current.arbiter,
-			presentation: {
-				run: (cue, { signal }) => cuePresentation(cue, signal),
-				commandReady: (cue) =>
-					commandGates.get(cue.id)?.triggered ?? null,
-				commandExecuting: async (cue) => {
-					if (cue.action.type !== "launch-wm") return;
+	function launchTitleFor(step: ScenarioStep): HeroAppTitle | null {
+		if (!("event" in step) || step.event.kind !== "window_added") return null;
+		const title = step.event.window.title;
+		return HERO_APPS.find((app) => app.title === title)?.title ?? null;
+	}
+
+	async function applyStep(step: ScenarioStep): Promise<void> {
+		const current = session;
+		if (!current) throw new Error("Scenario session is unavailable");
+		const next = await current.apply(step);
+		if (current !== session) return;
+		if (!fastForwarding) simulationState = next;
+		stepCursor += 1;
+	}
+
+	async function playSteps(
+		reducedMotion: boolean,
+	): Promise<PlaybackOutcome> {
+		const token = ++playbackToken;
+		const abort = new AbortController();
+		playbackAbort = abort;
+		try {
+			if (!reducedMotion) {
+				await delay(100);
+				if (token !== playbackToken) return "aborted";
+				phase = "opening";
+				await delay(1200);
+				if (token !== playbackToken) return "aborted";
+				phase = "desktop";
+				await delay(500);
+				if (token !== playbackToken) return "aborted";
+			}
+			while (stepCursor < steps.length) {
+				const step = steps[stepCursor];
+				if (!step) break;
+				const launchTitle = reducedMotion
+					? null
+					: launchTitleFor(step);
+				const chord = reducedMotion ? null : chordForStep(step);
+				const launchingPaneform =
+					!reducedMotion && "command" in step && step.command === "service start";
+				const launching = launchTitle !== null || launchingPaneform;
+				if (launchTitle !== null) cursorApp = launchTitle;
+				else if (launchingPaneform) cursorApp = "Paneform";
+				if (launchingPaneform) {
 					showPaneformSplash();
 					await tick();
-				},
-				commandCommitted: async (cue) => {
-					await tick();
-					if (cue.action.type === "launch-wm") await markPaneformLayoutApplied();
-					commandGates.get(cue.id)?.resolveCommitted();
-					commandGates.delete(cue.id);
-				},
-				cancel: () => {
-					cursorApp = null;
-					hidePaneformSplash();
-					for (const gate of commandGates.values()) {
-						gate.resolveTriggered();
-						gate.resolveCommitted();
-					}
-					commandGates.clear();
-					keyboard.releaseAll({ source: "script" });
-				},
-				settleFinal: () => {
-					phase = "complete";
-				},
-			},
-			onSnapshot: (next) => {
-				if (!next.valid) {
-					failInteractive();
-					return;
 				}
-				if (current === session && !fastForwarding) snapshot = next;
-			},
-		});
+				if (launching) {
+					// Let the cursor (and splash) settle before the launch commits.
+					await delay(cursorLeadMs);
+					if (token !== playbackToken) return "aborted";
+				}
+				try {
+					if (chord) {
+						let applied: Promise<void> | null = null;
+						const animation = keyboard.chord({
+							keys: chord.keys,
+							preHold: tokens.motion.chordPrelude,
+							hold: tokens.motion.chordHold,
+							pressStagger: tokens.motion.chordStagger,
+							releaseStagger: tokens.motion.keyReleaseStagger,
+							source: "script",
+							signal: abort.signal,
+							onTrigger: () => {
+								applied = applyStep(step);
+								return applied;
+							},
+						});
+						await Promise.all([
+							animation.catch(() => {}),
+							delay(step.duration ?? 1200),
+						]);
+						if (applied !== null) await applied;
+					} else {
+						await applyStep(step);
+						if (!reducedMotion) await delay(step.duration ?? 1200);
+					}
+				} catch {
+					if (token !== playbackToken) return "aborted";
+					status = "Playback stopped at the failing step.";
+					liveStatus = status;
+					return "paused";
+				}
+				if (launchingPaneform) await markPaneformLayoutApplied();
+				if (token !== playbackToken) return "aborted";
+				if (launching) cursorApp = null;
+			}
+			return "completed";
+		} finally {
+			if (playbackAbort === abort) playbackAbort = null;
+		}
 	}
 
 	async function runDemo() {
@@ -368,23 +305,19 @@
 		status = reducedMotion
 			? "Preparing the reduced-motion interactive state."
 			: "See how wm arranges your windows.";
-		runner = await createRunner(session);
-		const operation = runner.run({ reducedMotion });
-		activeRun = operation;
-		const result = await operation;
-		if (activeRun === operation) activeRun = null;
+		const outcome = await playSteps(reducedMotion);
 		if (!(await refresh())) return;
 		fastForwarding = false;
-		finishDemo(result);
+		finishDemo(outcome);
 	}
 
-	function finishDemo(result: DemoRunResult) {
+	function finishDemo(outcome: PlaybackOutcome) {
 		if (lifecycle === "failed") return;
-		if (result.status === "completed") {
+		if (outcome === "completed") {
 			phase = "complete";
 			lifecycle = "interactive";
 			status = "Demo complete. Try it.";
-		} else if (result.status === "paused") {
+		} else if (outcome === "paused") {
 			lifecycle = "interactive";
 			settleHardware();
 			status = "Demo paused. Try it.";
@@ -393,40 +326,32 @@
 	}
 
 	async function continueDemo() {
-		if (!runner) {
+		if (!session) {
 			await replay();
 			return;
 		}
-		await activeRun;
 		lifecycle = "autoplay";
 		status = "See how wm arranges your windows.";
-		const operation = runner.run();
-		activeRun = operation;
-		const result = await operation;
-		if (activeRun === operation) activeRun = null;
+		const outcome = await playSteps(false);
 		if (!(await refresh())) return;
-		finishDemo(result);
+		finishDemo(outcome);
 	}
 
 	async function finishWithoutMotion() {
-		if (!runner || lifecycle !== "autoplay") return;
-		runner.pause();
+		if (!session || lifecycle !== "autoplay") return;
+		stopPlayback();
 		lifecycle = "loading";
 		fastForwarding = true;
-		await activeRun;
-		const operation = runner.run({ reducedMotion: true });
-		activeRun = operation;
-		const result = await operation;
-		if (activeRun === operation) activeRun = null;
+		const outcome = await playSteps(true);
 		if (!(await refresh())) return;
 		fastForwarding = false;
-		finishDemo(result);
+		finishDemo(outcome);
 	}
 
 	async function initialize() {
 		const generation = ++lifecycleGeneration;
 		lifecycle = "loading";
-		const pending: PendingBootstrap = { client: null };
+		const pending: PendingBootstrap = { session: null };
 		let bootstrapTimer: ReturnType<typeof setTimeout> | undefined;
 		try {
 			const bootstrap = (async () => {
@@ -450,18 +375,13 @@
 				);
 				if (generation !== lifecycleGeneration)
 					throw new Error("Simulation bootstrap invalidated");
-				const { createSimulationClient } = await import(
-					"./simulation-client.js"
+				const { createScenarioSession: create } = await import(
+					"@paneform/layout-browser"
 				);
 				if (generation !== lifecycleGeneration)
 					throw new Error("Simulation bootstrap invalidated");
-				const nextClient = createSimulationClient();
-				pending.client = nextClient;
-				client = nextClient;
-				return {
-					client: nextClient,
-					session: await nextClient.start(),
-				};
+				pending.session = await create(scenario);
+				return pending.session;
 			})();
 			const next = await Promise.race([
 				bootstrap,
@@ -477,29 +397,22 @@
 				),
 			]);
 			if (generation !== lifecycleGeneration) {
-				await next.client.dispose();
+				await next.dispose();
 				return;
 			}
-			client = next.client;
-			session = next.session;
+			session = next;
 			if (measuredWorkArea) await updateWorkArea(measuredWorkArea);
-			const initialSnapshot = await session.simulation.snapshot();
-			if (!initialSnapshot.valid)
-				throw new Error(
-					"Simulation bootstrap produced an invalid state",
-				);
 			if (!matchMedia("(prefers-reduced-motion: reduce)").matches)
-				snapshot = initialSnapshot;
+				simulationState = await session.snapshot();
 			lifecycle = "interactive";
 			status = "Demo ready.";
 			if (!drainPendingDockApp()) void runDemo();
 		} catch {
 			if (generation !== lifecycleGeneration) {
-				void pending.client?.dispose();
+				void pending.session?.dispose();
 				return;
 			}
 			lifecycleGeneration += 1;
-			client ??= pending.client;
 			failInteractive();
 		} finally {
 			if (bootstrapTimer) clearTimeout(bootstrapTimer);
@@ -516,39 +429,50 @@
 	}
 
 	function takeOver() {
-		runner?.abort();
+		if (lifecycle === "autoplay") stopPlayback();
 		cursorApp = null;
-		keyboard.releaseAll({ source: "script" });
 		lifecycle = "interactive";
 		settleHardware();
 		status = "You're in control.";
 	}
 
-	async function submitUser(
-		action: (simulation: HeroSimulation) => Promise<HeroActionResult>,
+	async function applyUser(
+		step: ScenarioStep,
 		description?: string,
-		beforeSubmit?: () => void | Promise<void>,
-	) {
-		if (!session) return;
-		takeOver();
-		await beforeSubmit?.();
-		if (description) status = description;
+		options?: { splash?: boolean },
+	): Promise<boolean> {
 		const current = session;
-		const outcome = await current.arbiter.submitUser(() =>
-			action(current.simulation),
-		);
-		if (outcome.status === "completed") {
-			if (!outcome.value.snapshot.valid) {
-				failInteractive();
-				return;
-			}
-			snapshot = outcome.value.snapshot;
-			settleHardware();
-			status = outcome.value.ok
-				? "You're in control."
-				: "Command could not be completed. Try it again.";
-			liveStatus = status;
+		if (!current) return false;
+		takeOver();
+		if (options?.splash) {
+			showPaneformSplash();
+			await tick();
 		}
+		if (description) status = description;
+		let next: SimulationState;
+		try {
+			next = await current.apply(step);
+		} catch {
+			if (options?.splash && current === session)
+				await markPaneformLayoutApplied();
+			status = "Command could not be completed. Try it again.";
+			liveStatus = status;
+			return false;
+		}
+		if (current !== session) return false;
+		simulationState = next;
+		settleHardware();
+		status = "You're in control.";
+		liveStatus = status;
+		if (options?.splash) await markPaneformLayoutApplied();
+		return true;
+	}
+
+	function windowIdForApp(title: string): string {
+		return title
+			.toLowerCase()
+			.replaceAll(/[^a-z0-9]+/g, "-")
+			.replace(/^-+|-+$/g, "");
 	}
 
 	async function activateApp(app: HeroAppTitle) {
@@ -557,86 +481,122 @@
 			status = "Preparing the interactive demo.";
 			return;
 		}
-		const unopened = !snapshot?.apps[app];
-		const launchingPaneform = app === "Paneform" && !snapshot?.wmRunning;
-		try {
-			await submitUser(
-				(simulation) => simulation.activateApp(app),
-				unopened ? `macOS opens ${app}` : `paneform focuses ${app}`,
-				launchingPaneform
-					? async () => {
-							showPaneformSplash();
-							await tick();
-						}
-					: undefined,
+		const meta = HERO_APPS.find(({ title }) => title === app);
+		if (!meta) return;
+		if (app === "Paneform") {
+			if (simulationState?.wmRunning !== false) {
+				status = "paneform wm is already running.";
+				liveStatus = status;
+				return;
+			}
+			await applyUser(
+				{ command: "service start" },
+				undefined,
+				{ splash: true },
 			);
-		} finally {
-			if (launchingPaneform && snapshot?.wmRunning) await markPaneformLayoutApplied();
 			stage?.focus({ preventScroll: true });
+			return;
 		}
+		const existing = simulationState?.windows.find(
+			({ bundleId }) => bundleId === meta.bundleId,
+		);
+		if (existing) {
+			await applyUser(
+				{ event: { kind: "focus_changed", windowId: existing.id } },
+				`paneform focuses ${app}.`,
+			);
+		} else {
+			const display = simulationState?.topology.find(
+				({ id }) => id === MACBOOK_DISPLAY_ID,
+			);
+			const workArea = display?.workArea ?? display?.frame;
+			if (!workArea) return;
+			const offset = (openSequence++ % 6) * 36;
+			const maxWidth = "maxWidth" in meta ? meta.maxWidth : undefined;
+			const width = Math.max(
+				1,
+				Math.min(maxWidth ?? 900, workArea.width - 80),
+			);
+			const height = Math.max(1, Math.min(620, workArea.height - 80));
+			const base = {
+				id: windowIdForApp(app),
+				title: app,
+				bundleId: meta.bundleId,
+				frame: {
+					x: workArea.x + Math.min(40 + offset, Math.max(0, workArea.width - width)),
+					y: workArea.y + Math.min(40 + offset, Math.max(0, workArea.height - height)),
+					width,
+					height,
+				},
+			};
+			const window: SimulationWindow =
+				maxWidth === undefined ? base : { ...base, constraints: { maxWidth } };
+			await applyUser(
+				{ event: { kind: "window_added", window, focus: true } },
+				`macOS opens ${app}.`,
+			);
+		}
+		stage?.focus({ preventScroll: true });
 	}
 
-	async function focusWindow(app: HeroAppTitle) {
-		await submitUser((simulation) => simulation.focusWindow(app));
+	async function focusWindow(windowId: string) {
+		await applyUser({ event: { kind: "focus_changed", windowId } });
 	}
 
-	async function closeWindow(app: HeroAppTitle) {
-		await submitUser((simulation) => simulation.closeWindow(app));
+	async function closeWindow(windowId: string) {
+		await applyUser({ event: { kind: "window_removed", windowId } });
 	}
 
 	async function focusWorkspace(workspace: HeroWorkspace) {
-		await submitUser((simulation) => simulation.focusWorkspace(workspace));
+		await applyUser({ command: `workspace focus ${workspace}` });
 	}
 
-	async function moveWindow(app: HeroAppTitle, point: { x: number; y: number }) {
-		await submitUser((simulation) => simulation.moveWindow(app, point));
+	async function moveWindow(windowId: string, point: { x: number; y: number }) {
+		const window = simulationState?.windows.find(({ id }) => id === windowId);
+		if (!window) return;
+		await applyUser({
+			event: {
+				kind: "window_changed",
+				window: { id: windowId, frame: { ...window.frame, ...point } },
+			},
+		});
 	}
 
-	async function resizeWindow(app: HeroAppTitle, frame: HeroWindowFrame) {
-		await submitUser((simulation) => simulation.resizeWindow(app, frame));
+	async function resizeWindow(windowId: string, frame: Frame) {
+		await applyUser({
+			event: { kind: "window_changed", window: { id: windowId, frame } },
+		});
 	}
 
 	async function runKeyboardCommand(command: HeroCommand) {
-		switch (command.type) {
-			case "moveFocusedWindowToWorkspace":
-				await submitUser((simulation) =>
-					simulation.moveFocusedWindowToWorkspace(command.workspace),
-				);
-				break;
-			case "moveDirection":
-				await submitUser((simulation) =>
-					simulation.moveDirection(command.direction),
-				);
-				break;
-			case "focusDirection":
-				await submitUser((simulation) =>
-					simulation.focusDirection(command.direction),
-				);
-				break;
-			case "moveFocusedWorkspaceToNextDisplay":
-				await submitUser((simulation) =>
-					simulation.moveFocusedWorkspaceToNextDisplay(),
-				);
-				break;
-			case "focusWorkspace":
-				await submitUser((simulation) =>
-					simulation.focusWorkspace(command.workspace),
-				);
-				break;
-		}
+		await applyUser({ command: keyboardCommand(command) });
 	}
 
 	async function replay() {
-		if (!client) return;
+		const current = session;
+		if (!current) return;
+		const generation = lifecycleGeneration;
 		try {
 			lifecycle = "loading";
-			runner?.abort();
+			stopPlayback();
 			keyboard.releaseAll();
-			session = await client.replay();
+			session = null;
+			await current.dispose();
+			const { createScenarioSession: create } = await import(
+				"@paneform/layout-browser"
+			);
+			const next = await create(scenario);
+			if (generation !== lifecycleGeneration) {
+				await next.dispose();
+				return;
+			}
+			session = next;
 			if (measuredWorkArea) await updateWorkArea(measuredWorkArea);
-			snapshot = await session.simulation.snapshot();
+			simulationState = await session.snapshot();
 			phase = "closed";
 			started = false;
+			stepCursor = 0;
+			openSequence = 0;
 			status = "Preparing the interactive demo.";
 			if (pendingDockApp) {
 				lifecycle = "interactive";
@@ -704,16 +664,18 @@
 		void initialize();
 		return () => {
 			lifecycleGeneration += 1;
+			playbackToken += 1;
+			playbackAbort?.abort();
 			observer?.disconnect();
 			motionPreference.removeEventListener("change", onMotionPreference);
 			document.removeEventListener(
 				"visibilitychange",
 				onVisibilityChange,
 			);
-			runner?.abort();
 			hidePaneformSplash();
 			detachKeyboard();
-			void client?.dispose();
+			void session?.dispose();
+			session = null;
 		};
 	});
 </script>
@@ -747,7 +709,7 @@
 			>
 				<Workstation
 					onworkareachange={(area) => void updateWorkArea(area)}
-					{snapshot}
+					state={simulationState}
 					{phase}
 					controller={keyboard}
 					interactive={ready}
@@ -759,11 +721,11 @@
 					{cursorApp}
 					{paneformLaunching}
 					onactivate={(app) => void activateApp(app)}
-					onclosewindow={(app) => void closeWindow(app)}
-					onfocuswindow={(app) => void focusWindow(app)}
+					onclosewindow={(windowId) => void closeWindow(windowId)}
+					onfocuswindow={(windowId) => void focusWindow(windowId)}
 					onfocusworkspace={(workspace) => void focusWorkspace(workspace)}
-					onmovewindow={(app, point) => moveWindow(app, point)}
-					onresizewindow={(app, frame) => resizeWindow(app, frame)}
+					onmovewindow={(windowId, point) => moveWindow(windowId, point)}
+					onresizewindow={(windowId, frame) => resizeWindow(windowId, frame)}
 				/>
 				<div class="demo-control" class:available={ready}>
 					<button disabled={!ready} onclick={toggleDemo} aria-label={controlLabel} aria-describedby="demo-control-help">

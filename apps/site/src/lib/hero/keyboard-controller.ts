@@ -1,3 +1,5 @@
+import { quoteCommandToken } from "@paneform/layout";
+
 import {
   primaryKeyboardChord,
   type HeroCommand,
@@ -5,6 +7,21 @@ import {
   type KeyboardKey,
   type KeyboardKeyId,
 } from "$lib/design/tokens.js";
+
+export function keyboardCommand(command: HeroCommand): string {
+  switch (command.type) {
+    case "moveDirection":
+      return `window move ${command.direction}`;
+    case "focusDirection":
+      return `window focus ${command.direction}`;
+    case "moveFocusedWindowToWorkspace":
+      return `workspace move-window ${quoteCommandToken(command.workspace)}`;
+    case "moveFocusedWorkspaceToNextDisplay":
+      return "workspace move next";
+    case "focusWorkspace":
+      return `workspace focus ${quoteCommandToken(command.workspace)}`;
+  }
+}
 
 export type KeyboardPressSource = "script" | "user";
 

@@ -1,37 +1,21 @@
 <script lang="ts">
-  import { heroFeatures } from "./feature-flags.js";
+  import type { SimulationState } from "@paneform/layout-browser";
+
   import DisplaySurface from "./DisplaySurface.svelte";
-  import DesktopDisplay from "../desktop/DesktopDisplay.svelte";
   import Laptop from "../desktop/Laptop.svelte";
   import Dock from "./Dock.svelte";
   import Keyboard from "./Keyboard.svelte";
   import PaneformWordmark from "./PaneformWordmark.svelte";
   import ShortcutReadout from "./ShortcutReadout.svelte";
   import WorkspaceTopBar from "./WorkspaceTopBar.svelte";
-  import type {
-    HeroCommittedSnapshot,
-    HeroWindowFrame,
-  } from "./create-hero-simulation.js";
-  import {
-    MACBOOK_DISPLAY_ID,
-    STUDIO_DISPLAY_ID,
-    type HeroAppTitle,
-    type HeroWorkspace,
-  } from "./hero-model.js";
+  import type { Frame } from "../desktop/desktop-model.js";
+  import { MACBOOK_DISPLAY_ID, type HeroAppTitle, type HeroWorkspace } from "./hero-model.js";
   import type { KeyboardController } from "./keyboard-controller.js";
 
-  export type ScenePhase =
-    | "closed"
-    | "opening"
-    | "signal"
-    | "desktop"
-    | "monitor"
-    | "connected"
-    | "powered"
-    | "complete";
+  export type ScenePhase = "closed" | "opening" | "desktop" | "complete";
 
   let {
-    snapshot,
+    state,
     phase,
     controller,
     interactive = false,
@@ -48,8 +32,8 @@
     onresizewindow,
     onworkareachange,
   }: {
-    snapshot: HeroCommittedSnapshot | null;
-    onworkareachange?: (area: HeroWindowFrame) => void;
+    state: SimulationState | null;
+    onworkareachange?: (area: Frame) => void;
     phase: ScenePhase;
     controller: KeyboardController;
     interactive?: boolean;
@@ -59,78 +43,30 @@
     cursorApp?: HeroAppTitle | null;
     paneformLaunching?: boolean;
     onactivate?: (app: HeroAppTitle) => void;
-    onclosewindow?: (app: HeroAppTitle) => void;
-    onfocuswindow?: (app: HeroAppTitle) => void;
+    onclosewindow?: (windowId: string) => void;
+    onfocuswindow?: (windowId: string) => void;
     onfocusworkspace?: (workspace: HeroWorkspace) => void;
-    onmovewindow?: (app: HeroAppTitle, point: { x: number; y: number }) => Promise<void> | void;
-    onresizewindow?: (app: HeroAppTitle, frame: HeroWindowFrame) => Promise<void> | void;
+    onmovewindow?: (windowId: string, point: { x: number; y: number }) => Promise<void> | void;
+    onresizewindow?: (windowId: string, frame: Frame) => Promise<void> | void;
   } = $props();
 
-  const hasStudio = $derived(
-    heroFeatures.secondMonitor && (fallback ||
-      phase === "monitor" ||
-      phase === "connected" ||
-      phase === "powered" ||
-      phase === "complete" ||
-      Boolean(snapshot?.state.topology.some(({ id }) => id === STUDIO_DISPLAY_ID))),
-  );
-  const powered = $derived(fallback || phase === "powered" || phase === "complete");
   const open = $derived(fallback || phase !== "closed");
   const desktop = $derived(
-    fallback ||
-      phase === "opening" ||
-      phase === "desktop" ||
-      phase === "monitor" ||
-      phase === "connected" ||
-      phase === "powered" ||
-      phase === "complete",
-  );
-  const cabled = $derived(
-    fallback || phase === "connected" || phase === "powered" || phase === "complete",
+    fallback || phase === "opening" || phase === "desktop" || phase === "complete",
   );
   const macBookInteractive = $derived(interactive && desktop);
   const macBookDockInteractive = $derived((dockInteractive || interactive) && desktop);
-  const studioInteractive = $derived(interactive && powered);
 </script>
 
 <div
-  class:connected={hasStudio}
-  class:cabled
   class:desktop
   class:open
   class:paused
-  class:powered
   class="scene"
 >
-  {#if heroFeatures.secondMonitor}
-  <svg class="cable cable-wide" viewBox="0 0 1760 1100" aria-hidden="true">
-    <path pathLength="1" d="M 660 380 C 690 500, 740 560, 790 550" />
-    <circle cx="660" cy="380" r="8" />
-    <circle cx="790" cy="550" r="8" />
-  </svg>
-  <svg class="cable cable-stacked" viewBox="0 0 1100 1550" aria-hidden="true">
-    <path pathLength="1" d="M 300 624 C 300 824, 230 940, 310 1100" />
-    <circle cx="300" cy="624" r="8" />
-    <circle cx="310" cy="1100" r="8" />
-  </svg>
-
-  {#snippet studioScreen()}
-          <DisplaySurface
-            {snapshot}
-            displayId={STUDIO_DISPLAY_ID}
-            interactive={studioInteractive}
-            {onclosewindow}
-            {onfocuswindow}
-            {onmovewindow}
-            {onresizewindow}
-          />
-  {/snippet}
-  <DesktopDisplay class="studio" screen={studioScreen} {powered} {paused} />
-  {/if}
-
   {#snippet laptopScreen()}
             <DisplaySurface
-              {snapshot}
+              {state}
               displayId={MACBOOK_DISPLAY_ID}
               interactive={macBookInteractive}
               {onclosewindow}
@@ -139,14 +75,14 @@
               {onresizewindow}
             />
             <WorkspaceTopBar
-              {snapshot}
+              {state}
               interactive={macBookInteractive}
               {onfocusworkspace}
             />
             <ShortcutReadout {controller} />
             <Dock
               {onworkareachange}
-              {snapshot}
+              {state}
               interactive={macBookDockInteractive}
               {cursorApp}
               {onactivate}
@@ -175,50 +111,6 @@
     animation-play-state: paused !important;
   }
 
-  .cable {
-    position: absolute;
-    z-index: var(--layer-cable);
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    overflow: visible;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity var(--motion-feedback) var(--easing-standard);
-  }
-
-  .cable-wide { display: none; }
-
-  .cable path {
-    fill: none;
-    stroke: var(--color-cable);
-    stroke-width: var(--cable-stroke);
-    stroke-dasharray: 1;
-    stroke-dashoffset: 1;
-    transition: stroke-dashoffset var(--motion-wire) linear;
-    vector-effect: non-scaling-stroke;
-  }
-
-  .cable circle { fill: var(--color-state-connected); opacity: 0; }
-  .scene.cabled .cable { opacity: 1; }
-  .scene.cabled .cable path { stroke-dashoffset: 0; }
-  .scene.cabled .cable circle { opacity: 1; transition: opacity var(--motion-feedback) var(--motion-wire); }
-
-  .scene :global(.studio) {
-    position: absolute;
-    z-index: var(--layer-monitor);
-    inset: var(--studio-stacked-top) auto auto var(--studio-stacked-left);
-    width: var(--studio-stacked-width);
-    aspect-ratio: var(--studio-total-aspect);
-    opacity: 0;
-    transform: translateY(var(--device-enter-distance));
-    transition:
-      opacity var(--motion-monitor) var(--easing-standard),
-      transform var(--motion-monitor) var(--easing-standard);
-  }
-
-  .scene.connected :global(.studio) { opacity: 1; transform: none; }
-
   .scene :global(.laptop) {
     position: absolute;
     z-index: var(--layer-laptop);
@@ -230,12 +122,6 @@
       width var(--motion-scene) var(--easing-mechanical),
       inset var(--motion-scene) var(--easing-mechanical),
       transform var(--motion-scene) var(--easing-mechanical);
-  }
-
-  .scene.connected :global(.laptop) {
-    inset: var(--laptop-stacked-top) auto auto var(--laptop-stacked-left);
-    width: var(--laptop-stacked-width);
-    transform: none;
   }
 
   .paneform-splash {
@@ -268,30 +154,13 @@
       --laptop-solo-width: min(84%, 42rem);
       --laptop-solo-top: 50%;
     }
-
-    .scene :global(.studio),
-    .cable { display: none; }
-
-    .scene.connected :global(.laptop) {
-      inset: var(--laptop-solo-top) auto auto 50%;
-      width: var(--laptop-solo-width);
-      transform: translateX(-50%);
-    }
   }
 
   @container stage (min-width: 72rem) {
     .scene { aspect-ratio: var(--scene-wide-aspect); }
-    .cable-stacked { display: none; }
-    .cable-wide { display: block; }
-    .scene :global(.studio) { inset: var(--studio-wide-top) auto auto var(--studio-wide-left); width: var(--studio-wide-width); }
     .scene :global(.laptop) {
       inset: var(--laptop-intro-wide-top) auto auto var(--laptop-intro-wide-left);
       width: var(--laptop-intro-wide-width);
-      transform: none;
-    }
-    .scene.connected :global(.laptop) {
-      inset: var(--laptop-wide-top) auto auto var(--laptop-wide-left);
-      width: var(--laptop-wide-width);
       transform: none;
     }
   }
