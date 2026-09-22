@@ -116,6 +116,7 @@
     settling: "Applying window rules",
   }[dragPreview.phase]);
   let hoveredStepTitle = $state<string | null>(null);
+  let linkTipOpen = $state(false);
   const railGeometry = $derived(
     proportionalRail(steps.map((step) => step.duration ?? defaultStepDuration)),
   );
@@ -860,14 +861,22 @@
   });
 </script>
 
+<svelte:window onclick={() => (linkTipOpen = false)} />
+
 <section class="player" aria-labelledby="play-heading" aria-busy={busy}>
-  <header class="intro"><div><p class="eyebrow">Paneform playground</p><h1 id="play-heading">{linkedComparison?.primary.label && linkedComparison.secondary.label ? `${linkedComparison.primary.label} vs ${linkedComparison.secondary.label}` : title}</h1></div><p>{comparing ? "One recording, two simulations. Actions on either side are sent to both." : description}</p></header>
+  <header class="intro" class:comparing={comparing}><div><p class="eyebrow">Paneform playground</p><h1 id="play-heading">{linkedComparison?.primary.label && linkedComparison.secondary.label ? `${linkedComparison.primary.label} vs ${linkedComparison.secondary.label}` : title}</h1></div>{#if !comparing}<p>{description}</p>{/if}</header>
   <div class="showcase">
     <div class="simulation-panes" class:comparing bind:this={stageRoot}>
       {#key inputEpoch}{#each panes as pane (pane.id)}
         {@const renderedInputEpoch = inputEpoch}
         <div class="simulation-pane" data-simulation-pane={pane.id}>
           {#if comparing && (pane.label || pane.subtext)}<header class="pane-heading">{#if pane.label}<h2>{pane.label}</h2>{/if}{#if pane.subtext}<p>{pane.subtext}</p>{/if}</header>{/if}
+          {#if comparing && pane.id === "comparison"}
+            <button class="link-indicator" class:open={linkTipOpen} type="button" aria-label="inputs are identical, but OS rules impact outcomes" aria-expanded={linkTipOpen} onclick={(event) => { event.stopPropagation(); linkTipOpen = !linkTipOpen; }} onblur={() => (linkTipOpen = false)} onkeydown={(event) => { if (event.key === "Escape") linkTipOpen = false; }}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
+              <span class="tooltip" aria-hidden="true">inputs are identical, but OS rules impact outcomes</span>
+            </button>
+          {/if}
           <ScenarioStage
             state={pane.state}
             {presentation}
@@ -964,15 +973,20 @@
 
 <style>
   .player { width: min(100% - 2 * clamp(0.5rem, 2vw, 2rem), 120rem); margin-inline: auto; padding-block: 1rem; }
-  .intro { display: grid; grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.8fr); align-items: end; gap: 3rem; margin-bottom: 1.5rem; } .eyebrow { margin: 0 0 0.6rem; color: var(--rp-foam); font-size: var(--type-size-label); font-weight: 650; letter-spacing: var(--type-tracking-label); text-transform: uppercase; } h1 { margin: 0; font-size: clamp(2rem, 4vw, 3.5rem); line-height: 1; } .intro > p { margin: 0; color: var(--color-page-secondary); }
+  .intro { display: grid; grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.8fr); align-items: end; gap: 3rem; margin-bottom: 1.5rem; } .intro.comparing { grid-template-columns: minmax(0, 1fr); text-align: center; } .eyebrow { margin: 0 0 0.6rem; color: var(--rp-foam); font-size: var(--type-size-label); font-weight: 650; letter-spacing: var(--type-tracking-label); text-transform: uppercase; } h1 { margin: 0; font-size: clamp(2rem, 4vw, 3.5rem); line-height: 1; } .intro > p { margin: 0; color: var(--color-page-secondary); }
   .showcase { overflow: hidden; border: 1px solid var(--color-line-default); border-radius: 1rem; background: radial-gradient(circle at 50% 20%, color-mix(in srgb, var(--rp-iris) 10%, transparent), transparent 55%), var(--color-surface-base); }
   .simulation-panes.comparing { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .simulation-pane { min-width: 0; }
+  .simulation-pane { min-width: 0; position: relative; }
   .comparing .simulation-pane + .simulation-pane { border-inline-start: 1px solid var(--color-line-default); }
+  .link-indicator { position: absolute; z-index: 2; inset-inline-start: 0; top: 50%; transform: translate(-50%, -50%); display: grid; place-items: center; width: 1.9rem; height: 1.9rem; min-height: 0; padding: 0; border-radius: 999px; color: var(--color-page-secondary); }
+  .link-indicator:hover { color: var(--color-page-foreground); }
+  .link-indicator svg { display: block; width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .link-indicator .tooltip { position: absolute; top: calc(100% + 0.45rem); left: 50%; transform: translateX(-50%); border: 1px solid var(--color-line-default); border-radius: var(--radius-control); padding: 0.4rem 0.6rem; background: var(--color-surface-raised); color: var(--color-page-foreground); font: 500 0.75rem/1.35 var(--type-family-system); text-align: center; width: max-content; max-width: 13rem; box-shadow: 0 0.25rem 0.875rem color-mix(in srgb, black 18%, transparent); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity var(--motion-feedback) var(--easing-standard), visibility var(--motion-feedback) var(--easing-standard); }
+  .link-indicator:hover .tooltip, .link-indicator:focus-visible .tooltip, .link-indicator:active .tooltip, .link-indicator.open .tooltip { opacity: 1; visibility: visible; }
   .pane-heading { padding: 1rem 1rem 0; text-align: center; }
   .pane-heading h2 { margin: 0; font-size: clamp(1.2rem, 2.5vw, 1.8rem); letter-spacing: -0.03em; overflow-wrap: anywhere; }
   .pane-heading p { margin: 0.35rem 0 0; color: var(--color-page-secondary); font-size: 0.8rem; }
-  @media (max-width: 48rem) { .simulation-panes.comparing { grid-template-columns: minmax(0, 1fr); } .comparing .simulation-pane + .simulation-pane { border-inline-start: 0; border-block-start: 1px solid var(--color-line-default); } }
+  @media (max-width: 48rem) { .simulation-panes.comparing { grid-template-columns: minmax(0, 1fr); } .comparing .simulation-pane + .simulation-pane { border-inline-start: 0; border-block-start: 1px solid var(--color-line-default); } .link-indicator { inset-inline-start: 50%; top: 0; transform: translate(-50%, -50%); } }
   .player-bar { display: grid; gap: 0.1rem; border-top: 1px solid var(--color-line-default); padding: 0.55rem 0.9rem 0.6rem; background: color-mix(in srgb, var(--color-surface-raised) 45%, transparent); }
   .step-title { margin: 0; overflow: hidden; white-space: nowrap; text-align: center; text-overflow: ellipsis; font-size: 0.9rem; font-weight: 650; }
   .transport { display: flex; align-items: center; gap: 0.45rem; }
