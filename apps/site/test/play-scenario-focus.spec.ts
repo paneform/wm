@@ -1,4 +1,9 @@
-import { createScenarioSession, parseScenario, runScenario, type SimulationState } from "@paneform/layout-browser";
+import {
+  createScenarioSession,
+  parseScenario,
+  runScenario,
+  type SimulationState,
+} from "@paneform/layout-browser";
 import { describe, expect, it } from "vitest";
 import {
   insertFocusStep,
@@ -108,8 +113,12 @@ describe("scene change detection", () => {
   });
 
   it("records an attempt whose reset geometry differs from the requested value", () => {
-    const requested = state({ windows: [{ id: "A", frame: { x: 0, y: 0, width: 10, height: 10 }, workspace: "1" }] });
-    const reset = state({ windows: [{ id: "A", frame: { x: 0, y: 44, width: 10, height: 10 }, workspace: "1" }] });
+    const requested = state({
+      windows: [{ id: "A", frame: { x: 0, y: 0, width: 10, height: 10 }, workspace: "1" }],
+    });
+    const reset = state({
+      windows: [{ id: "A", frame: { x: 0, y: 44, width: 10, height: 10 }, workspace: "1" }],
+    });
     expect(sceneChanged(panes(requested), panes(reset))).toBe(true);
   });
 });
