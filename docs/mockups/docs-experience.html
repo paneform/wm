@@ -1,0 +1,1544 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>paneform docs — mockup</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --rp-base: #191724;
+    --rp-surface: #1f1d2e;
+    --rp-overlay: #26233a;
+    --rp-muted: #6e6a86;
+    --rp-subtle: #908caa;
+    --rp-text: #e0def4;
+    --rp-love: #eb6f92;
+    --rp-rose: #ebbcba;
+    --rp-gold: #f6c177;
+    --rp-pine: #31748f;
+    --rp-foam: #9ccfd8;
+    --rp-iris: #c4a7e7;
+    --pv-focus-iris: color-mix(in srgb, var(--rp-iris) 50%, transparent);
+    --page-bg: var(--rp-base);
+    --page-fg: var(--rp-text);
+    --page-secondary: var(--rp-subtle);
+    --docs-text-heading: var(--rp-subtle);
+    --docs-text-label: color-mix(in srgb, var(--rp-subtle) 80%, var(--rp-text));
+    --docs-text-quiet: var(--rp-subtle);
+    --surface: var(--rp-surface);
+    --raised: var(--rp-overlay);
+      --line: color-mix(in srgb, var(--rp-muted) 40%, var(--page-bg));
+    --pf-raised: var(--rp-overlay);
+    --pf-sunken: var(--rp-surface);
+    --line-strong: var(--rp-subtle);
+    --screen-bg: var(--rp-surface);
+    --win-raised: var(--rp-overlay);
+    --screen-off: color-mix(in srgb, var(--rp-base) 82%, var(--rp-surface));
+    --device-shell: color-mix(in srgb, var(--rp-overlay) 75%, var(--rp-subtle));
+    --device-rim: color-mix(in srgb, var(--rp-text) 12%, var(--device-shell));
+    --device-shade: color-mix(in srgb, var(--rp-base) 35%, var(--device-shell));
+    --display-bezel: #191724;
+    --win-bg: var(--rp-surface);
+    --win-focus: var(--rp-iris);
+    --win-unfocused: var(--rp-subtle);
+    --action-bg: var(--rp-foam);
+    --action-fg: var(--rp-base);
+    --code-bg: color-mix(in srgb, var(--rp-overlay) 55%, var(--rp-base));
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --docs-type-size-xs: 0.75rem;
+    --docs-type-size-sm: 0.875rem;
+    --docs-type-size-base: 1rem;
+    --docs-type-size-lg: 1.25rem;
+    --docs-type-size-xl: 1.75rem;
+    --docs-type-size-simulation: 0.5625rem;
+    --type-family-body: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --type-family-heading: "Inter Variable", var(--type-family-body);
+    --easing-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --radius: 8px;
+    --radius-small: 5px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --rp-base: #faf4ed;
+      --rp-surface: #fffaf3;
+      --rp-overlay: #f2e9e1;
+      --rp-muted: #9893a5;
+      --rp-subtle: #797593;
+      --rp-text: #464261;
+      --rp-love: #b4637a;
+      --rp-rose: #d7827e;
+      --rp-gold: #ea9d34;
+      --rp-pine: #286983;
+      --rp-foam: #56949f;
+      --rp-iris: #907aa9;
+       --pv-focus-iris: var(--rp-iris);
+      --page-secondary: var(--rp-text);
+      --docs-text-label: color-mix(in srgb, var(--rp-subtle) 40%, var(--rp-text));
+      --docs-text-quiet: color-mix(in srgb, var(--rp-subtle) 60%, var(--rp-text));
+      --screen-bg: var(--rp-base);
+      --win-raised: var(--rp-surface);
+      --screen-off: color-mix(in srgb, var(--rp-overlay) 82%, var(--rp-base));
+      --device-shell: color-mix(in srgb, var(--rp-overlay) 75%, var(--rp-muted));
+      --device-rim: color-mix(in srgb, var(--rp-surface) 65%, var(--device-shell));
+      --device-shade: color-mix(in srgb, var(--rp-muted) 30%, var(--device-shell));
+      --display-bezel: var(--rp-subtle);
+      --action-bg: var(--rp-pine);
+      --action-fg: var(--rp-surface);
+      --code-bg: color-mix(in srgb, var(--rp-overlay) 65%, var(--rp-surface));
+    }
+  .situation {
+    --pf-raised: var(--rp-surface);
+    --pf-sunken: var(--rp-overlay);
+  }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  html, body { margin: 0; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
+  body {
+    background: var(--page-bg);
+    color: var(--page-fg);
+    font-family: var(--type-family-body);
+    font-size: var(--docs-type-size-base);
+    line-height: 1.55;
+  }
+  h1, h2, h3 { font-family: var(--type-family-heading); }
+  ::selection { background: color-mix(in srgb, var(--rp-iris) 40%, transparent); }
+
+  .topbar {
+    position: sticky; top: 0; z-index: 50;
+    display: flex; align-items: center; gap: 1rem;
+    padding: 0 1.25rem; height: 3.25rem;
+    background: color-mix(in srgb, var(--page-bg) 88%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .wordmark { display: flex; align-items: center; gap: 0.5rem; white-space: nowrap; }
+  .wordmark img { display: block; height: 1.5rem; width: auto; }
+  .wordmark .sep { color: var(--docs-text-quiet); font-weight: 400; }
+  .wordmark a { text-decoration: none; }
+  .wordmark a:focus-visible { outline: 2px solid var(--rp-iris); outline-offset: 3px; }
+  .topbar .crumb { color: var(--docs-text-quiet); font-size: var(--docs-type-size-sm); }
+  .topbar .crumb:hover { color: var(--page-fg); }
+  .topbar .spacer { flex: 1; }
+  .search {
+    display: flex; align-items: center; gap: 0.5rem;
+    border: 1px solid var(--line); border-radius: var(--radius-small);
+    padding: 0.3rem 0.6rem; color: var(--docs-text-quiet); font-size: var(--docs-type-size-sm);
+    min-width: 13rem; cursor: text;
+  }
+  .search kbd {
+    margin-left: auto; font-family: inherit; font-size: var(--docs-type-size-xs);
+    border: 1px solid var(--line); border-radius: 3px; padding: 0 0.3rem;
+  }
+  .toplink { color: var(--page-secondary); font-size: var(--docs-type-size-sm); text-decoration: none; }
+  .toplink:hover { color: var(--page-fg); }
+
+  .shell {
+    display: grid;
+    grid-template-columns: 15.5rem minmax(0, 1fr) 13rem;
+    gap: 2.5rem;
+    max-width: 78rem;
+    margin: 0 auto;
+    padding: 2rem 1.5rem 6rem;
+  }
+  .shell main { min-width: 0; }
+  .sidebar { position: sticky; top: 4.5rem; align-self: start; max-height: calc(100vh - 6rem); overflow-y: auto; font-size: var(--docs-type-size-sm); }
+  .sidebar .group { margin-bottom: 1.4rem; }
+  .sidebar .group > .label {
+    font-size: var(--docs-type-size-xs); letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--docs-text-label); margin-bottom: 0.45rem;
+  }
+  .sidebar .subgroup {
+    font-size: var(--docs-type-size-xs); font-weight: 600; color: var(--docs-text-label);
+    margin: 0.9rem 0 0.25rem; padding-left: 0.6rem;
+  }
+  .sidebar .label + .subgroup { margin-top: 0.1rem; }
+  .sidebar ul { list-style: none; margin: 0; padding: 0; }
+  .sidebar li { margin: 0.1rem 0; }
+  .sidebar a {
+    display: block; padding: 0.22rem 0.6rem;
+    color: var(--page-secondary); text-decoration: none;
+    border-radius: var(--radius-small);
+  }
+  .sidebar a:hover { color: var(--page-fg); background: color-mix(in srgb, var(--rp-overlay) 55%, transparent); }
+  .sidebar a.active {
+    color: var(--page-fg); background: color-mix(in srgb, var(--rp-overlay) 75%, transparent);
+    font-weight: 600;
+  }
+  .sidebar a.sub { padding-left: 1.4rem; }
+  .sidebar .commands a { font-family: var(--mono); }
+
+  .toc { position: sticky; top: 4.5rem; align-self: start; font-size: var(--docs-type-size-sm); }
+  .toc .label { font-size: var(--docs-type-size-xs); letter-spacing: 0.12em; text-transform: uppercase; color: var(--docs-text-label); margin-bottom: 0.5rem; }
+  .toc-links { position: relative; }
+  .toc ul { position: relative; list-style: none; margin: 0; padding: 0; }
+  .toc-rail { position: absolute; inset: 0 auto 0 0; width: 18px; height: 100%; overflow: visible; pointer-events: none; }
+  .toc-rail path { fill: none; }
+  .toc-rail-track { stroke: var(--line); stroke-width: 1.5; }
+  .toc-rail-progress { stroke: color-mix(in srgb, var(--rp-iris) 65%, var(--page-bg)); stroke-width: 1.5; stroke-dasharray: 1; stroke-dashoffset: 1; }
+  .toc-rail-active { stroke: var(--rp-iris); stroke-width: 2.5; stroke-linecap: round; transition: stroke-dashoffset 0.28s var(--easing-standard), stroke-dasharray 0.28s var(--easing-standard); }
+  @keyframes toc-progress { to { stroke-dashoffset: 0; } }
+  @supports (animation-timeline: scroll()) {
+    .toc-rail-progress { animation: toc-progress linear both; animation-timeline: scroll(root block); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .toc-rail-progress { animation: none; }
+    .toc-rail-active { transition: none; }
+  }
+  .toc a { display: block; padding: 0.18rem 0 0.18rem 0.8rem; color: var(--page-secondary); text-decoration: none; }
+  .toc a:hover { color: var(--page-fg); }
+  .toc a[aria-current="location"] {
+    color: var(--page-fg); font-weight: 650;
+  }
+  .toc .nested a { padding-left: 1.6rem; font-size: var(--docs-type-size-xs); }
+
+  .view { display: none; }
+  .view.active { display: block; }
+
+  .breadcrumbs { font-size: var(--docs-type-size-xs); color: var(--docs-text-quiet); margin-bottom: 0.8rem; }
+  .breadcrumbs b { color: var(--page-secondary); font-weight: 500; }
+  h1 { font-size: var(--docs-type-size-xl); letter-spacing: -0.03em; margin: 0 0 0.5rem; line-height: 1.2; }
+  .lede { color: var(--page-secondary); margin: 0 0 1.5rem; max-width: 46rem; }
+  h2 {
+    font-size: var(--docs-type-size-lg); letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--docs-text-heading); margin: 2.6rem 0 0.9rem; font-weight: 600;
+    padding-top: 0.4rem; scroll-margin-top: 4rem;
+  }
+  h2 a { color: inherit; text-decoration: none; }
+  h2 a:focus-visible { outline: 2px solid var(--rp-pine); outline-offset: 3px; }
+  h2 .n { color: var(--docs-text-label); margin-right: 0.5rem; }
+  .badge {
+    display: inline-block; vertical-align: middle; margin-left: 0.6rem;
+    font-size: var(--docs-type-size-xs); letter-spacing: 0.1em; padding: 0.15rem 0.45rem;
+    border: 1px solid var(--rp-gold); color: var(--rp-gold); border-radius: 99px;
+  }
+
+
+  table.invocations { border-collapse: collapse; width: 100%; font-size: var(--docs-type-size-sm); }
+  table.invocations th {
+    text-align: left; font-size: var(--docs-type-size-xs); letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--docs-text-label); font-weight: 600; padding: 0.4rem 0.75rem 0.4rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  table.invocations td { padding: 0.55rem 0.75rem 0.55rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.invocations td:first-child { white-space: nowrap; width: 7rem; }
+  .method {
+    display: inline-block; font-size: var(--docs-type-size-xs); letter-spacing: 0.08em; padding: 0.12rem 0.45rem;
+    border-radius: 99px; border: 1px solid var(--line-strong); color: var(--page-secondary);
+  }
+  .method.cli { color: var(--rp-foam); border-color: color-mix(in srgb, var(--rp-foam) 55%, transparent); }
+  .method.key { color: var(--rp-gold); border-color: color-mix(in srgb, var(--rp-gold) 55%, transparent); }
+  .method.ws { color: var(--rp-iris); border-color: color-mix(in srgb, var(--rp-iris) 55%, transparent); }
+  .method.scen { color: var(--rp-pine); border-color: color-mix(in srgb, var(--rp-pine) 65%, transparent); }
+  code, kbd { font-family: var(--mono); }
+  td code.snippet, p code, li code, .prose code {
+    background: var(--code-bg); border: 1px solid var(--line);
+    border-radius: 4px; padding: 0.08rem 0.35rem; font-size: var(--docs-type-size-sm); white-space: nowrap;
+  }
+  table.invocations code.snippet { white-space: normal; overflow-wrap: anywhere; }
+  kbd.key {
+    display: inline-block; min-width: 1.35rem; text-align: center;
+    font-size: var(--docs-type-size-xs); padding: 0.1rem 0.38rem; margin: 0 0.12rem;
+    background: var(--raised); border: 1px solid var(--line-strong);
+    border-bottom-width: 2.5px; border-radius: 5px; color: var(--page-fg);
+  }
+  td .note { color: var(--docs-text-quiet); font-size: var(--docs-type-size-xs); display: block; margin-top: 0.2rem; }
+  td .note a { color: var(--docs-text-label); text-underline-offset: 2px; }
+
+  ul.behavior { margin: 0; padding-left: 1.1rem; color: var(--page-secondary); max-width: 46rem; }
+  ul.behavior li { margin: 0.3rem 0; }
+  ul.behavior li::marker { color: var(--rp-iris); }
+
+  .demos { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 1rem; }
+  .sectionintro { margin: -0.3rem 0 1rem; font-size: var(--docs-type-size-base); color: var(--page-secondary); max-width: 46rem; }
+  .demo-example { margin: 0 0 0.75rem; color: var(--docs-text-quiet); font-size: var(--docs-type-size-sm); }
+  .demo-example code { color: var(--page-fg); }
+  .demo-stage {
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: color-mix(in srgb, var(--rp-surface) 45%, var(--page-bg));
+    overflow: hidden; max-width: 46rem;
+  }
+  .stage-head {
+    display: flex; align-items: stretch;
+    background: color-mix(in srgb, var(--rp-overlay) 38%, var(--page-bg));
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+  }
+  .situations { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); align-items: stretch; flex: 1; list-style: none; margin: 0; padding: 0; }
+  .situations li { display: flex; min-width: 0; }
+  .situation {
+    --pf-tile: var(--rp-base);
+    --pf-pane: var(--pf-sunken);
+    --pf-focus: var(--pf-raised);
+    position: relative; flex: 1; display: block; min-width: 7.5rem; height: auto;
+    background: var(--pf-sunken); border: 0; border-right: 1px solid var(--line);
+    border-radius: 0; padding: 0.45rem 0.5rem; cursor: pointer; color: var(--page-secondary);
+    transition: background 0.15s, color 0.15s;
+  }
+  .situation:not(.on):hover .sit-title { color: var(--page-fg); }
+  .sit-preview {
+    display: block; position: relative; margin: 0 auto;
+    width: min(100%, 16vw, 80px); height: auto; aspect-ratio: 16 / 10;
+    background: var(--pf-tile);
+    border: 1px solid var(--line); border-radius: 3px; overflow: hidden;
+  }
+  .pv-win {
+    position: absolute; box-sizing: border-box;
+    background: var(--pf-pane); border: 2px solid var(--pf-tile); border-radius: 3px;
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+  .pv-win.focused { background: var(--pf-focus); box-shadow: inset 0 0 0 1px var(--pv-focus-iris); border-radius: 3px; }
+  .sit-title {
+    display: block; margin: 0.3rem 0 0.1rem;
+    font-weight: 600; font-size: var(--docs-type-size-xs); text-align: center;
+    white-space: normal; color: color-mix(in srgb, var(--rp-muted) 50%, var(--rp-text));
+  }
+  .situation.on {
+    background: var(--pf-raised);
+    color: var(--rp-text);
+  }
+  .situation.on .sit-title { color: var(--rp-text); }
+  .situations li:last-child .situation { border-right: 0; }
+  .situation:not(.on):hover {
+    color: var(--page-fg);
+    background: color-mix(in srgb, var(--page-fg) 4%, var(--page-bg));
+  }
+  .pv-win {
+    position: absolute; box-sizing: border-box;
+    background: var(--pf-pane); border: 2px solid var(--pf-tile); border-radius: 3px;
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+  .pv-win.focused { background: var(--pf-focus); box-shadow: inset 0 0 0 1px var(--pv-focus-iris); border-radius: 3px; }
+  .demo-stage .demo {
+    display: none; border: 0; border-radius: 0; background: transparent;
+  }
+  .demo-stage .demo.active { display: flex; }
+  .demo {
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: color-mix(in srgb, var(--rp-surface) 45%, var(--page-bg));
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  .player-bar {
+    display: grid; gap: 0.1rem;
+    border-top: 1px solid var(--line);
+    padding: 0.5rem 0.7rem 0.55rem;
+    background: color-mix(in srgb, var(--rp-surface) 45%, transparent);
+  }
+  .step-title {
+    margin: 0; overflow: hidden; text-align: center;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+    overflow-wrap: anywhere;
+    font-size: var(--docs-type-size-sm); font-weight: 650;
+  }
+  .step-title .ok { color: var(--rp-foam); }
+  .step-title .noop { color: var(--rp-gold); }
+  .transport { display: flex; align-items: center; gap: 0.35rem; }
+  .icon-control {
+    display: inline-grid; place-items: center;
+    width: 1.7rem; height: 1.7rem; min-width: 1.7rem; min-height: 1.7rem;
+    border: 0; padding: 0; background: none; border-radius: 999px;
+    color: var(--page-secondary); cursor: pointer;
+  }
+  .icon-control:not(:disabled):hover { background: color-mix(in srgb, var(--page-fg) 8%, transparent); color: var(--page-fg); }
+  .icon-control svg { display: block; width: 0.95rem; height: 0.95rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .rail { position: relative; flex: 1; height: 1.7rem; min-width: 2rem; }
+  .rail::before { content: ""; position: absolute; inset: 50% 0 auto; height: 2px; transform: translateY(-50%); background: var(--rp-muted); }
+  .rail::after {
+    content: ""; position: absolute; inset: 50% auto auto 0;
+    width: var(--rail-fill, 0%); height: 2px; transform: translateY(-50%);
+    border-radius: 999px; background: var(--rp-foam);
+    transition: width 0.6s var(--easing-standard);
+  }
+  .pip {
+    position: absolute; top: 0; bottom: 0; width: 1.1rem; transform: translateX(-50%);
+    border: 0; padding: 0; background: none; cursor: pointer;
+  }
+  .pip.start { left: 0; }
+  .pip.step { left: 100%; }
+  .pip::after {
+    content: ""; position: absolute; top: 50%; left: 50%;
+    width: 0.45rem; height: 0.45rem; border-radius: 999px;
+    background: var(--rp-muted); transform: translate(-50%, -50%);
+    transition: background 0.16s, transform 0.16s;
+  }
+  .pip.done::after { background: var(--rp-foam); }
+  .pip:not(:disabled):hover::after { transform: translate(-50%, -50%) scale(1.35); }
+  .bookend { color: var(--page-secondary); font-size: var(--docs-type-size-xs); font-variant-numeric: tabular-nums; }
+  .demo .screenwrap { padding: 0 0.7rem; }
+  .demo-stage .demo .screenwrap { padding: 0; }
+  .display-shell {
+    padding: 2px;
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    background: linear-gradient(145deg, var(--device-rim), var(--device-shell) 38%, var(--device-shade));
+    box-shadow: inset 0 0 0 1px var(--device-rim);
+  }
+  .display-bezel { padding: 1.25%; border-radius: 3px; background: var(--display-bezel); box-shadow: inset 0 0 0.25rem color-mix(in srgb, var(--rp-muted) 38%, transparent); }
+  .screen {
+    position: relative; aspect-ratio: 16 / 10;
+    background: var(--screen-off);
+    border-radius: 2px; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .workarea { position: relative; flex: 1; }
+  .workarea.noanim .win { transition: none !important; }
+  .wsbar {
+    flex: none; height: 1.1rem;
+    display: flex; align-items: stretch; gap: 3px;
+    padding: 2px 4px; z-index: 3;
+  }
+  .wschip {
+    display: flex; align-items: center; gap: 3px; min-width: 0;
+    height: 100%; padding: 0 4px 0 0;
+    border: 1px solid var(--rp-subtle); border-radius: 3px;
+    background: color-mix(in srgb, var(--rp-surface) 38%, transparent);
+    color: var(--rp-subtle); font-size: var(--docs-type-size-simulation); line-height: 1; white-space: nowrap;
+    transition: color 0.25s, border-color 0.25s;
+  }
+  .wschip .name {
+    display: flex; align-items: center; align-self: stretch;
+    padding: 0 3px; border-radius: 2px 3px 3px 2px;
+    background: var(--rp-subtle); color: var(--screen-bg); font-weight: 600;
+    transition: background 0.25s;
+  }
+  .wschip.focused { color: var(--rp-gold); border-color: var(--rp-gold); }
+  .wschip.focused .name { background: var(--rp-gold); }
+  .wschip .apps { display: flex; gap: 2px; }
+  .wschip .app { width: 5px; height: 5px; border-radius: 1.5px; background: currentColor; opacity: 0.85; transition: opacity 0.2s; }
+  .win {
+    position: absolute; border-radius: 4px;
+    background: var(--win-bg); border: 1px solid var(--win-unfocused);
+    transition: left 0.5s cubic-bezier(0.22, 1, 0.36, 1), top 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+      width 0.5s cubic-bezier(0.22, 1, 0.36, 1), height 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 0.28s ease, border-color 0.2s ease, background 0.2s ease;
+  }
+  .win:not(.focused) { background: var(--screen-bg); }
+  .win .bar {
+    position: absolute; inset: 0 0 auto 0; height: 1rem;
+    display: flex; align-items: center; gap: 3px;
+    padding: 0 4px; border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  }
+  .win .dot { width: 4.5px; height: 4.5px; border-radius: 50%; }
+  .win .dot.r { background: var(--rp-love); } .win .dot.y { background: var(--rp-gold); } .win .dot.g { background: var(--rp-pine); }
+  .win:not(.focused) .dot { background: var(--rp-subtle); }
+  .win .t {
+    font-size: var(--docs-type-size-simulation); color: var(--rp-subtle); margin-left: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .win.focused {
+    border: 2px solid var(--win-focus); box-shadow: none;
+    background: var(--win-raised);
+  }
+  .win.focused .t { color: var(--page-fg); }
+  .win.enter { opacity: 0; }
+  .win.exit { opacity: 0; }
+  .flash { position: absolute; inset: 0; background: color-mix(in srgb, var(--rp-love) 7%, transparent); opacity: 0; pointer-events: none; transition: opacity 0.25s; }
+  .flash.on { opacity: 1; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .win, .rail::after { transition: opacity 0.1s; }
+  }
+
+  .args, table.args { border-collapse: collapse; font-size: var(--docs-type-size-sm); width: 100%; max-width: 40rem; }
+  table.args td, table.args th { text-align: left; padding: 0.45rem 0.9rem 0.45rem 0; border-bottom: 1px solid var(--line); }
+  table.args th { font-size: var(--docs-type-size-xs); letter-spacing: 0.1em; text-transform: uppercase; color: var(--docs-text-label); }
+  table.args td a { color: var(--docs-text-label); text-underline-offset: 2px; }
+
+  .errors { font-size: var(--docs-type-size-sm); color: var(--page-secondary); }
+  .errors code { background: var(--code-bg); border: 1px solid var(--line); border-radius: 4px; padding: 0.08rem 0.35rem; }
+
+  .related { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+  .related a {
+    font-size: var(--docs-type-size-sm); text-decoration: none; color: var(--page-fg);
+    border: 1px solid var(--line); border-radius: var(--radius-small);
+    padding: 0.45rem 0.7rem; background: color-mix(in srgb, var(--rp-surface) 40%, transparent);
+  }
+  .related a:hover { border-color: var(--rp-iris); }
+  .related a span { color: var(--docs-text-quiet); display: block; font-size: var(--docs-type-size-xs); }
+
+  .terminal {
+    background: var(--page-bg);
+    border: 1px solid var(--line-strong); border-radius: var(--radius);
+    font-size: var(--docs-type-size-sm); padding: 0.9rem 1rem; min-height: 15rem; color: var(--page-fg);
+    white-space: pre-wrap;
+    max-width: 40rem;
+  }
+  .terminal .prompt { color: var(--rp-foam); }
+  .terminal .punc { color: var(--docs-text-quiet); }
+  .terminal .str { color: var(--rp-gold); }
+  .terminal .key-line { color: var(--rp-iris); }
+  .terminal .okline { color: var(--rp-foam); }
+  .terminal .caret { display: inline-block; width: 0.5em; height: 1em; background: var(--rp-subtle); vertical-align: text-bottom; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .term-notes { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.7rem; }
+  .term-note { font-size: var(--docs-type-size-xs); color: var(--docs-text-quiet); border: 1px dashed var(--line-strong); border-radius: 99px; padding: 0.15rem 0.55rem; }
+
+  .prose { max-width: 44rem; color: var(--page-secondary); font-size: var(--docs-type-size-base); }
+  .prose p { margin: 0.7rem 0; }
+  .prose h3 { font-size: var(--docs-type-size-base); color: var(--docs-text-quiet); margin: 1.6rem 0 0.4rem; scroll-margin-top: 4rem; }
+  .prose ul { padding-left: 1.2rem; }
+  .quiet-note { color: var(--docs-text-quiet); font-size: var(--docs-type-size-xs); max-width: 40rem; }
+
+  .toast {
+    position: fixed; bottom: 1.2rem; left: 50%; transform: translateX(-50%) translateY(150%);
+    background: var(--raised); color: var(--page-fg); border: 1px solid var(--line-strong);
+    border-radius: var(--radius); padding: 0.55rem 0.9rem; font-size: var(--docs-type-size-xs);
+    transition: transform 0.25s ease; z-index: 99; max-width: 42rem;
+  }
+  .toast.on { transform: translateX(-50%) translateY(0); }
+
+  .mockupnote {
+    margin: 2.5rem 0 0; padding-top: 1rem; border-top: 1px dashed var(--line);
+    font-size: var(--docs-type-size-xs); color: var(--docs-text-quiet); max-width: 46rem;
+  }
+  .mockupnote code { white-space: normal; overflow-wrap: anywhere; }
+  @media (max-width: 42rem) {
+    .topbar .toplink { display: none; }
+    .wordmark { flex-direction: column; align-items: flex-start; gap: 0.125rem; }
+    .wordmark img { height: 1.125rem; }
+    .wordmark .sep { display: none; }
+    .wordmark .crumb { font-size: var(--docs-type-size-xs); line-height: 1; }
+    .topbar .spacer { flex: 0; }
+    .search { flex: 1; min-width: 0; }
+    .search kbd { display: none; }
+    table.invocations, table.args { display: block; }
+    table.invocations tr, table.args tr {
+      display: block; padding: 0.55rem 0;
+      border-bottom: 1px solid var(--line);
+    }
+    table.invocations tr:first-child, table.args tr:first-child { display: none; }
+    table.invocations td, table.args td {
+      display: block; padding: 0.15rem 0; border-bottom: 0;
+    }
+    table.invocations td + td, table.args td + td { margin-top: 0.45rem; }
+    table.invocations td[data-label]::before, table.args td[data-label]::before {
+      content: attr(data-label);
+       display: block; font-size: var(--docs-type-size-xs); letter-spacing: 0.1em;
+       text-transform: uppercase; color: var(--docs-text-label); margin-bottom: 0.2rem;
+    }
+    table.args code.snippet {
+      white-space: normal; overflow-wrap: anywhere;
+    }
+  }
+  @media (max-width: 70rem) {
+    .shell { grid-template-columns: 13rem minmax(0, 1fr); }
+    .toc { display: none; }
+  }
+  @media (max-width: 52rem) {
+    .shell { grid-template-columns: minmax(0, 1fr); }
+    .sidebar { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wordmark"><a href="/wm"><img src="../../assets/paneform-wm-lockup.svg" alt="Paneform WM" /></a><span class="sep" aria-hidden="true">/</span><a class="crumb" href="/wm/docs">docs</a></div>
+  <div class="spacer"></div>
+  <div class="search">Search docs… <kbd>⌘K</kbd></div>
+  <a class="toplink" href="#" data-stub>Playground ↗</a>
+</header>
+
+<div class="shell">
+
+  <nav class="sidebar" id="sidebar">
+    <div class="group">
+      <div class="label">Getting started</div>
+      <ul>
+        <li><a href="#" data-view="getting-started">Installation</a></li>
+        <li><a href="#" data-stub>Permissions</a></li>
+        <li><a href="#" data-stub>Your first config</a></li>
+      </ul>
+    </div>
+    <div class="group">
+      <div class="label">Concepts</div>
+      <ul>
+        <li><a href="#" data-stub>Workspaces</a></li>
+        <li><a href="#" data-stub>Layout modes</a></li>
+        <li><a href="#" data-stub>Pause &amp; reconcile</a></li>
+      </ul>
+    </div>
+    <div class="group commands">
+      <div class="label">Commands</div>
+      <div class="subgroup">Windows</div>
+      <ul>
+        <li><a class="sub" href="#" data-stub>focus</a></li>
+        <li><a class="sub" href="#" data-view="move-directional">move</a></li>
+        <li><a class="sub" href="#" data-view="move-workspace">move workspace</a></li>
+        <li><a class="sub" href="#" data-stub>Float &amp; tile</a></li>
+      </ul>
+      <div class="subgroup">Workspaces</div>
+      <ul>
+        <li><a class="sub" href="#" data-stub>Focus workspace</a></li>
+        <li><a class="sub" href="#" data-stub>move-display</a></li>
+        <li><a class="sub" href="#" data-stub>Retile</a></li>
+      </ul>
+      <div class="subgroup">Diagnostics</div>
+      <ul>
+        <li><a class="sub" href="#" data-view="doctor">doctor</a></li>
+      </ul>
+    </div>
+    <div class="group">
+      <div class="label">Configuration</div>
+      <ul>
+        <li><a href="#" data-stub>Options</a></li>
+        <li><a href="#" data-stub>Keybinds</a></li>
+      </ul>
+    </div>
+    <div class="group">
+      <div class="label">Reference</div>
+      <ul>
+        <li><a href="#" data-stub>Scenario format</a></li>
+        <li><a href="#" data-stub>WebSocket protocol</a></li>
+        <li><a href="#" data-stub>CLI listing</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main>
+
+    <section class="view" id="view-move-directional">
+      <div class="breadcrumbs">Docs / Commands / Windows / <b>Move directionally</b></div>
+      <h1>Move window directionally<span class="badge">generated page</span></h1>
+      <p class="lede">Swap the focused window with its neighbor in a direction, expanding along the display edge when the edge is free of neighbors.</p>
+
+      <h2 id="sec-md-demos"><a href="#sec-md-demos"><span class="n" aria-hidden="true">#</span>See it work</a></h2>
+      <p class="sectionintro">Three situations using left as an example. The same behavior applies in the other directions — pick a situation and run it.</p>
+      <p class="demo-example">Example command: <code>wm window move left</code></p>
+      <div class="demo-stage" data-stage="move-directional">
+        <div class="stage-head">
+          <ol class="situations" aria-label="Demo situations">
+            <li>
+              <button class="situation on" data-demo-tab="swap" aria-selected="true">
+                <span class="sit-preview"></span>
+                <span class="sit-title">Borders a window</span>
+              </button>
+            </li>
+            <li>
+              <button class="situation" data-demo-tab="edge-expand" aria-selected="false">
+                <span class="sit-preview"></span>
+                <span class="sit-title">Shared edge</span>
+              </button>
+            </li>
+            <li>
+              <button class="situation" data-demo-tab="edge-alone" aria-selected="false">
+                <span class="sit-preview"></span>
+                <span class="sit-title">Exclusive edge</span>
+              </button>
+            </li>
+          </ol>
+        </div>
+
+        <div class="demo active" data-demo="swap">
+        <div class="screenwrap"><div class="display-shell"><div class="display-bezel"><div class="screen">
+          <div class="wsbar"></div>
+          <div class="workarea"><div class="flash"></div></div>
+        </div></div></div></div>
+        <div class="player-bar">
+          <p class="step-title" aria-live="polite">Editor sits to the right of Mail.</p>
+          <div class="transport">
+            <button class="icon-control" data-transport type="button" aria-label="Play" title="Play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z"/></svg></button>
+            <span class="bookend" aria-hidden="true">1</span>
+            <div class="rail" role="group" aria-label="Scenario steps">
+              <button class="pip start" type="button" aria-label="Return to the starting layout"></button>
+              <button class="pip step" type="button" aria-label="Step 1"></button>
+            </div>
+            <span class="bookend" aria-hidden="true">1</span>
+            <button class="icon-control" data-playground type="button" aria-label="Open in playground" title="Open in playground"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg></button>
+          </div>
+        </div>
+        </div>
+
+        <div class="demo" data-demo="edge-expand">
+        <div class="screenwrap"><div class="display-shell"><div class="display-bezel"><div class="screen">
+          <div class="wsbar"></div>
+          <div class="workarea"><div class="flash"></div></div>
+        </div></div></div></div>
+        <div class="player-bar">
+          <p class="step-title" aria-live="polite">Editor already touches the left edge, and Mail shares it from above.</p>
+          <div class="transport">
+            <button class="icon-control" data-transport type="button" aria-label="Play" title="Play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z"/></svg></button>
+            <span class="bookend" aria-hidden="true">1</span>
+            <div class="rail" role="group" aria-label="Scenario steps">
+              <button class="pip start" type="button" aria-label="Return to the starting layout"></button>
+              <button class="pip step" type="button" aria-label="Step 1"></button>
+            </div>
+            <span class="bookend" aria-hidden="true">1</span>
+            <button class="icon-control" data-playground type="button" aria-label="Open in playground" title="Open in playground"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg></button>
+          </div>
+        </div>
+        </div>
+
+        <div class="demo" data-demo="edge-alone">
+        <div class="screenwrap"><div class="display-shell"><div class="display-bezel"><div class="screen">
+          <div class="wsbar"></div>
+          <div class="workarea"><div class="flash"></div></div>
+        </div></div></div></div>
+        <div class="player-bar">
+          <p class="step-title" aria-live="polite">Nothing neighbors Editor on the left.</p>
+          <div class="transport">
+            <button class="icon-control" data-transport type="button" aria-label="Play" title="Play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z"/></svg></button>
+            <span class="bookend" aria-hidden="true">1</span>
+            <div class="rail" role="group" aria-label="Scenario steps">
+              <button class="pip start" type="button" aria-label="Return to the starting layout"></button>
+              <button class="pip step" type="button" aria-label="Step 1"></button>
+            </div>
+            <span class="bookend" aria-hidden="true">1</span>
+            <button class="icon-control" data-playground type="button" aria-label="Open in playground" title="Open in playground"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg></button>
+          </div>
+        </div>
+        </div>
+
+      </div>
+
+      <h2 id="sec-md-inv"><a href="#sec-md-inv"><span class="n" aria-hidden="true">#</span>Invocation</a></h2>
+      <table class="invocations">
+        <tr><th>Method</th><th>Invocation</th></tr>
+        <tr>
+          <td><span class="method cli">CLI</span></td>
+          <td><code class="snippet">wm window move &lt;direction&gt;</code></td>
+        </tr>
+        <tr>
+          <td><span class="method key">Keybind</span></td>
+          <td>
+             <code class="snippet">"option+h": "window move &lt;direction&gt;"</code> <span style="color:var(--docs-text-quiet)">in</span> <code class="snippet">keybinds</code>
+            <span class="note">Chords accept modifiers <kbd class="key">⌥</kbd><kbd class="key">⌃</kbd><kbd class="key">⌘</kbd><kbd class="key">⇧</kbd> and one key — bind one chord per direction.</span>
+            <span class="note">Assign a shortcut to a concrete command in your config. <a href="#" data-stub>Keybinds guide ↗</a></span>
+          </td>
+        </tr>
+        <tr>
+          <td><span class="method ws">WebSocket</span></td>
+          <td><code class="snippet">{"type":"moveDirection","direction":"&lt;direction&gt;"}</code><span class="note">Send a command payload to the local service. <a href="#" data-stub>WebSocket protocol ↗</a></span></td>
+        </tr>
+        <tr>
+          <td><span class="method scen">Scenario</span></td>
+          <td><code class="snippet">"window move &lt;direction&gt;"</code><span class="note">Use this command in a playground or docs demo, or in a test. <a href="#" data-stub>Scenario format ↗</a></span></td>
+        </tr>
+      </table>
+
+      <h2 id="sec-md-args"><a href="#sec-md-args"><span class="n" aria-hidden="true">#</span>Arguments</a></h2>
+      <table class="args">
+        <tr><th>Name</th><th>Type</th><th>Values</th></tr>
+        <tr>
+          <td><code class="snippet">direction</code></td>
+          <td>enum</td>
+          <td><code>left</code>, <code>right</code>, <code>up</code>, <code>down</code></td>
+        </tr>
+      </table>
+
+      <h2 id="sec-md-errors"><a href="#sec-md-errors"><span class="n" aria-hidden="true">#</span>Errors</a></h2>
+      <table class="args">
+        <tr><th>Code</th><th>Meaning</th><th>What to do</th></tr>
+        <tr>
+          <td><code class="snippet">window_not_found</code></td>
+          <td>No live window matches the target.</td>
+          <td>List live windows with <code class="snippet">wm windows</code> and retry with a current ID.</td>
+        </tr>
+        <tr>
+          <td><code class="snippet">paused</code></td>
+          <td>The window manager is paused and holds mutations.</td>
+          <td>Resume with <code class="snippet">wm resume</code> (or your pause keybind), then retry.</td>
+        </tr>
+      </table>
+       <p class="quiet-note" style="margin-top:0.6rem">The no-op case (alone at the edge) is success, not an error.</p>
+
+      <h2 id="sec-md-related"><a href="#sec-md-related"><span class="n" aria-hidden="true">#</span>Related</a></h2>
+      <div class="related">
+        <a href="#" data-stub>Focus neighbor <span>window focus left</span></a>
+        <a href="#" data-stub>Move to workspace <span>window move workspace</span></a>
+        <a href="#" data-stub>Concept: layout modes <span>BSP &amp; floating</span></a>
+      </div>
+      <p class="mockupnote">Working code, not a mock: the cards run the real scenario runner and layout engine — <code>@paneform/layout-browser</code> bundled to <code>layout-engine.js</code> (regenerate: <code>esbuild packages/layout-browser/src/index.ts --bundle --minify --format=iife --global-name=Paneform --outfile=docs/mockups/layout-engine.js</code>). Run steps the fixed example scenario and renders engine state. The card chrome is the playground’s own player bar (step title, transport, step rail); the playground link — which encodes a <code>/wm/play#scenario=gz.…</code> URL at click time — is the only docs-specific control.</p>
+    </section>
+
+    <section class="view" id="view-move-workspace">
+      <div class="breadcrumbs">Docs / Commands / Windows / <b>Move to workspace</b></div>
+      <h1>Move to workspace<span class="badge">generated page</span></h1>
+      <p class="lede">Move the focused window and follow it to another workspace, or target a window by ID without switching your view.</p>
+
+      <h2 id="sec-mw-demos"><a href="#sec-mw-demos"><span class="n" aria-hidden="true">#</span>See it work</a></h2>
+      <p class="sectionintro">Two situations using writing as an example destination. Demos run against the focused window on <b>code</b> — whether the destination is empty changes what happens.</p>
+      <p class="demo-example">Example command: <code>wm window move workspace writing</code></p>
+      <div class="demo-stage" data-stage="move-workspace">
+        <div class="stage-head">
+          <ol class="situations" aria-label="Demo situations">
+            <li>
+              <button class="situation on" data-demo-tab="ws-follow" aria-selected="true">
+                <span class="sit-preview"></span>
+                <span class="sit-title">Empty destination</span>
+              </button>
+            </li>
+            <li>
+              <button class="situation" data-demo-tab="ws-retile" aria-selected="false">
+                <span class="sit-preview"></span>
+                <span class="sit-title">Populated destination</span>
+              </button>
+            </li>
+          </ol>
+        </div>
+
+        <div class="demo active" data-demo="ws-follow">
+        <div class="screenwrap"><div class="display-shell"><div class="display-bezel"><div class="screen">
+          <div class="wsbar"></div>
+          <div class="workarea"><div class="flash"></div></div>
+        </div></div></div></div>
+        <div class="player-bar">
+          <p class="step-title" aria-live="polite">Editor is focused on code; writing is empty.</p>
+          <div class="transport">
+            <button class="icon-control" data-transport type="button" aria-label="Play" title="Play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z"/></svg></button>
+            <span class="bookend" aria-hidden="true">1</span>
+            <div class="rail" role="group" aria-label="Scenario steps">
+              <button class="pip start" type="button" aria-label="Return to the starting layout"></button>
+              <button class="pip step" type="button" aria-label="Step 1"></button>
+            </div>
+            <span class="bookend" aria-hidden="true">1</span>
+            <button class="icon-control" data-playground type="button" aria-label="Open in playground" title="Open in playground"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg></button>
+          </div>
+        </div>
+        </div>
+
+        <div class="demo" data-demo="ws-retile">
+        <div class="screenwrap"><div class="display-shell"><div class="display-bezel"><div class="screen">
+          <div class="wsbar"></div>
+          <div class="workarea"><div class="flash"></div></div>
+        </div></div></div></div>
+        <div class="player-bar">
+          <p class="step-title" aria-live="polite">writing already has Mail in it. Watch it make room.</p>
+          <div class="transport">
+            <button class="icon-control" data-transport type="button" aria-label="Play" title="Play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z"/></svg></button>
+            <span class="bookend" aria-hidden="true">1</span>
+            <div class="rail" role="group" aria-label="Scenario steps">
+              <button class="pip start" type="button" aria-label="Return to the starting layout"></button>
+              <button class="pip step" type="button" aria-label="Step 1"></button>
+            </div>
+            <span class="bookend" aria-hidden="true">1</span>
+            <button class="icon-control" data-playground type="button" aria-label="Open in playground" title="Open in playground"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg></button>
+          </div>
+        </div>
+        </div>
+
+      </div>
+
+      <h2 id="sec-mw-inv"><a href="#sec-mw-inv"><span class="n" aria-hidden="true">#</span>Invocation</a></h2>
+      <table class="invocations">
+        <tr><th>Method</th><th>Invocation</th></tr>
+        <tr>
+          <td><span class="method cli">CLI</span></td>
+          <td>
+            <code class="snippet">wm window move workspace &lt;workspace&gt;</code>
+            <span class="note">Moves the focused window and follows it; also spelled <code>wm workspace move-window &lt;workspace&gt;</code>.</span>
+            <code class="snippet">wm workspace move-window &lt;window-id&gt; &lt;workspace&gt;</code>
+            <span class="note">Moves a specified window without switching your view. Example: <code>wm workspace move-window w1 writing</code>. Find a current ID with <code>wm windows</code>.</span>
+          </td>
+        </tr>
+        <tr>
+          <td><span class="method key">Keybind</span></td>
+          <td>
+            <kbd class="key">⌥</kbd><kbd class="key">⇧</kbd><kbd class="key">1</kbd> <code class="snippet">"option+shift+1": "window move workspace &lt;workspace&gt;"</code>
+            <span class="note">Assign a shortcut to a concrete command in your config. <a href="#" data-stub>Keybinds guide ↗</a></span>
+          </td>
+        </tr>
+        <tr>
+          <td><span class="method ws">WebSocket</span></td>
+          <td><code class="snippet">{"type":"moveFocusedWindowToWorkspace","workspace":"&lt;workspace&gt;"}</code><span class="note">Send a command payload to the local service. <a href="#" data-stub>WebSocket protocol ↗</a></span></td>
+        </tr>
+        <tr>
+          <td><span class="method scen">Scenario</span></td>
+          <td><code class="snippet">"window move workspace &lt;workspace&gt;"</code><span class="note">Use this command in a playground or docs demo, or in a test. <a href="#" data-stub>Scenario format ↗</a></span></td>
+        </tr>
+      </table>
+
+      <h2 id="sec-mw-args"><a href="#sec-mw-args"><span class="n" aria-hidden="true">#</span>Arguments</a></h2>
+      <table class="args">
+        <tr><th>Name</th><th>Type</th><th>Notes</th></tr>
+        <tr><td><code class="snippet">window</code></td><td><a href="#" data-stub>Window ID →</a></td><td>Required in the explicit-ID form; the other forms use the focused window.</td></tr>
+        <tr><td><code class="snippet">workspace</code></td><td><a href="#" data-stub>Workspace name →</a></td><td>Any name; new workspaces are created on first use.</td></tr>
+      </table>
+
+      <h2 id="sec-mw-errors"><a href="#sec-mw-errors"><span class="n" aria-hidden="true">#</span>Errors</a></h2>
+      <table class="args">
+        <tr><th>Code</th><th>Meaning</th><th>What to do</th></tr>
+        <tr>
+          <td><code class="snippet">window_not_found</code></td>
+          <td>No live window matches the target.</td>
+          <td>List live windows with <code class="snippet">wm windows</code> and retry with a current ID.</td>
+        </tr>
+        <tr>
+          <td><code class="snippet">workspace_not_found</code></td>
+          <td>No workspace has that name.</td>
+          <td>Check spelling — names are created on first use, so this only fails on a strict lookup.</td>
+        </tr>
+        <tr>
+          <td><code class="snippet">paused</code></td>
+          <td>The window manager is paused and holds mutations.</td>
+          <td>Resume with <code class="snippet">wm resume</code> (or your pause keybind), then retry.</td>
+        </tr>
+      </table>
+
+      <h2 id="sec-mw-related"><a href="#sec-mw-related"><span class="n" aria-hidden="true">#</span>Related</a></h2>
+      <div class="related">
+        <a href="#" data-stub>Focus workspace <span>workspace focus main</span></a>
+        <a href="#" data-stub>Move directionally <span>window move left</span></a>
+        <a href="#" data-stub>Concept: workspaces <span>membership &amp; affinity</span></a>
+      </div>
+    </section>
+
+    <section class="view" id="view-doctor">
+      <div class="breadcrumbs">Docs / Commands / Diagnostics / <b>doctor</b></div>
+      <h1>wm doctor<span class="badge">generated page</span></h1>
+      <p class="lede">Check the local installation: sidecar reachability, macOS permissions, and service state. Runs locally — it never contacts the daemon.</p>
+
+      <h2 id="sec-dr-inv"><a href="#sec-dr-inv"><span class="n" aria-hidden="true">#</span>Invocation</a></h2>
+      <table class="invocations">
+        <tr><th>Method</th><th>Invocation</th></tr>
+        <tr>
+          <td><span class="method cli">CLI</span></td>
+          <td><code class="snippet">wm doctor</code>
+            <span class="note">No keybind or WebSocket row: doctor reads your machine directly, so it only exists in the terminal.</span>
+          </td>
+        </tr>
+      </table>
+
+      <h2 id="sec-dr-exit"><a href="#sec-dr-exit"><span class="n" aria-hidden="true">#</span>Exit codes</a></h2>
+      <table class="args">
+        <tr><th>Code</th><th>Meaning</th><th>What to do</th></tr>
+        <tr>
+          <td><code class="snippet">0</code></td>
+          <td>All checks passed.</td>
+          <td>Nothing — you are set.</td>
+        </tr>
+        <tr>
+          <td><code class="snippet">1</code></td>
+          <td>At least one check failed; the JSON output names it.</td>
+          <td>Run <code class="snippet">wm permissions-request</code> for permission failures, then <code class="snippet">wm doctor</code> again.</td>
+        </tr>
+      </table>
+
+      <h2 id="sec-dr-demo"><a href="#sec-dr-demo"><span class="n" aria-hidden="true">#</span>Sample run</a></h2>
+      <div class="demo-stage">
+        <div class="stage-head">
+          <ol class="situations">
+            <li>
+              <div class="situation on">
+                <span class="sit-chip">A healthy machine</span>
+                <span class="sit-arrow">→</span>
+                <span class="sit-claim">passes every check — sidecar, permissions, service.</span>
+              </div>
+            </li>
+          </ol>
+        </div>
+        <div class="demo active" data-demo="doctor">
+      <div class="screenwrap">
+        <div class="terminal"><span class="caret"></span></div>
+      </div>
+      <div class="player-bar">
+        <p class="step-title" aria-live="polite">A healthy machine, replayed line by line.</p>
+        <div class="transport">
+          <button class="icon-control" data-transport type="button" aria-label="Play" title="Play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z"/></svg></button>
+          <span class="bookend" aria-hidden="true">1</span>
+          <div class="rail" role="group" aria-label="Scenario steps">
+            <button class="pip start" type="button" aria-label="Return to the starting layout"></button>
+            <button class="pip step" type="button" aria-label="Step 1"></button>
+          </div>
+          <span class="bookend" aria-hidden="true">1</span>
+          <button class="icon-control" data-playground type="button" aria-label="Copy sample transcript" title="Copy sample transcript"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 9h10v10H9zM5 15V5h10"/></svg></button>
+        </div>
+      </div>
+      <div class="term-notes">
+        <span class="term-note">accessibility → granted: required to move &amp; resize</span>
+        <span class="term-note">screenRecording → granted: required to observe window frames</span>
+      </div>
+        </div>
+      </div>
+
+      <h2 id="sec-dr-related"><a href="#sec-dr-related"><span class="n" aria-hidden="true">#</span>Related</a></h2>
+      <div class="related">
+        <a href="#" data-stub>Guide: permissions <span>granting &amp; troubleshooting</span></a>
+        <a href="#" data-stub>permissions-request <span>open the macOS prompts</span></a>
+      </div>
+    </section>
+
+    <section class="view" id="view-getting-started">
+      <div class="breadcrumbs">Docs / Getting started / <b>Installation</b></div>
+      <h1>Installation</h1>
+      <p class="lede">Paneform wm ships as a signed macOS service with a <code>wm</code> CLI. This page previews the authored-markdown style.</p>
+      <div class="prose">
+        <h2 id="sec-gs-setup">Setup steps</h2>
+        <h3 id="sec-gs-requirements">Requirements</h3>
+        <ul>
+          <li>macOS 14 or newer, Apple silicon or Intel</li>
+          <li>Node 24 (CLI only)</li>
+        </ul>
+        <h3 id="sec-gs-install">Install</h3>
+        <p><code>wm service install</code> registers and starts the launchd service. The daemon owns no windows until you start it.</p>
+        <h3 id="sec-gs-permissions">Grant permissions</h3>
+        <p>wm needs Accessibility and Screen Recording. Run <code>wm permissions-request</code> to open both prompts, then <code>wm doctor</code> to verify. <a href="#" data-view="doctor">See the doctor page for a sample run →</a></p>
+        <h3 id="sec-gs-config">Write a config</h3>
+        <p>Configuration lives at <code>~/.config/paneform/wm/config.jsonc</code> and hot-reloads on save.</p>
+         <p class="quiet-note">This page previews the authored-markdown style: prose, code fences checked against the real grammar, and demo components embedded where they help.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <aside class="toc"><div class="label">On this page</div><div class="toc-links"><svg class="toc-rail" viewBox="0 0 18 1" aria-hidden="true"><path class="toc-rail-track"/><path class="toc-rail-progress" pathLength="1"/><path class="toc-rail-active"/></svg><ul id="toc-list"></ul></div></aside>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="layout-engine.js"></script>
+<script>
+  const initialDemo = new URLSearchParams(location.search).get("demo");
+  const DISPLAY = { x: 0, y: 0, width: 1440, height: 900 };
+  const LAYOUT_GAP = 8;
+  const BAR_REM = 1.1;
+
+  function barMargin(screen) {
+    const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    const screenPx = screen.getBoundingClientRect().height || 260;
+    return Math.max(2, Math.round((BAR_REM * rem / screenPx) * DISPLAY.height));
+  }
+
+  function toLogical({ x, y, w, h }, margin) {
+    const contentHeight = DISPLAY.height - margin;
+    return {
+      x: Math.round((x / 100) * DISPLAY.width),
+      y: margin + Math.round((y / 100) * contentHeight),
+      width: Math.round((w / 100) * DISPLAY.width),
+      height: Math.round((h / 100) * contentHeight),
+    };
+  }
+
+  function buildScenario(scene, screen) {
+    const margin = barMargin(screen);
+    const windows = scene.state.map(({ title, x, y, w, h, focused, workspace }) => ({
+      id: title.toLowerCase(),
+      title,
+      frame: toLogical({ x, y, w, h }, margin),
+      workspace,
+    }));
+    const focused = scene.state.find((entry) => entry.focused);
+    return Paneform.parseScenario({
+      config: { defaults: { margins: { top: margin }, gap: LAYOUT_GAP } },
+      state: {
+        topology: [{ id: "display:main", frame: DISPLAY, workspace: "code", primary: true }],
+        windows,
+        focusedWindow: focused ? focused.title.toLowerCase() : null,
+        focusedWorkspace: "code",
+      },
+      steps: [{ command: scene.command, caption: scene.caption }],
+    });
+  }
+
+  function renderState(screen, sim, scene, margin) {
+    const contentHeight = DISPLAY.height - margin;
+    const bar = screen.querySelector(".wsbar");
+    const workarea = screen.querySelector(".workarea");
+    const workspaces = [...new Set([
+      ...(scene.workspaces ?? ["code"]),
+      sim.focusedWorkspace ?? "code",
+      ...sim.topology.map((display) => display.workspace),
+      ...sim.windows.map((window) => window.workspace),
+    ].filter(Boolean))];
+    const focusedWs = sim.focusedWorkspace ?? workspaces[0];
+    bar.innerHTML = "";
+    for (const name of workspaces) {
+      const members = sim.windows.filter((w) => w.workspace === name);
+      const chip = document.createElement("span");
+      chip.className = "wschip" + (name === focusedWs ? " focused" : "");
+      chip.innerHTML =
+        '<span class="name">' + name + '</span><span class="apps">' +
+        members.map(() => '<span class="app"></span>').join("") +
+        "</span>";
+      bar.appendChild(chip);
+    }
+    const visible = sim.windows.filter((w) => w.workspace === focusedWs);
+    const flash = workarea.querySelector(".flash");
+    const existing = new Map([...workarea.querySelectorAll(".win")].map((el) => [el.dataset.winId, el]));
+    const keep = new Set();
+    for (const w of visible) {
+      keep.add(w.id);
+      let el = existing.get(w.id);
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "win enter";
+        el.dataset.winId = w.id;
+        el.innerHTML = '<div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">' + (w.title ?? w.id) + "</span></div>";
+        workarea.insertBefore(el, flash);
+        requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove("enter")));
+      }
+      const f = w.frame;
+      el.style.left = (f.x / DISPLAY.width) * 100 + "%";
+      el.style.top = ((f.y - margin) / contentHeight) * 100 + "%";
+      el.style.width = (f.width / DISPLAY.width) * 100 + "%";
+      el.style.height = (f.height / contentHeight) * 100 + "%";
+      el.classList.toggle("focused", sim.focusedWindow === w.id);
+    }
+    for (const [id, el] of existing) {
+      if (keep.has(id)) continue;
+      el.classList.add("exit");
+      setTimeout(() => el.remove(), 320);
+    }
+  }
+
+  const SCENES = {
+    swap: {
+      workspaces: ["code"],
+      state: [
+        { title: "Mail", x: 0, y: 0, w: 50, h: 100, workspace: "code" },
+        { title: "Editor", x: 50, y: 0, w: 50, h: 100, focused: true, workspace: "code" },
+      ],
+      command: "window move left",
+      tab: "Borders a window",
+      situation: "Mail sits to the left of Editor.",
+      caption: '<span class="ok">✓</span> Editor swaps places with Mail — positions trade, focus stays on Editor.',
+    },
+    "edge-expand": {
+      workspaces: ["code"],
+      state: [
+        { title: "Mail", x: 0, y: 0, w: 100, h: 50, workspace: "code" },
+        { title: "Editor", x: 0, y: 50, w: 50, h: 50, focused: true, workspace: "code" },
+        { title: "Notes", x: 50, y: 50, w: 50, h: 50, workspace: "code" },
+      ],
+      command: "window move left",
+      tab: "Shared edge",
+      situation: "Editor already touches the left edge, and Mail shares it from above.",
+      caption: '<span class="ok">✓</span> Editor rotates around the tree and claims the full left edge; Mail and Notes restack on the right.',
+    },
+    "edge-alone": {
+      workspaces: ["code"],
+      noop: true,
+      state: [
+        { title: "Editor", x: 0, y: 0, w: 100, h: 100, focused: true, workspace: "code" },
+      ],
+      command: "window move left",
+      tab: "Exclusive edge",
+      situation: "Nothing neighbors Editor on the left.",
+      caption: '<span class="noop">✓ no-op</span> Editor is alone against the edge — the layout holds, and the command still succeeds.',
+    },
+    "ws-follow": {
+      workspaces: ["code", "writing"],
+      state: [
+        { title: "Editor", x: 0, y: 0, w: 50, h: 100, focused: true, workspace: "code" },
+        { title: "Terminal", x: 50, y: 0, w: 50, h: 100, workspace: "code" },
+      ],
+      command: "window move workspace writing",
+      tab: "Empty destination",
+      situation: 'Editor is focused on <b>code</b>; <b>writing</b> is empty.',
+      caption: '<span class="ok">✓</span> Editor joins <b>writing</b> — and the view follows, landing you on writing with it.',
+    },
+    "ws-retile": {
+      workspaces: ["code", "writing"],
+      state: [
+        { title: "Editor", x: 0, y: 0, w: 100, h: 100, focused: true, workspace: "code" },
+        { title: "Mail", x: 0, y: 0, w: 100, h: 100, workspace: "writing" },
+      ],
+      command: "window move workspace writing",
+      tab: "Populated destination",
+      situation: '<b>writing</b> already has Mail in it. Watch it make room.',
+      caption: '<span class="ok">✓</span> Mail retiles to half; Editor lands beside it, focused.',
+    },
+    doctor: {
+      terminal: true,
+      situation: "A healthy machine, replayed line by line.",
+      lines: [
+        '<span class="prompt">$</span> wm doctor',
+        '<span class="punc">{</span>',
+        '  <span class="key-line">"sidecar"</span><span class="punc">:</span> <span class="punc">{</span>',
+        '    <span class="key-line">"version"</span><span class="punc">:</span> <span class="str">"0.4.1"</span><span class="punc">,</span>',
+        '    <span class="key-line">"reachable"</span><span class="punc">:</span> <span class="str">true</span>',
+        '  <span class="punc">},</span>',
+        '  <span class="key-line">"permissions"</span><span class="punc">:</span> <span class="punc">{</span>',
+        '    <span class="key-line">"accessibility"</span><span class="punc">:</span> <span class="str">"granted"</span><span class="punc">,</span>',
+        '    <span class="key-line">"screenRecording"</span><span class="punc">:</span> <span class="str">"granted"</span>',
+        '  <span class="punc">},</span>',
+        '  <span class="key-line">"daemon"</span><span class="punc">:</span> <span class="punc">{</span>',
+        '    <span class="key-line">"service"</span><span class="punc">:</span> <span class="str">"loaded"</span><span class="punc">,</span>',
+        '    <span class="key-line">"socket"</span><span class="punc">:</span> <span class="str">"listening"</span>',
+        '  <span class="punc">}</span>',
+        '<span class="punc">}</span>',
+        '<span class="okline">✓ all checks passed</span>',
+      ],
+      caption: '<span class="ok">✓</span> Exit code 0.',
+    },
+  };
+
+  const toast = document.getElementById("toast");
+  let toastTimer;
+  function showToast(html) {
+    toast.innerHTML = html;
+    toast.classList.add("on");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove("on"), 3200);
+  }
+
+  const TRANSPORT = {
+    play: { d: "m9 5 11 7-11 7Z", label: "Play" },
+    pause: { d: "M9 5v14M15 5v14", label: "Pause" },
+    back: { d: "M4 10a8 8 0 1 1 1.5 7M4 4v6h6", label: "Return to start" },
+  };
+
+  function initDemo(card) {
+    const scene = SCENES[card.dataset.demo];
+    const screen = card.querySelector(".screen");
+    const title = card.querySelector(".step-title");
+    const transport = card.querySelector("[data-transport]");
+    const rail = card.querySelector(".rail");
+    const startPip = card.querySelector(".pip.start");
+    const stepPip = card.querySelector(".pip.step");
+    const flash = card.querySelector(".flash");
+    const viewId = card.closest(".view")?.id.replace("view-", "");
+    let sessionPromise = null;
+    let sessionKey = null;
+    let state = "idle";
+    let runToken = 0;
+
+    const setTransport = (mode) => {
+      transport.querySelector("path").setAttribute("d", TRANSPORT[mode].d);
+      transport.setAttribute("aria-label", TRANSPORT[mode].label);
+      transport.title = TRANSPORT[mode].label;
+    };
+    const setState = (next) => {
+      state = next;
+      stepPip.classList.toggle("done", next === "done");
+      setTransport(next === "done" ? "back" : next === "running" ? "pause" : "play");
+    };
+    const setFill = (value) => rail.style.setProperty("--rail-fill", value);
+    const restoreTerminal = () => {
+      const holder = card.querySelector(".terminal");
+      holder.innerHTML = "";
+      const caret = document.createElement("span");
+      caret.className = "caret";
+      holder.appendChild(caret);
+      return holder;
+    };
+    const startSession = async () => {
+      const margin = barMargin(screen);
+      const scenario = buildScenario(scene, screen);
+      const key = JSON.stringify(scenario);
+      if (key === sessionKey && sessionPromise) return;
+      sessionKey = key;
+      const previous = sessionPromise;
+      const created = Paneform.createScenarioSession(scenario).catch(() => null);
+      sessionPromise = created;
+      const session = await created;
+      if (!session) return;
+      previous?.then((done) => void done.dispose()).catch(() => {});
+      if (!scene.terminal) {
+        try {
+          await session.apply({ command: "reconcile" });
+        } catch {
+          return;
+        }
+      }
+      const snapshot = await session.snapshot();
+      if (sessionPromise !== created) {
+        void session.dispose();
+        return;
+      }
+      const workarea = screen.querySelector(".workarea");
+      workarea.classList.add("noanim");
+      renderState(screen, snapshot, scene, margin);
+      requestAnimationFrame(() => requestAnimationFrame(() => workarea.classList.remove("noanim")));
+    };
+    const reset = () => {
+      runToken += 1;
+      setState("idle");
+      setFill("0%");
+      title.innerHTML = scene.situation;
+      if (scene.terminal) {
+        restoreTerminal();
+        return;
+      }
+      if (!window.Paneform) {
+        title.innerHTML = "Engine bundle missing — rebuild docs/mockups/layout-engine.js.";
+        return;
+      }
+      if (card.offsetParent === null) return;
+      void startSession();
+    };
+    const finish = () => {
+      setState("done");
+      setFill("100%");
+      title.innerHTML = scene.caption;
+    };
+    const finishNow = () => {
+      runToken += 1;
+      if (scene.terminal) {
+        const holder = restoreTerminal();
+        holder.innerHTML = scene.lines.map((line) => '<div class="tline">' + line + "</div>").join("");
+      }
+      finish();
+    };
+    const play = async () => {
+      if (state === "running") return finishNow();
+      const token = ++runToken;
+      setState("running");
+      setFill("100%");
+      if (scene.terminal) {
+        const holder = restoreTerminal();
+        const caret = holder.querySelector(".caret");
+        for (const line of scene.lines) {
+          await new Promise((r) => setTimeout(r, 110));
+          if (token !== runToken) return;
+          const div = document.createElement("div");
+          div.className = "tline";
+          div.innerHTML = line;
+          holder.insertBefore(div, caret);
+        }
+        caret.remove();
+      } else {
+        const created = sessionPromise;
+        const session = await created?.catch(() => null);
+        if (!session || sessionPromise !== created) {
+          setState("idle");
+          setFill("0%");
+          return;
+        }
+        let result;
+        try {
+          result = await session.step();
+        } catch {
+          return;
+        }
+        sessionKey = null;
+        if (token !== runToken || !result) return;
+        renderState(screen, result.state, scene, barMargin(screen));
+        if (scene.noop) {
+          flash.classList.add("on");
+          setTimeout(() => flash.classList.remove("on"), 420);
+        }
+      }
+      if (token !== runToken) return;
+      finish();
+    };
+
+    transport.addEventListener("click", () => (state === "done" ? reset() : play()));
+    startPip.addEventListener("click", reset);
+    stepPip.addEventListener("click", () => { if (state !== "done") play(); });
+    startPip.addEventListener("mouseenter", () => (title.innerHTML = scene.situation));
+    startPip.addEventListener("mouseleave", () => (title.innerHTML = state === "done" ? scene.caption : scene.situation));
+    stepPip.addEventListener("mouseenter", () => (title.innerHTML = scene.caption));
+    stepPip.addEventListener("mouseleave", () => (title.innerHTML = state === "done" ? scene.caption : scene.situation));
+    card.querySelector("[data-playground]").addEventListener("click", () => {
+      showToast(card.dataset.demo === "doctor"
+        ? "Doctor has no scenario — this button would copy the sample transcript as JSON."
+        : "Encodes the demo scenario at click time → <b>/wm/play#scenario=gz.H4sIAAAAAAA…</b> (never stored, never committed)");
+    });
+    reset();
+    return { viewId, demoId: card.dataset.demo, refresh: reset };
+  }
+
+  const demoControllers = [];
+  document.querySelectorAll(".demo[data-demo]").forEach((card) => demoControllers.push(initDemo(card)));
+
+  const activeDemo = {};
+  const demoView = {};
+  function selectDemo(viewId, demoId) {
+    activeDemo[viewId] = demoId;
+    const stage = document.querySelector(`[data-stage="${viewId}"]`);
+    if (stage) {
+      stage.querySelectorAll("[data-demo-tab]").forEach((tab) => {
+        const on = tab.dataset.demoTab === demoId;
+        tab.classList.toggle("on", on);
+        tab.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      stage.querySelectorAll(".demo").forEach((card) => card.classList.toggle("active", card.dataset.demo === demoId));
+    }
+    const url = new URL(location.href);
+    if (url.searchParams.get("demo") !== demoId) {
+      url.searchParams.set("demo", demoId);
+      history.replaceState(null, "", url);
+    }
+    for (const controller of demoControllers) {
+      if (controller.viewId === viewId && controller.demoId === demoId) controller.refresh();
+    }
+  }
+
+  function renderPreviews(viewId) {
+    const stage = document.querySelector(`[data-stage="${viewId}"]`);
+    if (!stage) return;
+    stage.querySelectorAll("[data-demo-tab]").forEach((row) => {
+      const scene = SCENES[row.dataset.demoTab];
+      const preview = row.querySelector(".sit-preview");
+      if (!preview || scene.terminal) return;
+      preview.innerHTML = "";
+      const primary = scene.workspaces?.[0] ?? "code";
+      for (const w of scene.state) {
+        if (w.workspace !== primary) continue;
+        const win = document.createElement("span");
+        win.className = "pv-win" + (w.focused ? " focused" : "");
+        win.style.left = w.x + "%";
+        win.style.top = w.y + "%";
+        win.style.width = w.w + "%";
+        win.style.height = w.h + "%";
+        preview.appendChild(win);
+      }
+    });
+  }
+
+  document.querySelectorAll("[data-stage]").forEach((stage) => {
+    const viewId = stage.dataset.stage;
+    const initial = stage.querySelector(".demo.active")?.dataset.demo;
+    if (initial) activeDemo[viewId] = initial;
+    stage.querySelectorAll(".demo").forEach((card) => { demoView[card.dataset.demo] = viewId; });
+    stage.querySelectorAll("[data-demo-tab]").forEach((tab) =>
+      tab.addEventListener("click", () => selectDemo(viewId, tab.dataset.demoTab))
+    );
+    renderPreviews(viewId);
+  });
+
+  document.querySelectorAll("table.invocations, table.args").forEach((table) => {
+    const rows = [...table.querySelectorAll("tr")];
+    const heads = rows[0] ? [...rows[0].querySelectorAll("th")].map((th) => th.textContent.trim()) : [];
+    for (const row of rows.slice(1)) {
+      [...row.children].forEach((cell, index) => {
+        if (heads[index]) cell.dataset.label = heads[index];
+      });
+    }
+  });
+
+  const requestedView = initialDemo && SCENES[initialDemo] ? demoView[initialDemo] : null;
+  if (requestedView) selectDemo(requestedView, initialDemo);
+
+  let tocHeadings = [];
+  let tocFrame = 0;
+  let tocActiveIndex = -1;
+  let tocSegments = [];
+  const tocRail = document.querySelector(".toc-rail");
+  const tocTrack = tocRail.querySelector(".toc-rail-track");
+  const tocActiveRail = tocRail.querySelector(".toc-rail-active");
+
+  function railBend(previous, next) {
+    const halfway = (previous.y + next.y) / 2;
+    const bend = Math.min(6, (next.y - previous.y) / 4);
+    return { from: halfway - bend, to: halfway + bend };
+  }
+
+  function railPath(points, height) {
+    const commands = [`M ${points[0].x} 0`];
+    points.forEach((point, index) => {
+      const previous = points[index - 1];
+      if (previous && previous.x !== point.x) {
+        const { from, to } = railBend(previous, point);
+        commands.push(`L ${previous.x} ${from}`, `L ${point.x} ${to}`);
+      }
+      commands.push(`L ${point.x} ${point.y}`);
+    });
+    commands.push(`L ${points.at(-1).x} ${height}`);
+    return commands.join(" ");
+  }
+
+  function lengthAtY(y, total) {
+    let low = 0, high = total;
+    for (let i = 0; i < 16; i++) {
+      const middle = (low + high) / 2;
+      if (tocTrack.getPointAtLength(middle).y < y) low = middle;
+      else high = middle;
+    }
+    return (low + high) / 2;
+  }
+
+  function straightRailSegment(item, index, points, total) {
+    const point = points[index], previous = points[index - 1], next = points[index + 1];
+    const top = item.offsetTop, bottom = top + item.offsetHeight;
+    let startY = previous && previous.x !== point.x ? Math.max(top, railBend(previous, point).to + 2) : top;
+    let endY = next && next.x !== point.x ? Math.min(bottom, railBend(point, next).from - 2) : bottom;
+    if (startY >= endY) { startY = point.y - 1; endY = point.y + 1; }
+    return { start: lengthAtY(startY, total), end: lengthAtY(endY, total), total };
+  }
+
+  function moveTocRail(index, animate = true) {
+    const segment = tocSegments[index];
+    if (!segment) return;
+    tocActiveRail.style.transition = animate ? "" : "none";
+    tocActiveRail.style.strokeDasharray = `${segment.end - segment.start} ${segment.total + 1}`;
+    tocActiveRail.style.strokeDashoffset = String(-segment.start);
+    if (!animate) requestAnimationFrame(() => tocActiveRail.style.removeProperty("transition"));
+  }
+
+  function renderTocRail() {
+    const list = document.getElementById("toc-list");
+    const items = [...list.children];
+    if (!items.length || !list.offsetHeight) return;
+    const points = items.map((item) => ({
+      x: item.classList.contains("nested") ? 14 : 2,
+      y: item.offsetTop + item.offsetHeight / 2,
+    }));
+    const height = list.offsetHeight;
+    tocRail.setAttribute("viewBox", `0 0 18 ${height}`);
+    const d = railPath(points, height);
+    for (const path of tocRail.querySelectorAll("path")) path.setAttribute("d", d);
+    const total = tocTrack.getTotalLength();
+    tocSegments = items.map((item, index) => straightRailSegment(item, index, points, total));
+    moveTocRail(Math.max(0, tocActiveIndex), false);
+  }
+
+  function updateTocCurrent() {
+    const threshold = Math.min(innerHeight / 2, 320);
+    const active = tocHeadings.reduce(
+      (index, heading, i) => heading.getBoundingClientRect().top <= threshold ? i : index, 0
+    );
+    document.querySelectorAll("#toc-list a").forEach((link, i) => {
+      if (i === active) link.setAttribute("aria-current", "location");
+      else link.removeAttribute("aria-current");
+    });
+    if (active !== tocActiveIndex) {
+      tocActiveIndex = active;
+      moveTocRail(active);
+    }
+    tocFrame = 0;
+  }
+  function queueTocUpdate() {
+    if (!tocFrame) tocFrame = requestAnimationFrame(updateTocCurrent);
+  }
+  addEventListener("scroll", queueTocUpdate, { passive: true });
+  new ResizeObserver(renderTocRail).observe(document.getElementById("toc-list"));
+
+  function tocItem(heading) {
+    const li = document.createElement("li");
+    li.classList.toggle("nested", heading.tagName === "H3");
+    const a = document.createElement("a");
+    a.href = "#" + heading.id;
+    a.textContent = heading.querySelector("a")?.lastChild?.textContent?.trim() ?? heading.textContent.trim();
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      heading.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    li.appendChild(a);
+    return li;
+  }
+
+  function show(view) {
+    document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === "view-" + view));
+    document.querySelectorAll("#sidebar a").forEach((a) => a.classList.toggle("active", a.dataset.view === view));
+    demoControllers.forEach((controller) => {
+      if (controller.viewId === view && controller.demoId === activeDemo[view]) controller.refresh();
+    });
+    const list = document.getElementById("toc-list");
+    tocHeadings = [...document.querySelectorAll(`#view-${view} h2[id], #view-${view} h3[id]`)];
+    list.replaceChildren(...tocHeadings.map(tocItem));
+    tocActiveIndex = -1;
+    renderTocRail();
+    window.scrollTo({ top: 0 });
+    queueTocUpdate();
+  }
+
+  document.querySelectorAll("[data-view]").forEach((a) =>
+    a.addEventListener("click", (e) => { e.preventDefault(); show(a.dataset.view); })
+  );
+  document.querySelectorAll("[data-stub]").forEach((a) =>
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      showToast("Not part of this mockup — the real sidebar would navigate here.");
+    })
+  );
+
+  show(requestedView ?? "move-directional");
+</script>
+</body>
+</html>
