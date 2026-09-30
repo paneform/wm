@@ -334,6 +334,13 @@ for one through five examples:
 - Autoplay brings the active card into view without scrolling the document.
   It holds the starting state for one second before animation; clicking a
   card or using navigation starts that example without the autoplay hold.
+  The shared `demo-timing.ts` cadence is: prepared at 0ms, playback/progress
+  at 1000ms, command at 1300ms, transitions/progress/playback complete and
+  result caption shown at 1800ms, and advancement at 2800ms. After the last
+  example, an additional 1200ms hold precedes the sequence reset. A single
+  example therefore repeats every 4000ms, apart from runner/frame overhead.
+  Reset uses the saved prepared snapshots so all examples return to their
+  actual reconciled starting states.
 - Cards, dots, keyboard arrows and Home/End provide manual navigation.
   Horizontal browsing pauses automatic advancement; the snapped card becomes
   the selected example. Pips always select and play, including the current

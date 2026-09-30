@@ -6,6 +6,7 @@
   import type { DemoSituation } from "./demo-data.js";
   import { carouselSelection, carouselTarget } from "./carousel.js";
   import { DEMO_CAPTION_COLUMNS, formatDemoCaption } from "./demo-caption.js";
+  import { DEMO_TIMING } from "./demo-timing.js";
 
   let { situations }: { situations: DemoSituation[] } = $props();
   let stage = $state<HTMLDivElement>();
@@ -16,8 +17,10 @@
   let tiles: HTMLButtonElement[] = [];
   let pips: HTMLButtonElement[] = [];
   let snapshots = $state<SimulationState[]>([]);
+  let startingSnapshots = $state<SimulationState[]>([]);
   let selected = $state(0);
   let playing = $state(false);
+  let prepared = $state(false);
   let played = $state(new Set<number>());
   let resetting = $state(false);
   let flash = $state(-1);
@@ -65,7 +68,7 @@
   function resumeAutoplay() {
     if (!canAutoplay || playing || loading) return;
     suspendAutoplay();
-    if (played.has(selected)) pauseTimer = setTimeout(() => { if (canAutoplay) void advance(selected); }, 500);
+    if (played.has(selected)) scheduleAdvance(selected, generation);
     else if (session) schedulePlayback(session, selected, generation);
     else void run(selected);
   }
@@ -74,7 +77,7 @@
     if (!canAutoplay) return;
     pauseTimer = setTimeout(() => {
       if (generation === token && canAutoplay) beginPlayback(candidate, index, token);
-    }, 1000);
+    }, DEMO_TIMING.prepareHoldMs);
   }
 
   function scrollSettled() {
@@ -91,12 +94,12 @@
     updateEdges();
     clearTimeout(scrollTimer);
     if (!programmaticScroll) { userScrolled = true; userScrolling = true; suspendAutoplay(); }
-    scrollTimer = setTimeout(scrollSettled, 150);
+    scrollTimer = setTimeout(scrollSettled, DEMO_TIMING.scrollSettleMs);
   }
 
   function browse() {
     programmaticScroll = false; userScrolling = true; suspendAutoplay();
-    clearTimeout(scrollTimer); scrollTimer = setTimeout(scrollSettled, 150);
+    clearTimeout(scrollTimer); scrollTimer = setTimeout(scrollSettled, DEMO_TIMING.scrollSettleMs);
   }
 
   function keyboard(event: KeyboardEvent) {
@@ -119,6 +122,7 @@
     clearMove = null;
     flash = -1;
     playing = false;
+    prepared = false;
     resetting = false;
     const previous = session;
     session = null;
@@ -137,7 +141,7 @@
       clearMove = animateWorkspaceIndicator(tiles[index]!, origin, result.state);
       if (situations[index]!.slug === "exclusive-edge") {
         flash = index;
-        flashTimer = setTimeout(() => (flash = -1), 420);
+        flashTimer = setTimeout(() => (flash = -1), DEMO_TIMING.flashFadeMs);
       }
     } catch (cause) {
       if (generation === token) error = cause instanceof Error ? cause.message : "Demo step failed.";
@@ -146,15 +150,19 @@
 
   function beginPlayback(candidate: ScenarioSession, index: number, token: number) {
     playing = true;
-    stepTimer = setTimeout(() => void runStep(candidate, index, token), 300);
+    stepTimer = setTimeout(() => void runStep(candidate, index, token), DEMO_TIMING.commandLeadMs);
     endTimer = setTimeout(() => {
       if (generation !== token) return;
       playing = false;
       played = new Set([...played, index]);
-      pauseTimer = setTimeout(() => {
-        if (generation === token && canAutoplay) void advance(index);
-      }, 500);
-    }, 1000);
+      scheduleAdvance(index, token);
+    }, DEMO_TIMING.playbackMs);
+  }
+
+  function scheduleAdvance(index: number, token: number) {
+    pauseTimer = setTimeout(() => {
+      if (generation === token && canAutoplay) void advance(index);
+    }, DEMO_TIMING.resultHoldMs);
   }
 
   async function run(index: number, immediate = false) {
@@ -171,8 +179,11 @@
       candidate = await createScenarioSession(situations[index]!.scenario);
       if (generation !== token) return;
       session = candidate;
-       snapshots[index] = await candidate.snapshot();
+      const initial = await candidate.snapshot();
       if (generation !== token) return;
+      startingSnapshots[index] = initial;
+      snapshots[index] = initial;
+      prepared = true;
       if (immediate) beginPlayback(candidate, index, token);
       else schedulePlayback(candidate, index, token);
     } catch (cause) {
@@ -186,10 +197,17 @@
   async function advance(index: number) {
     if (!canAutoplay) return;
     if (index < situations.length - 1) { await run(index + 1); return; }
+    const token = generation;
+    pauseTimer = setTimeout(() => {
+      if (generation === token && canAutoplay) void resetSequence();
+    }, DEMO_TIMING.sequenceHoldMs);
+  }
+
+  async function resetSequence() {
     cancel();
     const token = generation;
     resetting = true;
-    snapshots = situations.map((situation) => situation.scenario.state);
+    snapshots = startingSnapshots.slice();
     played = new Set();
     await tick();
     if (generation !== token) return;
@@ -218,6 +236,7 @@
     const stageElement = stage;
     if (!stageElement) return;
     snapshots = situations.map((situation) => situation.scenario.state);
+    startingSnapshots = snapshots.slice();
     const motion = matchMedia('(prefers-reduced-motion: reduce)');
     const updateMotion = () => { reducedMotion = motion.matches; if (reducedMotion) suspendAutoplay(); else resumeAutoplay(); };
     reducedMotion = motion.matches;
@@ -245,7 +264,7 @@
   });
 </script>
 
-<div class="demo-stage" class:single={situations.length === 1} style:--demo-caption-columns={DEMO_CAPTION_COLUMNS} bind:this={stage} role="region" aria-roledescription="carousel" aria-label="Command examples. Press Escape to pause; select an example to play." data-autoplay={canAutoplay ? 'running' : 'paused'} data-reduced-motion={reducedMotion}>
+<div class="demo-stage" class:single={situations.length === 1} style:--demo-caption-columns={DEMO_CAPTION_COLUMNS} style:--demo-playback-duration={`${DEMO_TIMING.playbackMs}ms`} style:--demo-transition-duration={`${DEMO_TIMING.transitionMs}ms`} style:--demo-flash-duration={`${DEMO_TIMING.flashFadeMs}ms`} bind:this={stage} role="region" aria-roledescription="carousel" aria-label="Command examples. Press Escape to pause; select an example to play." data-autoplay={canAutoplay ? 'running' : 'paused'} data-reduced-motion={reducedMotion} data-prepared={prepared}>
   <div class="scroller" class:scroll-start={scrollStart} class:scroll-end={scrollEnd}>
   <div class="situations" bind:this={track} role="group" aria-label="Command situations" onscroll={scrolling} onpointerdown={browse} onpointerup={() => { userScrolling = false; resumeAutoplay(); }} onpointercancel={() => { userScrolling = false; resumeAutoplay(); }} onwheel={browse}>
      {#each situations as situation, index (situation.slug)}
@@ -307,7 +326,7 @@
   button.active .situation-title { color: var(--rp-text); }
   .progress { position: absolute; inset: auto 0 0; height: 3px; background: var(--rp-muted); }
   .progress::after { content: ''; display: block; height: 100%; width: 0; background: var(--rp-love); }
-  button.playing .progress::after { animation: progress 1s linear both; }
+  button.playing .progress::after { animation: progress var(--demo-playback-duration) linear both; }
   button.played .progress::after { width: 100%; }
   button.resetting :global(.pane) { transition: none; }
   .demo-error { margin: .6rem; color: var(--rp-love); font-size: var(--docs-sm); }

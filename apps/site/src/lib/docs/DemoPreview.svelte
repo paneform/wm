@@ -46,6 +46,7 @@
       {#each visibleWindows as window (window.id)}
         <span
           class="pane"
+          data-window-id={window.id}
            class:focused={window.id === state.focusedWindow}
            class:floating={window.floating}
           style:left={`${((window.frame.x - display.frame.x) / display.frame.width) * 100}%`}
@@ -72,14 +73,14 @@
   .workspace-apps { display: flex; gap: 2px; }
   .workspace-bar :global(.workspace-app) { width: 5px; height: 5px; flex: none; border-radius: 1.5px; background: currentColor; opacity: 0.85; }
   .workarea { position: relative; flex: 1; background: var(--rp-surface); }
-  .pane { position: absolute; border: 1px solid var(--rp-subtle); border-radius: 4px; background: var(--rp-surface); transition: left 0.5s var(--easing-standard), top 0.5s var(--easing-standard), width 0.5s var(--easing-standard), height 0.5s var(--easing-standard); }
+  .pane { position: absolute; border: 1px solid var(--rp-subtle); border-radius: 4px; background: var(--rp-surface); transition: left var(--demo-transition-duration, 500ms) var(--easing-standard), top var(--demo-transition-duration, 500ms) var(--easing-standard), width var(--demo-transition-duration, 500ms) var(--easing-standard), height var(--demo-transition-duration, 500ms) var(--easing-standard); }
   .pane.focused { border: 2px solid var(--rp-iris); background: var(--rp-overlay); }
   .dot { position: absolute; top: 5px; width: 4.5px; height: 4.5px; border-radius: 50%; }
   .dot.red { left: 5px; background: var(--rp-love); }
   .dot.yellow { left: 13px; background: var(--rp-gold); }
   .dot.green { left: 21px; background: var(--rp-pine); }
   .pane:not(.focused) .dot { background: var(--rp-subtle); }
-  .flash { position: absolute; inset: 0; background: color-mix(in srgb, var(--rp-love) 7%, transparent); opacity: 0; pointer-events: none; transition: opacity 0.25s; }
+  .flash { position: absolute; inset: 0; background: color-mix(in srgb, var(--rp-love) 7%, transparent); opacity: 0; pointer-events: none; transition: opacity var(--demo-flash-duration, 250ms); }
   .flash.on { opacity: 1; }
   .preview-screen :global(.travel-app) { position: absolute; z-index: 2; width: 5px; height: 5px; border-radius: 1.5px; background: var(--rp-gold); pointer-events: none; }
   @media (prefers-reduced-motion: reduce) { .pane { transition: none; } }

@@ -2036,6 +2036,139 @@ async function checkDocsCarousel(client: CdpClient): Promise<void> {
   );
 }
 
+async function checkDocsTiming(client: CdpClient): Promise<void> {
+  for (const count of [1, 2]) {
+    await navigate(client, new URL("../docs/commands/windows/move-directional/", pageUrl), {
+      width: 1440,
+      height: 1000,
+    });
+    await waitFor(
+      client,
+      "docs hydration before timing fixture",
+      "document.querySelector('.situations button.played')",
+    );
+    await evaluate(
+      client,
+      `(async () => {
+      const { mountCarousel } = await import('/src/lib/docs/carousel.fixture.ts');
+      window.carouselCleanup = mountCarousel(${count}); return true;
+    })()`,
+      true,
+    );
+    await waitFor(
+      client,
+      "timing fixture",
+      `document.querySelectorAll('[data-carousel-fixture] .situations button').length === ${count}`,
+    );
+    const times = await evaluate<{
+      playback: number;
+      command: number;
+      transition: number;
+      completed: number;
+      progressDuration: number;
+      next?: number;
+      lastCompleted: number;
+      reset: number;
+      resultCaption: boolean;
+      progressFinished: boolean;
+    }>(
+      client,
+      `new Promise((resolve, reject) => {
+      const stage = document.querySelector('[data-carousel-fixture] .demo-stage');
+      const cards = [...stage.querySelectorAll('.situations button')];
+      const focused = cards[0].querySelector('.pane[data-window-id="focused-window"]');
+      const values = {};
+      let base = stage.dataset.prepared === 'true' ? performance.now() : undefined;
+      const transition = (event) => {
+        if (event.target === focused && event.propertyName === 'left' && values.command !== undefined && values.transition === undefined) values.transition = performance.now() - base;
+      };
+      const observer = new MutationObserver(() => {
+        if (base === undefined && stage.dataset.prepared === 'true') base = performance.now();
+        if (base === undefined) return;
+        const elapsed = performance.now() - base;
+        if (cards[0].classList.contains('playing') && values.playback === undefined) {
+          values.playback = elapsed;
+          values.progressDuration = parseFloat(getComputedStyle(cards[0].querySelector('.progress'), '::after').animationDuration) * 1000;
+        }
+        if (values.playback !== undefined && parseFloat(focused.style.left) === 0 && values.command === undefined) values.command = elapsed;
+        if (cards[0].classList.contains('played') && values.completed === undefined) {
+          values.completed = elapsed;
+          values.resultCaption = cards[0].querySelector('.step-caption').textContent.includes('swaps');
+          const bar = cards[0].querySelector('.progress');
+          values.progressFinished = Math.abs(parseFloat(getComputedStyle(bar, '::after').width) - bar.getBoundingClientRect().width) < 1;
+        }
+        if (${count} > 1 && cards[1].getAttribute('aria-current') === 'true' && values.next === undefined) values.next = elapsed;
+        if (cards[${count - 1}].classList.contains('played') && values.lastCompleted === undefined) values.lastCompleted = elapsed;
+        if (values.lastCompleted !== undefined && cards.every((card) => !card.classList.contains('played')) && values.reset === undefined) {
+          values.reset = elapsed;
+          observer.disconnect(); stage.removeEventListener('transitionend', transition); clearTimeout(timeout); resolve(values);
+        }
+      });
+      const timeout = setTimeout(() => { observer.disconnect(); stage.removeEventListener('transitionend', transition); reject(new Error('Timing cycle did not finish')); }, 10000);
+      stage.addEventListener('transitionend', transition);
+      observer.observe(stage, { attributes: true, childList: true, characterData: true, subtree: true });
+    })`,
+      true,
+    );
+    const near = (
+      key:
+        | "playback"
+        | "command"
+        | "transition"
+        | "completed"
+        | "progressDuration"
+        | "next"
+        | "reset",
+      expected: number,
+    ) => {
+      const actual = times[key];
+      assert(
+        typeof actual === "number" && Math.abs(actual - expected) < 140,
+        `${key}: ${actual}ms, expected ${expected}ms`,
+      );
+    };
+    near("playback", 1000);
+    near("command", 1300);
+    near("transition", 1800);
+    near("completed", 1800);
+    near("progressDuration", 800);
+    assert(
+      times.resultCaption && times.progressFinished,
+      "Caption and progress did not finish with playback",
+    );
+    if (count === 1) near("reset", 4000);
+    else {
+      near("next", 2800);
+      near("reset", 6800);
+    }
+    assert(
+      Math.abs(times.reset! - times.lastCompleted! - 2200) < 140,
+      "Final sequence hold was not 2200ms after completion",
+    );
+    process.stdout.write(`Docs timing (${count} examples): ${JSON.stringify(times)}\n`);
+    if (count === 1) {
+      const card = "[data-carousel-fixture] .situations button";
+      await evaluate(client, `document.querySelector('${card}').click(); true`);
+      await waitFor(
+        client,
+        "manual playback completes before cancellation check",
+        `document.querySelector('${card}').classList.contains('played')`,
+      );
+      await sleep(1300);
+      await evaluate(client, `document.querySelector('${card}').click(); true`);
+      await sleep(1100);
+      assert(
+        await evaluate(
+          client,
+          `document.querySelector('${card}').classList.contains('played') && !document.querySelector('${card}').classList.contains('resetting')`,
+        ),
+        "An obsolete loop-reset timer interrupted manual playback",
+      );
+    }
+    await evaluate(client, "window.carouselCleanup().then(() => true)", true);
+  }
+}
+
 async function check(): Promise<void> {
   await mkdir(outputDir, { recursive: true });
   const port = await freePort();
@@ -2071,7 +2204,9 @@ async function check(): Promise<void> {
     });
     await client.command("Page.enable");
     await client.command("Runtime.enable");
-    if (process.env.WM_PLAY_CHECK === "docs-carousel") {
+    if (process.env.WM_PLAY_CHECK === "docs-timing") {
+      await checkDocsTiming(client);
+    } else if (process.env.WM_PLAY_CHECK === "docs-carousel") {
       await checkDocsCarousel(client);
     } else if (process.env.WM_PLAY_CHECK === "docs-demos") {
       await checkDocsDemos(client);

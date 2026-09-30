@@ -1,4 +1,5 @@
 import type { SimulationState } from "@paneform/layout-browser";
+import { DEMO_TIMING } from "./demo-timing.js";
 
 interface IndicatorOrigin {
   id: string;
@@ -63,7 +64,7 @@ export function animateWorkspaceIndicator(
       },
     ],
     {
-      duration: matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 500,
+      duration: matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : DEMO_TIMING.transitionMs,
       easing: "ease-in-out",
     },
   );
