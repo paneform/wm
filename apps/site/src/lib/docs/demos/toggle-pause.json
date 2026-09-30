@@ -1,0 +1,36 @@
+{
+  "presentation": {
+    "device": "display",
+    "showDock": false,
+    "showKeyboard": false,
+    "interactive": false
+  },
+  "state": {
+    "topology": [
+      {
+        "id": "display:main",
+        "frame": { "x": 0, "y": 0, "width": 1440, "height": 900 },
+        "workspace": "1"
+      }
+    ],
+    "windows": [
+      {
+        "id": "focused-window",
+        "title": "Focused window",
+        "workspace": "1",
+        "frame": { "x": 0, "y": 0, "width": 1440, "height": 900 }
+      }
+    ],
+    "focusedWindow": "focused-window",
+    "focusedWorkspace": "1"
+  },
+  "steps": [
+    { "command": "state", "expect": { "paused": false } },
+    {
+      "playback": "start",
+      "command": "workspace pause --toggle",
+      "caption": "The running manager switches to paused.",
+      "expect": { "paused": true }
+    }
+  ]
+}

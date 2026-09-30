@@ -21,6 +21,7 @@
     presentation = {},
     controller,
     attachKeyboard = true,
+    stand = true,
     label = "Interactive scenario displays",
     interactive = true,
     selectable = false,
@@ -39,7 +40,8 @@
   }: {
     state: SimulationState;
     presentation?: Presentation;
-    controller: KeyboardController;
+    controller?: KeyboardController;
+    stand?: boolean;
     attachKeyboard?: boolean;
     label?: string;
     interactive?: boolean;
@@ -64,6 +66,7 @@
   );
   const appIdForWindow = (window: SimulationState["windows"][number]) =>
     window.bundleId ?? window.title?.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-") ?? window.id;
+  const interactiveEnabled = $derived(interactive && (presentation.interactive ?? true));
   const windows = $derived(simulationState.windows.filter((window) => !window.hidden && !window.minimized));
   const openApps = $derived(new Set(windows.map(appIdForWindow)));
   const dockItems = $derived(
@@ -137,7 +140,7 @@
       (source?.bundleId === undefined && window.title === "Settings");
   }
 
-  onMount(() => (attachKeyboard && stageElement ? controller.attach(stageElement) : undefined));
+  onMount(() => (attachKeyboard && stageElement && controller ? controller.attach(stageElement) : undefined));
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -- This scoped keyboard region must receive physical key events. -->
@@ -152,8 +155,8 @@
           windows={surfaceWindows(display)}
           viewport={display.frame}
           focusedWindowId={simulationState.focusedWindow ?? null}
-           {interactive}
-           {selectable}
+          interactive={interactiveEnabled}
+          selectable={interactiveEnabled}
           allowMove={presentation.allowMove ?? true}
           allowResize={presentation.allowResize ?? true}
           motion={presentation.animate ?? true}
@@ -167,15 +170,15 @@
           onpreviewdrag={(preview) => emitPreview(display.id, preview)}
         />
         {#if presentation.showTopBar ?? true}<DesktopTopBar {workspaces} focusedWorkspace={display.workspace} interactive={interactive && (simulationState.wmRunning !== false || selectable)} onfocusworkspace={(name) => onfocusworkspace?.(name, display.id)} notched={laptop} />{/if}
-        {#if presentation.showDock ?? true}<DesktopDock items={dockItems} {interactive} frame={display.frame} workArea={display.workArea ?? display.frame} onactivate={(id) => onactivate?.(id, display.id)} />{/if}
+        {#if presentation.showDock ?? true}<DesktopDock items={dockItems} interactive={interactiveEnabled} frame={display.frame} workArea={display.workArea ?? display.frame} onactivate={(id) => onactivate?.(id, display.id)} />{/if}
       {/snippet}
-      {#snippet keyboardSnippet()}<Keyboard {controller} />{/snippet}
+       {#snippet keyboardSnippet()}{#if controller}<Keyboard {controller} />{/if}{/snippet}
       {#if laptop && (presentation.showKeyboard ?? true)}
         <Laptop screen={screenSnippet} keyboard={keyboardSnippet} open desktop motion={presentation.animate ?? true} paused={false} />
       {:else if laptop}
         <Laptop screen={screenSnippet} open desktop motion={presentation.animate ?? true} paused={false} />
       {:else}
-         <DesktopDisplay screen={screenSnippet} powered motion={presentation.animate ?? true} paused={false} />
+          <DesktopDisplay screen={screenSnippet} powered motion={presentation.animate ?? true} paused={false} {stand} />
       {/if}
     </div>
   {/each}

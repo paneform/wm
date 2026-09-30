@@ -1558,6 +1558,484 @@ async function checkMarketingPage(client: CdpClient): Promise<void> {
   await screenshot(client, "wm-reduced-motion.png");
 }
 
+async function checkPlaybackStart(client: CdpClient): Promise<void> {
+  const prepared: LayoutScenario = {
+    config: { defaults: { gap: 0 } },
+    presentation: { device: "display", showDock: false, showTopBar: false, animate: false },
+    state: {
+      topology: [
+        { id: "display:main", frame: { x: 0, y: 0, width: 1200, height: 800 }, workspace: "1" },
+      ],
+      windows: [
+        { id: "A", frame: { x: 0, y: 0, width: 600, height: 800 } },
+        { id: "B", frame: { x: 600, y: 0, width: 600, height: 800 } },
+      ],
+      focusedWindow: "A",
+      focusedWorkspace: "1",
+    },
+    steps: [
+      { command: "focus-window B", caption: "Prepare B", expect: { focusedWindow: "B" } },
+      {
+        playback: "start",
+        command: "focus-window A",
+        caption: "Demonstrate A",
+        expect: { focusedWindow: "A" },
+      },
+    ],
+  };
+  const url = new URL(pageUrl);
+  url.hash = await encodeScenarioFragment(prepared);
+  await navigate(client, url, { width: 1280, height: 900 });
+  await waitFor(
+    client,
+    "prepared focus",
+    "document.querySelector('.managed-window.focused')?.dataset.windowId === 'B'",
+  );
+  assert(
+    await evaluate(client, "document.querySelectorAll('.rail .pip').length === 2"),
+    "Preparation appeared in the playback rail",
+  );
+  assert(
+    await evaluate(
+      client,
+      "document.querySelector('.step-editor').textContent.includes('Preparation')",
+    ),
+    "Editor did not identify preparation",
+  );
+  await click(client, '.pip[aria-label^="Step 1:"]');
+  await waitFor(
+    client,
+    "seek to demonstration",
+    "document.querySelector('.managed-window.focused')?.dataset.windowId === 'A'",
+  );
+  await click(client, '.icon-control[aria-label="Return to start"]');
+  await waitFor(
+    client,
+    "reset reruns preparation",
+    "document.querySelector('.managed-window.focused')?.dataset.windowId === 'B' && document.querySelector('.player').getAttribute('aria-busy') === 'false'",
+  );
+  await click(client, '.icon-control[aria-label="Play"]');
+  await waitFor(
+    client,
+    "one playable step",
+    "document.querySelector('.managed-window.focused')?.dataset.windowId === 'A' && document.querySelector('.icon-control[aria-label=\"Return to start\"]')",
+  );
+  await click(client, '.icon-control[aria-label="Return to start"]');
+  await waitFor(
+    client,
+    "reset before recording",
+    "document.querySelector('.managed-window.focused')?.dataset.windowId === 'B' && document.querySelector('.player').getAttribute('aria-busy') === 'false'",
+  );
+  await click(client, '[data-window-id="A"] .window-titlebar');
+  await waitFor(
+    client,
+    "record after preparation",
+    "JSON.parse(document.querySelector('#scenario-json').value).steps.length === 3 && document.querySelector('.player').getAttribute('aria-busy') === 'false'",
+  );
+  const recorded = await scenarioDocument(client);
+  const preparation = recorded.steps?.[0];
+  assert(
+    preparation && "command" in preparation && preparation.command === "focus-window B",
+    "Recording overwrote preparation",
+  );
+  assert(
+    recorded.steps?.[1]?.playback === "start" && recorded.steps?.[2]?.playback === undefined,
+    "Recording did not transfer the playback boundary",
+  );
+  await evaluate(
+    client,
+    "document.querySelector('.pip[aria-label=\"Return to the starting layout\"]').click(); true",
+  );
+  await waitFor(
+    client,
+    "recorded reset",
+    "document.querySelector('.managed-window.focused')?.dataset.windowId === 'B' && document.querySelector('.player').getAttribute('aria-busy') === 'false'",
+  );
+  await click(client, ".step-editor li:first-child .presentation button");
+  await clickButton(client, "Apply steps", "document.querySelector('.step-editor')");
+  await waitFor(
+    client,
+    "edited boundary removes preparation",
+    "document.querySelector('.managed-window.focused')?.dataset.windowId === 'A' && document.querySelectorAll('.rail .pip').length === 4 && document.querySelector('.player').getAttribute('aria-busy') === 'false'",
+  );
+  await click(client, ".step-editor li:nth-child(2) .presentation button");
+  await clickButton(client, "Apply steps", "document.querySelector('.step-editor')");
+  await waitFor(
+    client,
+    "edited boundary reruns preparation",
+    "document.querySelector('.managed-window.focused')?.dataset.windowId === 'B' && document.querySelectorAll('.rail .pip').length === 3 && document.querySelector('.player').getAttribute('aria-busy') === 'false'",
+  );
+  await screenshot(client, "playback-start.png");
+}
+
+async function checkDocsDemos(client: CdpClient): Promise<void> {
+  const cases = [
+    { slug: "windows/move-directional", situations: 3, displays: 1 },
+    { slug: "windows/move-to-workspace", situations: 3, displays: 1 },
+    { slug: "workspaces/move-to-next-display", situations: 1, displays: 2 },
+    { slug: "windows/float", situations: 1, displays: 1 },
+  ];
+  for (const example of cases) {
+    await navigate(client, new URL(`../docs/commands/${example.slug}/`, pageUrl), {
+      width: 1440,
+      height: 1000,
+    });
+    await waitFor(
+      client,
+      `docs demo ${example.slug}`,
+      "document.querySelector('.demo-stage .situations button.played') || document.querySelector('.demo-error')",
+    );
+    assert(
+      await evaluate(client, "!document.querySelector('.demo-error')"),
+      `Demo failed for ${example.slug}`,
+    );
+    assert(
+      await evaluate(
+        client,
+        `document.querySelectorAll('.demo-stage .situations button').length === ${example.situations}`,
+      ),
+      `Wrong manifest situation count for ${example.slug}`,
+    );
+    assert(
+      await evaluate(
+        client,
+        `document.querySelectorAll('.demo-stage .situations button:first-child .preview-screen').length === ${example.displays}`,
+      ),
+      `Wrong display count for ${example.slug}`,
+    );
+    assert(
+      await evaluate(
+        client,
+        "!document.querySelector('.manager-state, .example-command') && document.querySelector('.demo-examples code')?.textContent.trim().startsWith('wm ')",
+      ),
+      "Preview labels were not removed or example commands are missing above the UI",
+    );
+    const timing = await evaluate<{ manualStart: number; autoplayPause: number }>(
+      client,
+      `new Promise((resolve, reject) => {
+      const tile = document.querySelector('.demo-stage .situations button:first-child');
+      const stage = document.querySelector('.demo-stage');
+      const started = performance.now();
+      let manualStart;
+      let idleStart;
+      const observer = new MutationObserver(() => {
+        const playing = stage.querySelector('button.playing');
+        const now = performance.now();
+        if (manualStart === undefined && playing === tile) manualStart = now - started;
+        else if (manualStart !== undefined && idleStart === undefined && !playing) idleStart = now;
+        else if (idleStart !== undefined && playing) {
+          clearTimeout(timeout); observer.disconnect(); resolve({ manualStart, autoplayPause: now - idleStart });
+        }
+      });
+      const timeout = setTimeout(() => { observer.disconnect(); reject(new Error('Demo did not complete a playback cycle')); }, 8000);
+      observer.observe(stage, { attributes: true, subtree: true, attributeFilter: ['class'] });
+      tile.click();
+    })`,
+      true,
+    );
+    assert(
+      timing.manualStart < 900,
+      `Manual playback waited ${timing.manualStart}ms for ${example.slug}`,
+    );
+    assert(
+      timing.autoplayPause >= 990,
+      `Autoplay waited only ${timing.autoplayPause}ms for ${example.slug}`,
+    );
+    await screenshot(client, `docs-${example.slug.replaceAll("/", "-")}.png`);
+  }
+}
+
+async function checkDocsCarousel(client: CdpClient): Promise<void> {
+  const fixture = "[data-carousel-fixture]";
+  const widths = [1440, 375, 320].filter(
+    (width) => !process.env.WM_CAROUSEL_WIDTH || String(width) === process.env.WM_CAROUSEL_WIDTH,
+  );
+  const counts = [1, 2, 3, 4, 5].filter(
+    (count) => !process.env.WM_CAROUSEL_COUNT || String(count) === process.env.WM_CAROUSEL_COUNT,
+  );
+  assert(widths.length && counts.length, "Unknown carousel test dimensions");
+  for (const width of widths)
+    for (const count of counts) {
+      await navigate(client, new URL("../docs/commands/windows/move-directional/", pageUrl), {
+        width,
+        height: 1000,
+      });
+      await waitFor(
+        client,
+        "docs hydration before fixture mount",
+        "document.querySelector('.demo-stage .situations button.played')",
+      );
+      await evaluate(
+        client,
+        `(async () => {
+      const { mountCarousel } = await import('/src/lib/docs/carousel.fixture.ts');
+      window.carouselCleanup = mountCarousel(${count});
+      return true;
+    })()`,
+        true,
+      );
+      await waitFor(
+        client,
+        "carousel fixture",
+        `document.querySelectorAll('${fixture} .situations button').length === ${count}`,
+      );
+      await evaluate(
+        client,
+        `document.querySelector('${fixture} .situations button').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`,
+      );
+      const layout = await evaluate<{
+        height: number;
+        widths: number[];
+        cardHeights: number[];
+        tops: number[];
+        pageWidth: number;
+        viewport: number;
+      }>(
+        client,
+        `(() => {
+      const stage = document.querySelector('${fixture} .demo-stage');
+      const cards = [...stage.querySelectorAll('.situations button')].map((card) => card.getBoundingClientRect());
+      return { height: stage.getBoundingClientRect().height, widths: cards.map((card) => card.width), cardHeights: cards.map((card) => card.height), tops: cards.map((card) => card.top), pageWidth: document.documentElement.scrollWidth, viewport: innerWidth };
+    })()`,
+      );
+      assert(
+        layout.height >= 220 && layout.height <= 280,
+        `Carousel height ${layout.height}px at ${width}px / ${count} cards`,
+      );
+      assert(
+        layout.widths.every((value) => value <= 305),
+        "A single or crowded example stretched beyond its card width",
+      );
+      assert(
+        layout.cardHeights.every((value) => value === 240) &&
+          layout.tops.every((value) => Math.abs(value - layout.tops[0]!) < 1),
+        "Examples stacked or changed height",
+      );
+      assert(layout.pageWidth <= layout.viewport, "Carousel caused document overflow");
+      await waitFor(
+        client,
+        "scroll-edge shadows match available content",
+        `(() => {
+        const track = document.querySelector('${fixture} .situations');
+        const shell = track.parentElement;
+        const maximum = Math.max(0, track.scrollWidth - track.clientWidth);
+        return shell.classList.contains('scroll-start') === (track.scrollLeft > 1) && shell.classList.contains('scroll-end') === (maximum - track.scrollLeft > 1);
+      })()`,
+      );
+      const minimal = await evaluate<boolean>(
+        client,
+        `(() => {
+        const stage = document.querySelector('${fixture} .demo-stage');
+        const dots = [...stage.querySelectorAll('.carousel-dots button')];
+        const active = dots.filter((dot) => dot.getAttribute('aria-current') === 'true');
+         const clear = [stage, stage.querySelector('.situations')].every((node) => getComputedStyle(node).backgroundColor === 'rgba(0, 0, 0, 0)');
+         const cards = [...stage.querySelectorAll('.situations button')];
+         const surfaces = cards.every((node) => getComputedStyle(node).backgroundColor !== 'rgba(0, 0, 0, 0)');
+         const tight = parseFloat(getComputedStyle(stage.querySelector('.situations')).gap) <= 4;
+         return clear && surfaces && tight && cards.every((card) => card.getBoundingClientRect().width < 270) && !stage.querySelector('.carousel-controls, .carousel-count') && stage.querySelectorAll('.progress').length === ${count} && dots.length === ${count} && active.length === 1 && parseFloat(getComputedStyle(active[0], '::after').width) > 4;
+      })()`,
+      );
+      assert(
+        minimal,
+        "Card surfaces, progress bars, spacing or pips do not match the reference design",
+      );
+      const captionsFit = await evaluate<boolean>(
+        client,
+        `(() => {
+        return [...document.querySelectorAll('${fixture} .step-caption')].every((caption) => {
+          const style = getComputedStyle(caption);
+          const probe = document.createElement('span');
+          probe.textContent = '0'; probe.style.font = style.font; probe.style.position = 'absolute'; probe.style.visibility = 'hidden';
+          document.body.appendChild(probe);
+          const column = probe.getBoundingClientRect().width;
+          probe.remove();
+          const rect = caption.getBoundingClientRect();
+          return caption.textContent.split('\\n').every((line) => [...line].length <= 32) && Math.abs(rect.width - column * 32) < 1 && Math.abs(rect.height - parseFloat(style.lineHeight) * 2) < 1 && caption.scrollWidth <= caption.clientWidth + 1 && caption.scrollHeight <= caption.clientHeight + 1;
+        });
+      })()`,
+      );
+      assert(captionsFit, "A caption exceeds the fixed 32ch/two-line area");
+      if (width === 1440 && count === 2) {
+        await client.command("Emulation.setDeviceMetricsOverride", {
+          width: 375,
+          height: 1000,
+          deviceScaleFactor: 1,
+          mobile: true,
+        });
+        await waitFor(
+          client,
+          "resize adds a shadow when cards overflow",
+          `document.querySelector('${fixture} .scroller').classList.contains('scroll-end')`,
+        );
+        await client.command("Emulation.setDeviceMetricsOverride", {
+          width,
+          height: 1000,
+          deviceScaleFactor: 1,
+          mobile: false,
+        });
+        await waitFor(
+          client,
+          "resize clears shadows when all cards fit",
+          `!document.querySelector('${fixture} .scroller').matches('.scroll-start, .scroll-end')`,
+        );
+      }
+      if (count === 5) {
+        await evaluate(
+          client,
+          `(() => {
+          const track = document.querySelector('${fixture} .situations');
+          track.dispatchEvent(new WheelEvent('wheel', { deltaX: 500, bubbles: true }));
+          track.scrollTo({ left: (track.scrollWidth - track.clientWidth) / 2, behavior: 'instant' });
+          return true;
+        })()`,
+        );
+        await waitFor(
+          client,
+          "both shadows show between scroll ends",
+          `document.querySelector('${fixture} .scroller').matches('.scroll-start.scroll-end')`,
+        );
+        await evaluate(
+          client,
+          `document.querySelector('${fixture} .situations button').focus(); true`,
+        );
+        await client.command("Input.dispatchKeyEvent", {
+          type: "keyDown",
+          key: "End",
+          code: "End",
+        });
+        await client.command("Input.dispatchKeyEvent", { type: "keyUp", key: "End", code: "End" });
+        await waitFor(
+          client,
+          "keyboard reveals final card",
+          `(() => {
+        const track = document.querySelector('${fixture} .situations');
+        const last = track.lastElementChild;
+        const rect = last.getBoundingClientRect(), bounds = track.getBoundingClientRect();
+        return last.getAttribute('aria-current') === 'true' && rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1;
+      })()`,
+        );
+        await waitFor(
+          client,
+          "end shadow clears at the final scroll stop",
+          `(() => {
+          const shell = document.querySelector('${fixture} .scroller');
+          return shell.classList.contains('scroll-start') && !shell.classList.contains('scroll-end');
+        })()`,
+        );
+        await evaluate(
+          client,
+          `(() => { document.activeElement.blur(); const track = document.querySelector('${fixture} .situations'); track.dispatchEvent(new WheelEvent('wheel', { deltaX: -2000, bubbles: true })); track.scrollTo({ left: 0, behavior: 'instant' }); return true; })()`,
+        );
+        await waitFor(
+          client,
+          "manual scrolling selects snapped card",
+          `document.querySelector('${fixture} .situations button').getAttribute('aria-current') === 'true'`,
+        );
+        await waitFor(
+          client,
+          "start shadow clears on return to the beginning",
+          `(() => {
+          const shell = document.querySelector('${fixture} .scroller');
+          return !shell.classList.contains('scroll-start') && shell.classList.contains('scroll-end');
+        })()`,
+        );
+        if (width === 375) {
+          await client.command("Emulation.setTouchEmulationEnabled", {
+            enabled: true,
+            maxTouchPoints: 1,
+          });
+          const start = await evaluate<Point>(
+            client,
+            `(() => {
+          const bounds = document.querySelector('${fixture} .situations').getBoundingClientRect();
+          return { x: bounds.right - 24, y: bounds.top + 70 };
+        })()`,
+          );
+          await client.command("Input.dispatchTouchEvent", {
+            type: "touchStart",
+            touchPoints: [start],
+          });
+          for (let distance = 65; distance <= 260; distance += 65) {
+            await client.command("Input.dispatchTouchEvent", {
+              type: "touchMove",
+              touchPoints: [{ x: start.x - distance, y: start.y }],
+            });
+            await sleep(25);
+          }
+          await client.command("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+          await waitFor(
+            client,
+            "touch swipe snaps and selects a visible example",
+            `(() => {
+          const track = document.querySelector('${fixture} .situations');
+          const card = track.querySelector('[aria-current=true]');
+          const bounds = track.getBoundingClientRect(), rect = card.getBoundingClientRect();
+          return track.scrollLeft > 0 && rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1;
+        })()`,
+          );
+          await evaluate(
+            client,
+            `(() => { const track = document.querySelector('${fixture} .situations'); track.dispatchEvent(new WheelEvent('wheel', { deltaX: -2000, bubbles: true })); track.scrollTo({ left: 0, behavior: 'instant' }); return true; })()`,
+          );
+          await waitFor(
+            client,
+            "return to first example after swipe",
+            `document.querySelector('${fixture} .situations button').getAttribute('aria-current') === 'true'`,
+          );
+          await client.command("Emulation.setTouchEmulationEnabled", { enabled: false });
+        }
+        await click(client, `${fixture} .carousel-dots button:first-child`);
+        await waitFor(
+          client,
+          "autoplay scrolls final card into view",
+          `(() => {
+        const track = document.querySelector('${fixture} .situations'), last = track.lastElementChild;
+        const rect = last.getBoundingClientRect(), bounds = track.getBoundingClientRect();
+        return last.classList.contains('playing') && rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1;
+      })()`,
+          18000,
+        );
+        assert(
+          await evaluate(
+            client,
+            `document.querySelector('${fixture} .demo-stage').dataset.autoplay === 'running' && document.querySelector('${fixture} .carousel-dots button').matches(':focus')`,
+          ),
+          "Hover/focus or a pip click stopped autoplay",
+        );
+        await waitFor(
+          client,
+          "active item progress bar fills",
+          `(() => {
+          const bar = document.querySelector('${fixture} .situations button.playing .progress');
+          if (!bar) return false;
+          const fill = getComputedStyle(bar, '::after');
+          return fill.animationName !== 'none' && parseFloat(fill.width) > 5;
+        })()`,
+        );
+        await screenshot(client, `docs-carousel-${width}-five.png`);
+      }
+      if (count === 1) await screenshot(client, `docs-carousel-${width}-single.png`);
+      await evaluate(client, "window.carouselCleanup().then(() => true)", true);
+    }
+  await client.command("Emulation.setEmulatedMedia", {
+    features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+  });
+  await navigate(client, new URL("../docs/commands/windows/move-directional/", pageUrl), {
+    width: 375,
+    height: 1000,
+  });
+  await waitFor(
+    client,
+    "reduced motion carousel readiness",
+    "document.querySelector('.demo-stage[data-reduced-motion=true]')",
+  );
+  await sleep(1300);
+  assert(
+    await evaluate(client, "!document.querySelector('.situations button.playing')"),
+    "Reduced-motion carousel autoplayed without a request",
+  );
+}
+
 async function check(): Promise<void> {
   await mkdir(outputDir, { recursive: true });
   const port = await freePort();
@@ -1593,16 +2071,25 @@ async function check(): Promise<void> {
     });
     await client.command("Page.enable");
     await client.command("Runtime.enable");
-    await checkInitialAndDirectManipulation(client);
-    await checkServicesPresentationAndDisplays(client);
-    await checkAuthoringAndSharing(client);
-    await checkAuthoringRegressions(client);
-    await checkFocusAuthoring(client);
-    await checkBoundedSharedEditor(client);
-    await checkHero(client);
-    await checkWorkerTimeout(client);
-    await checkMobile(client);
-    await checkMarketingPage(client);
+    if (process.env.WM_PLAY_CHECK === "docs-carousel") {
+      await checkDocsCarousel(client);
+    } else if (process.env.WM_PLAY_CHECK === "docs-demos") {
+      await checkDocsDemos(client);
+    } else {
+      await checkPlaybackStart(client);
+      if (process.env.WM_PLAY_CHECK !== "playback-start") {
+        await checkInitialAndDirectManipulation(client);
+        await checkServicesPresentationAndDisplays(client);
+        await checkAuthoringAndSharing(client);
+        await checkAuthoringRegressions(client);
+        await checkFocusAuthoring(client);
+        await checkBoundedSharedEditor(client);
+        await checkHero(client);
+        await checkWorkerTimeout(client);
+        await checkMobile(client);
+        await checkMarketingPage(client);
+      }
+    }
     assert(
       exceptions.length === 0,
       `Unexpected browser runtime exceptions:\n${exceptions.join("\n\n")}`,

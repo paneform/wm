@@ -1,4 +1,10 @@
-import { createScenarioSession, parseScenario, runScenario, type SimulationState } from "@paneform/layout-browser";
+import {
+  createScenarioSession,
+  parseScenario,
+  runScenario,
+  playbackSteps,
+  type SimulationState,
+} from "@paneform/layout-browser";
 import { describe, expect, it } from "vitest";
 import {
   insertFocusStep,
@@ -27,6 +33,82 @@ const scenario = parseScenario({
 });
 
 describe("focus while editing a played scenario", () => {
+  it("records at playback start after preparation and transfers the start marker", async () => {
+    const prepared = parseScenario({
+      ...scenario,
+      steps: [
+        { command: "reconcile", expect: { focusedWindow: "A" } },
+        { playback: "start", command: "state" },
+        { command: "window move left" },
+      ],
+    });
+    const recorded = insertFocusStep(prepared, -1, "B", "B");
+    expect(recorded.index).toBe(0);
+    expect(recorded.scenario.steps?.[0]).toEqual(prepared.steps?.[0]);
+    expect(recorded.scenario.steps?.[1]).toMatchObject({
+      playback: "start",
+      event: { kind: "focus_changed", windowId: "B" },
+    });
+    expect(recorded.scenario.steps?.[2]).toEqual({ command: "state" });
+    expect(playbackSteps(recorded.scenario)).toHaveLength(3);
+    const session = await createScenarioSession(prepared);
+    try {
+      await session.apply(recorded.step);
+      for (const step of playbackSteps(prepared)) await session.apply(step);
+      expect(await runScenario(recorded.scenario)).toEqual(await session.snapshot());
+    } finally {
+      await session.dispose();
+    }
+  });
+
+  it("retains preparation for actions recorded after a played step", () => {
+    const prepared = parseScenario({
+      ...scenario,
+      steps: [
+        { command: "reconcile" },
+        { playback: "start", command: "state" },
+        { command: "window move left" },
+      ],
+    });
+    const recorded = insertFocusStep(prepared, 0, "B", "B");
+    expect(recorded.index).toBe(1);
+    expect(recorded.scenario.steps).toEqual([
+      prepared.steps![0],
+      prepared.steps![1],
+      recorded.step,
+      prepared.steps![2],
+    ]);
+  });
+
+  it("rebuilds when preparation or the playback boundary changes, but keeps future edits", () => {
+    const steps = parseScenario({
+      ...scenario,
+      steps: [
+        { command: "reconcile" },
+        { playback: "start", command: "state" },
+        { command: "window move left" },
+      ],
+    }).steps!;
+    expect(preservesExecutedSteps(steps, [{ command: "state" }, ...steps.slice(1)], -1, true)).toBe(
+      false,
+    );
+    expect(
+      preservesExecutedSteps(
+        steps,
+        [steps[0]!, { command: "state" }, { ...steps[2]!, playback: "start" }],
+        -1,
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      preservesExecutedSteps(
+        steps,
+        [...steps.slice(0, 2), { command: "window move right" }],
+        0,
+        true,
+      ),
+    ).toBe(true);
+  });
   it("inserts focus at the current cursor and preserves the baseline and remaining steps", async () => {
     const next = insertFocusStep(scenario, 0, "B");
     expect(next.scenario.state).toEqual(scenario.state);
@@ -108,8 +190,12 @@ describe("scene change detection", () => {
   });
 
   it("records an attempt whose reset geometry differs from the requested value", () => {
-    const requested = state({ windows: [{ id: "A", frame: { x: 0, y: 0, width: 10, height: 10 }, workspace: "1" }] });
-    const reset = state({ windows: [{ id: "A", frame: { x: 0, y: 44, width: 10, height: 10 }, workspace: "1" }] });
+    const requested = state({
+      windows: [{ id: "A", frame: { x: 0, y: 0, width: 10, height: 10 }, workspace: "1" }],
+    });
+    const reset = state({
+      windows: [{ id: "A", frame: { x: 0, y: 44, width: 10, height: 10 }, workspace: "1" }],
+    });
     expect(sceneChanged(panes(requested), panes(reset))).toBe(true);
   });
 });

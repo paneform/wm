@@ -447,6 +447,10 @@
             "allowResize": {
               "type": "boolean"
             },
+            "interactive": {
+              "type": "boolean",
+              "description": "Whether the rendered desktop responds to pointer interaction (window drag, resize, close, focus, dock). Disable for read-only playback surfaces such as documentation demos."
+            },
             "animate": {
               "type": "boolean"
             }
@@ -854,6 +858,11 @@
                       "retile"
                     ],
                     "minLength": 1
+                  },
+                  "playback": {
+                    "type": "string",
+                    "enum": ["start"],
+                    "description": "The first playback step. Earlier steps execute and validate during session creation. At most one marker is allowed; without a marker playback begins at the first step."
                   },
                   "caption": {
                     "type": "string",
@@ -1632,6 +1641,11 @@
                       }
                     ],
                     "description": "A simplified physical platform event."
+                  },
+                  "playback": {
+                    "type": "string",
+                    "enum": ["start"],
+                    "description": "The first playback step. Earlier steps execute and validate during session creation. At most one marker is allowed; without a marker playback begins at the first step."
                   },
                   "caption": {
                     "type": "string",

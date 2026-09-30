@@ -219,9 +219,16 @@ export const commandPaths: readonly CommandPath[] = [
 ];
 
 /** Data-only descriptors also serve host and simulated service commands. */
-export const serviceCommandPaths: readonly CommandPath[] = (
-  ["install", "start", "stop", "restart", "status", "uninstall"] as const
-).map((action) => ({
+export const SERVICE_ACTIONS = [
+  "install",
+  "start",
+  "stop",
+  "restart",
+  "status",
+  "uninstall",
+] as const;
+export type ServiceAction = (typeof SERVICE_ACTIONS)[number];
+export const serviceCommandPaths: readonly CommandPath[] = SERVICE_ACTIONS.map((action) => ({
   tokens: [literal("service"), literal(action)],
   description: descriptions[action],
 }));

@@ -1,0 +1,37 @@
+{
+  "config": { "defaults": { "margins": { "top": 28 } } },
+  "presentation": {
+    "device": "display",
+    "showDock": false,
+    "showKeyboard": false,
+    "interactive": false
+  },
+  "state": {
+    "topology": [
+      {
+        "id": "display:main",
+        "frame": { "x": 0, "y": 0, "width": 1440, "height": 900 },
+        "workspace": "1"
+      }
+    ],
+    "windows": [
+      {
+        "id": "focused-window",
+        "title": "Focused window",
+        "workspace": "1",
+        "frame": { "x": 0, "y": 28, "width": 1440, "height": 872 }
+      }
+    ],
+    "focusedWindow": "focused-window",
+    "focusedWorkspace": "1"
+  },
+  "steps": [
+    { "command": "state", "expect": { "wmRunning": true } },
+    {
+      "playback": "start",
+      "command": "service stop",
+      "caption": "The manager stops; the focused window remains open.",
+      "expect": { "wmRunning": false, "windows": { "focused-window": { "exists": true } } }
+    }
+  ]
+}

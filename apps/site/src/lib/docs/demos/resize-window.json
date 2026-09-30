@@ -1,0 +1,48 @@
+{
+  "presentation": {
+    "device": "display",
+    "showDock": false,
+    "showKeyboard": false,
+    "interactive": false
+  },
+  "state": {
+    "topology": [
+      {
+        "id": "display:main",
+        "frame": { "x": 0, "y": 0, "width": 1440, "height": 900 },
+        "workspace": "1"
+      }
+    ],
+    "windows": [
+      {
+        "id": "focused-window",
+        "title": "Focused window",
+        "workspace": "1",
+        "floating": true,
+        "frame": { "x": 80, "y": 80, "width": 640, "height": 400 }
+      }
+    ],
+    "focusedWindow": "focused-window",
+    "focusedWorkspace": "1"
+  },
+  "steps": [
+    {
+      "command": "state",
+      "expect": {
+        "windows": {
+          "focused-window": { "floating": true, "frame": { "width": 640, "height": 400 } }
+        }
+      }
+    },
+    {
+      "playback": "start",
+      "command": "resize-window focused-window 900 600",
+      "caption": "The focused window grows to the requested size without moving.",
+      "expect": {
+        "windows": {
+          "focused-window": { "frame": { "x": 80, "y": 80, "width": 900, "height": 600 } }
+        }
+      }
+    }
+  ]
+}

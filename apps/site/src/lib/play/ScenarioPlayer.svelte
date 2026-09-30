@@ -2,6 +2,7 @@
   import { quoteCommandToken, type Config } from "@paneform/layout";
   import {
     parseScenario,
+    playbackSteps,
     parseScenarioCommand,
     type LayoutScenario,
     type LinkedComparison,
@@ -97,7 +98,7 @@
   let reducedMotion = $state(false);
   let actionTail: Promise<void> = Promise.resolve();
 
-  const steps = $derived(scenario.steps ?? []);
+  const steps = $derived(playbackSteps(scenario));
   const currentStep = $derived(stepIndex >= 0 ? steps[stepIndex] : undefined);
   const selectedWindow = $derived(
     stateForPane(selectedPane).windows.find(({ id }) => id === selectedWindowId) ?? null,
@@ -387,7 +388,7 @@
     }
     documentText = JSON.stringify(scenario, null, 2);
     stepIndex = next.index;
-    complete = stepIndex === (scenario.steps?.length ?? 0) - 1;
+    complete = stepIndex === playbackSteps(scenario).length - 1;
     notice = `Action recorded as step ${stepIndex + 1}.`;
     return true;
   }
@@ -583,9 +584,9 @@
   async function changeSteps(nextSteps: readonly ScenarioStep[]): Promise<boolean> {
     try {
       const next = parseScenario({ ...scenario, steps: nextSteps });
-      if (preservesExecutedSteps(steps, nextSteps, stepIndex, sessionMatchesCursor)) {
+      if (preservesExecutedSteps(scenario.steps ?? [], nextSteps, stepIndex, sessionMatchesCursor)) {
         scenario = next;
-        complete = stepIndex >= 0 && stepIndex === nextSteps.length - 1;
+        complete = stepIndex >= 0 && stepIndex === playbackSteps(next).length - 1;
         documentText = JSON.stringify(next, null, 2);
         notice = "Steps updated. Continue from the current layout.";
         return true;

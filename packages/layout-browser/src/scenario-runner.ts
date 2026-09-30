@@ -3,6 +3,7 @@ import { Effect, Stream } from "effect";
 import { parseScenarioCommand } from "./scenario-commands.js";
 import {
   parseScenario,
+  playbackStartIndex,
   type LayoutScenario,
   type ScenarioEvent,
   type ScenarioExpectation,
@@ -23,6 +24,7 @@ import {
 } from "./sim/web-platform.js";
 
 export interface ScenarioStepResult {
+  /** Index in the original document, including preparation steps. */
   readonly index: number;
   readonly step: ScenarioStep;
   readonly state: SimulationState;
@@ -449,7 +451,14 @@ export async function createScenarioSession(input: unknown): Promise<ScenarioSes
       return closing;
     },
   };
-  return session;
+  try {
+    const start = playbackStartIndex(scenario.steps ?? []);
+    while (index < start) await session.step();
+    return session;
+  } catch (error) {
+    await session.dispose();
+    throw error;
+  }
 }
 
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Same validated boundary as createScenarioSession.

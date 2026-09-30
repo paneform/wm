@@ -1,0 +1,17 @@
+<p class="docs-breadcrumb">Docs / Concepts / Workspaces and layout</p>
+
+# Workspaces and layout
+
+Paneform keeps a model of connected displays, workspaces, and windows. Commands act on this model and the layout engine applies the resulting positions.
+
+## Workspaces
+
+A workspace groups windows. The focused workspace is the one you are viewing. Use `wm workspace focus <workspace>` to change it; a new name can be created on first use.
+
+## Tiling and floating
+
+In BSP mode, windows share the available area. Floating windows remain in their workspace but are excluded from automatic tiling. Use the [command reference](/wm/docs/commands/) to see the exact forms.
+
+## Pausing
+
+Pause holds automatic mutations. Resume to let the manager reconcile the desktop again.

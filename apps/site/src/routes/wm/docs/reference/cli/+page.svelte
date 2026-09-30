@@ -1,0 +1,3 @@
+<script lang="ts">import { commandDocs } from "@paneform/layout"; import { commandHref } from "$lib/docs/navigation.js";</script>
+<p class="docs-breadcrumb">Docs / Reference / CLI</p><h1>CLI listing</h1><p class="lede">Command spellings and short descriptions come directly from the layout package’s grammar.</p>
+<h2 id="commands">Command forms</h2><table><tbody><tr><th>Command</th><th>Description</th></tr>{#each commandDocs as doc}{#each doc.forms as form}<tr><td data-label="Command"><a href={commandHref(doc.slug)}><code>{form.syntax}</code></a></td><td data-label="Description">{form.description}</td></tr>{/each}{/each}</tbody></table>

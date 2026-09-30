@@ -24,6 +24,7 @@ export * from "./events.js";
 export * from "./config.js";
 export * from "./commands.js";
 export * from "./command-syntax.js";
+export * from "./command-docs.js";
 export type { EngineInitialLayout } from "./initial-layout.js";
 export * from "./transport.js";
 export * from "./engine.js";

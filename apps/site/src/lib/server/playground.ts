@@ -5,7 +5,11 @@ export function isPlaygroundPath(path: string): boolean {
 }
 
 export function requirePlayground(env: Readonly<Record<string, string | undefined>>): void {
-  if (env.PLAYGROUND_ENABLED !== "true" || env.VERCEL_ENV === "production") {
+  if (!playgroundEnabled(env)) {
     error(404, "Not found");
   }
+}
+
+export function playgroundEnabled(env: Readonly<Record<string, string | undefined>>): boolean {
+  return env.PLAYGROUND_ENABLED === "true" && env.VERCEL_ENV !== "production";
 }

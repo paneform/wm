@@ -57,12 +57,13 @@ export interface Rule {
 // Classification-aware predicates (rule 1 anchors these)
 // ---------------------------------------------------------------------------
 
-/** System/uncertain surfaces: ignored unless explicitly managed. */
+/** Explicitly unmanaged windows and system/uncertain surfaces are ignored. */
 export function isIgnoredSurface(
   _world: World,
   ctx: RuleContext,
   observation: WindowObservation,
 ): boolean {
+  if (ctx.overrides.unmanaged.has(observation.id)) return true;
   if (ctx.overrides.managed.has(observation.id)) return false;
   const cls = classify(observation);
   return cls === "system" || cls === "uncertain";

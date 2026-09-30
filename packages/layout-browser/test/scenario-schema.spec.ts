@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { parseScenario, scenarioJsonSchema, type LayoutScenario } from "../src/scenario.js";
+import {
+  parseScenario,
+  playbackStartIndex,
+  playbackSteps,
+  scenarioJsonSchema,
+  type LayoutScenario,
+} from "../src/scenario.js";
 import { windowDragFrame, windowDragPointer, windowDragTargetFrame } from "../src/window-drag.js";
 import {
   describeScenarioCommandTokens,
@@ -25,6 +31,34 @@ const base = () => ({
 });
 
 describe("layout scenario schema", () => {
+  it("retains an optional playback boundary on command and event steps", () => {
+    const scenario = parseScenario({
+      ...base(),
+      steps: [
+        { command: "reconcile" },
+        { playback: "start", event: { kind: "focus_changed", windowId: null } },
+      ],
+    });
+    expect(playbackStartIndex(scenario.steps!)).toBe(1);
+    expect(playbackSteps(scenario)).toEqual([scenario.steps![1]]);
+    expect(playbackStartIndex([])).toBe(0);
+    expect(playbackSteps(base())).toEqual([]);
+  });
+
+  it("rejects duplicate and unknown playback markers", () => {
+    expect(() =>
+      parseScenario({
+        ...base(),
+        steps: [
+          { playback: "start", command: "reconcile" },
+          { playback: "start", command: "state" },
+        ],
+      }),
+    ).toThrow("at most one playback start marker");
+    expect(() =>
+      parseScenario({ ...base(), steps: [{ playback: "setup", command: "state" }] }),
+    ).toThrow();
+  });
   it("interpolates a clamped straight-line drag without changing dimensions", () => {
     const drag = {
       windowId: "terminal",

@@ -96,13 +96,13 @@ The standalone mockup defines these as `--docs-type-size-*`; the site docs shell
 should scope the same tokens to its own layout so the product hero keeps its
 separate type system.
 
-| Token | Size | Typical use |
-| ----- | ---- | ----------- |
-| `xs` | 0.75rem (12px) | Breadcrumbs, table headers, badges, small notes |
-| `sm` | 0.875rem (14px) | Sidebar and TOC links, controls, code, tables, terminal |
-| `base` | 1rem (16px) | Guide prose, command summaries, demo introductions |
-| `lg` | 1.25rem (20px) | Command-page sections |
-| `xl` | 1.75rem (28px) | Page titles |
+| Token  | Size            | Typical use                                             |
+| ------ | --------------- | ------------------------------------------------------- |
+| `xs`   | 0.75rem (12px)  | Breadcrumbs, table headers, badges, small notes         |
+| `sm`   | 0.875rem (14px) | Sidebar and TOC links, controls, code, tables, terminal |
+| `base` | 1rem (16px)     | Guide prose, command summaries, demo introductions      |
+| `lg`   | 1.25rem (20px)  | Command-page sections                                   |
+| `xl`   | 1.75rem (28px)  | Page titles                                             |
 
 Keep weight, line height, and tracking separate from size. Guide subheadings
 use `base` with stronger weight; they do not need another size. Tiny labels
@@ -130,11 +130,11 @@ meet WCAG AA's 3:1 large-text threshold. Smaller guide subheadings use `quiet`.
 The other roles clear 4.5:1 for normal text on the page, surface, and raised
 overlay. The lowest ratio for each is:
 
-| Token | Lowest contrast | Typical use |
-| ----- | --------------- | ----------- |
-| `--docs-text-heading` | 3.67:1 | Large section headings only; `--rp-subtle` |
-| `--docs-text-label` | 5.75:1 | Table headers, nav group labels, section markers |
-| `--docs-text-quiet` | 4.71:1 | Small guide subheadings, breadcrumbs, notes, asides, secondary metadata |
+| Token                 | Lowest contrast | Typical use                                                             |
+| --------------------- | --------------- | ----------------------------------------------------------------------- |
+| `--docs-text-heading` | 3.67:1          | Large section headings only; `--rp-subtle`                              |
+| `--docs-text-label`   | 5.75:1          | Table headers, nav group labels, section markers                        |
+| `--docs-text-quiet`   | 4.71:1          | Small guide subheadings, breadcrumbs, notes, asides, secondary metadata |
 
 Use these roles for small text instead of raw `--rp-muted`, which falls below
 4.5:1 in both themes. Reserve stronger theme accents for emphasis where needed,
@@ -152,12 +152,12 @@ clear demo is the fastest path from zero to understanding:
    Cells always show argument placeholders; concrete values appear in the
    labeled demo example:
 
-   | Method | Invocation |
-   | ------ | ---------- |
-   | CLI | `wm window move <direction>` |
-   | Keybind | `"option+h": "window move <direction>"` (in `keybinds`) |
-   | WebSocket | `{"type":"moveDirection","direction":"<direction>"}` |
-   | Scenario step | `"window move <direction>"` |
+   | Method        | Invocation                                              |
+   | ------------- | ------------------------------------------------------- |
+   | CLI           | `wm window move <direction>`                            |
+   | Keybind       | `"option+h": "window move <direction>"` (in `keybinds`) |
+   | WebSocket     | `{"type":"moveDirection","direction":"<direction>"}`    |
+   | Scenario step | `"window move <direction>"`                             |
 
    Rows are omitted when a method does not apply (for example `doctor` has
    no WebSocket row because it runs locally and never contacts the daemon).
@@ -172,16 +172,17 @@ clear demo is the fastest path from zero to understanding:
    from one shared method-help definition, not from each command's registry
    entry:
 
-   | Method | Shared note | Link |
-   | ------ | ----------- | ---- |
-   | Keybind | Assign a shortcut to a concrete command in your config. | Keybinds guide |
-   | WebSocket | Send a command payload to the local service. | WebSocket protocol |
-   | Scenario | Use this command in a playground or docs demo, or in a test. | Scenario format |
+   | Method    | Shared note                                                  | Link               |
+   | --------- | ------------------------------------------------------------ | ------------------ |
+   | Keybind   | Assign a shortcut to a concrete command in your config.      | Keybinds guide     |
+   | WebSocket | Send a command payload to the local service.                 | WebSocket protocol |
+   | Scenario  | Use this command in a playground or docs demo, or in a test. | Scenario format    |
 
    Command-specific notes may accompany the shared note where helpful (for
    example, directional commands need one chord per direction). The mockup
    repeats the shared text in its two static pages; the generated renderer
    should supply it once from method metadata.
+
 3. **Arguments.** Slot table (name, semantic type, usage/allowed values)
    generated from the command path tokens, directly under the invocation so
    syntax and its parameters read together. Type names link to a shared
@@ -243,11 +244,11 @@ controls:
 - The **step rail** shows the single step as a pip (start pip + step pip)
   and fills as the step plays.
 - The transport row carries one docs-specific addition:
-   **Open in playground**, which encodes the scenario with
-   `encodeScenarioFragment` at click time and opens
-   `/wm/play#scenario=gz.…. Links are computed, never committed. The
-   concrete command is labeled once above the stage, so each demo needs no
-   command chip.
+  **Open in playground**, which encodes the scenario with
+  `encodeScenarioFragment` at click time and opens
+  `/wm/play#scenario=gz.…. Links are computed, never committed. The
+  concrete command is labeled once above the stage, so each demo needs no
+  command chip.
 - Bound chords appear in the Invocation table alongside the command syntax.
 - Demos never autoplay; every demo waits for an explicit Run. Motion only
   happens on command, which also keeps the docs calm to re-read.
@@ -279,13 +280,19 @@ Demos are ordinary `LayoutScenario` documents (validated against
 `scenario.schema.json`, checked by a vitest parse test like the hero
 scenario). To keep them simple:
 
-- exactly one `steps[]` entry, a `command` step, with `caption` and
-  `expect`;
+- exactly one playable `command` step, with `caption` and `expect`;
+- preparation is an ordered prefix of `steps[]`. The demonstrated step is
+  marked `"playback": "start"`; the runner executes and validates earlier
+  steps before presenting the initial snapshot. Without a marker, playback
+  starts at the first step;
 - initial states are structural sketches (clean halves and quadrants, no
-  hardcoded spacing). After the session opens it applies a `reconcile`
-  as setup, so the engine itself refits the initial geometry to the
+  hardcoded spacing). A preparation `reconcile` step, with its own `expect`,
+  lets the engine itself refit the initial geometry to the
   config — gap, margins, and any future layout setting propagate to
   every demo by editing config, never by re-authoring scenarios;
+- tests run each complete scenario and rely on its preparation and playback
+  expectations. Exact frame assertions currently use logical points and must
+  be reviewed when gap or margin configuration changes;
 - interaction is off: docs demo scenarios set
   `presentation.interactive: false` so the stage renders read-only
   playback (no drag, resize, close, focus, or dock activation) — the
@@ -301,31 +308,51 @@ imported at build time. A registry entry names its demo files; a test
 fails if a referenced file is missing or a file is unreferenced (no orphans,
 no dead links).
 
-### Multiple demos per command: one stage, a situation index
+### Multiple demos per command: a compact snapping carousel
 
-Demos are not a grid of loose boxes — they share one stage so the page
-stays intentional at any demo count (2–5):
+Demos share one horizontally scrollable stage, keeping a consistent footprint
+for one through five examples:
 
-- Each demo represents one **situation**, and the stage head renders a
-  **situation index**: equal-width choices with miniature layout previews
-  and short names ("Borders a window", "Shared edge", "Exclusive edge").
+- Each demo represents one **situation**, with a miniature layout preview,
+  short name and semantic starting/result caption. Cards stay 240px high
+  and use a fixed width derived from the caption width plus padding (about
+  254px). A single example uses the same width instead of stretching.
+  Subtle sunken/raised card surfaces and each item's player progress bar
+  follow the reference. The outer carousel stays unframed, with tightly
+  spaced cards and a row of pips; the active example has a wider pip.
+  No footer toolbar is shown.
+- Starting and result captions use a fixed **32ch, two-line monospace** area.
+  A shared docs-only rule caps text at **64 characters** and checks that its
+  words fit two 32-column lines. Rendering uses explicit word-boundary wraps
+  rather than clipping or truncation; the same width drives CSS and validation.
+- The carousel uses native horizontal scrolling and CSS scroll snapping.
+  Mobile keeps the same single row, with a partial neighboring card signaling
+  that more examples are available.
 - Every name remains visible and searchable whether its demo is active or
   not. The active demo's step title explains its starting state and the
   result after Run. Shared behavior lives in the section's intro sentence.
-- The active row highlights and selects which demo the stage runs;
-  clicking a row switches demos. One large stage renders the active
-  situation; hidden situations keep no session (sessions build lazily
-  when a row is first selected), so a page with five demos costs about
-  the same as a page with one.
+- Autoplay brings the active card into view without scrolling the document.
+  It holds the starting state for one second before animation; clicking a
+  card or using navigation starts that example without the autoplay hold.
+- Cards, dots, keyboard arrows and Home/End provide manual navigation.
+  Horizontal browsing pauses automatic advancement; the snapped card becomes
+  the selected example. Pips always select and play, including the current
+  example. Escape pauses autoplay; selecting an example resumes it.
+- Hover and focus do not stop autoplay. Automatic advancement suspends while
+  browsing horizontally, while offscreen, or while the page is hidden.
+  Reduced motion disables
+  autoplay by default and uses instant scrolling and window updates.
+- Only the active card owns a scenario session; other previews use their
+  saved snapshots, keeping cost bounded as more examples are added.
 - Where context changes behavior, one demo per context:
 
 `window move left` demonstrates:
 
-| Situation | What the reader sees |
-| --------- | -------------------- |
-| Neighbor in the direction | The two windows swap positions. |
+| Situation                                            | What the reader sees                                                       |
+| ---------------------------------------------------- | -------------------------------------------------------------------------- |
+| Neighbor in the direction                            | The two windows swap positions.                                            |
 | At the display edge, another window shares that edge | The moved window rotates around the tree and expands along the whole edge. |
-| At the display edge, alone | Nothing moves; the command is a no-op. |
+| At the display edge, alone                           | Nothing moves; the command is a no-op.                                     |
 
 Directional siblings (right/up/down) note "same behavior in the other
 direction" rather than repeating twelve scenarios.
@@ -417,12 +444,12 @@ and drift checks; a CLI alias is not the same as an optional argument.
 Add a compact `/wm/docs/reference/argument-types/` page, with stable anchors
 for recurring semantic types rather than one page per argument occurrence:
 
-| Type | Shared definition should explain |
-| ---- | -------------------------------- |
-| Window ID | Obtain a current ID from `wm windows`; live commands target that ID, not a window title. Scenario files can also use their own window names/IDs. An unknown live ID yields `window_not_found`. |
-| Workspace name | A name supplied as one argument (quote names containing spaces); whether a missing workspace is created or rejected depends on the command. |
-| Direction | Closed set `left`, `right`, `up`, `down`. |
-| Display ID, coordinate, dimension | ID source, coordinate space and units, and numeric constraints, respectively. |
+| Type                              | Shared definition should explain                                                                                                                                                               |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Window ID                         | Obtain a current ID from `wm windows`; live commands target that ID, not a window title. Scenario files can also use their own window names/IDs. An unknown live ID yields `window_not_found`. |
+| Workspace name                    | A name supplied as one argument (quote names containing spaces); whether a missing workspace is created or rejected depends on the command.                                                    |
+| Direction                         | Closed set `left`, `right`, `up`, `down`.                                                                                                                                                      |
+| Display ID, coordinate, dimension | ID source, coordinate space and units, and numeric constraints, respectively.                                                                                                                  |
 
 Keep **type-level** definitions and examples in this reference; show
 **command-level** rules on each command page (required in this form, defaults
@@ -475,9 +502,9 @@ Three pages nail the design before broad coverage:
    expand, edge no-op), full invocation table, argument table for
    `direction`.
 2. **`windows/move-to-workspace`** — two desktop demos: move the focused
-    window to an empty workspace (view follows), and move into a populated
-    workspace (target retiles around the insertion). Table shows the two
-    focused spellings and the explicit-window variant with an ID example.
+   window to an empty workspace (view follows), and move into a populated
+   workspace (target retiles around the insertion). Table shows the two
+   focused spellings and the explicit-window variant with an ID example.
 3. **`diagnostics/doctor`** — terminal demo kind, CLI-only invocation
    table, exit-code table, links to the permissions guide.
 

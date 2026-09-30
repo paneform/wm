@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { createScenarioSession, runScenario } from "../src/scenario-runner.js";
-import { parseScenario, type LayoutScenario } from "../src/scenario.js";
+import { parseScenario, playbackSteps, type LayoutScenario } from "../src/scenario.js";
 
 const frame = { x: 0, y: 0, width: 1200, height: 800 };
 const base = {
@@ -17,6 +17,96 @@ const base = {
 } as const satisfies LayoutScenario;
 
 describe("portable scenario runner", () => {
+  it("prepares command and event steps before exposing the first playback snapshot", async () => {
+    const input: LayoutScenario = {
+      ...base,
+      state: { ...base.state, wmRunning: false },
+      steps: [
+        {
+          event: { kind: "window_added", window: { id: "C", frame }, focus: true },
+          expect: { focusedWindow: "C" },
+        },
+        { command: "service start", expect: { wmRunning: true } },
+        { event: { kind: "focus_changed", windowId: "B" }, expect: { focusedWindow: "B" } },
+        {
+          playback: "start",
+          command: "window move workspace writing",
+          expect: { focusedWorkspace: "writing", windows: { B: { workspace: "writing" } } },
+        },
+      ],
+    };
+    expect(playbackSteps(input)).toHaveLength(1);
+    let initial;
+    const session = await createScenarioSession(input);
+    try {
+      initial = await session.snapshot();
+      expect(initial.wmRunning).toBe(true);
+      expect(initial.focusedWindow).toBe("B");
+      expect(initial.focusedWorkspace).not.toBe("writing");
+      expect(initial.windows.map((window) => window.id)).toEqual(["A", "B", "C"]);
+      const result = await session.step();
+      expect(result?.index).toBe(3);
+      expect(result?.state.focusedWorkspace).toBe("writing");
+      expect(await session.step()).toBeNull();
+    } finally {
+      await session.dispose();
+    }
+    const reset = await createScenarioSession(input);
+    try {
+      expect(await reset.snapshot()).toEqual(initial);
+    } finally {
+      await reset.dispose();
+    }
+    expect((await runScenario(input)).focusedWorkspace).toBe("writing");
+  });
+
+  it.each([undefined, "start" as const])(
+    "does not execute the first step on load with marker %s",
+    async (playback) => {
+      const step = playback
+        ? { command: "focus-window B", playback, duration: 0 }
+        : { command: "focus-window B", duration: 0 };
+      const session = await createScenarioSession({ ...base, steps: [step] });
+      try {
+        expect((await session.snapshot()).focusedWindow).toBe("A");
+        const result = await session.step();
+        expect(result?.index).toBe(0);
+        expect(result?.state.focusedWindow).toBe("B");
+      } finally {
+        await session.dispose();
+      }
+    },
+  );
+
+  it("rejects session creation when a preparation expectation fails", async () => {
+    const input: LayoutScenario = {
+      ...base,
+      steps: [
+        { command: "state", expect: { focusedWindow: "B" } },
+        { playback: "start", command: "focus-window B" },
+      ],
+    };
+    await expect(createScenarioSession(input)).rejects.toThrow("Step 1: Expected focusedWindow");
+    await expect(runScenario(input)).rejects.toThrow("Step 1: Expected focusedWindow");
+  });
+
+  it("accepts expected preparation errors and validates playback expectations normally", async () => {
+    const session = await createScenarioSession({
+      ...base,
+      state: { ...base.state, paused: true },
+      steps: [
+        { command: "state", expect: { error: "paused", paused: true } },
+        { playback: "start", command: "resume", expect: { paused: true } },
+      ],
+    });
+    try {
+      expect((await session.snapshot()).paused).toBe(true);
+      await expect(session.step()).rejects.toThrow("Step 2: Expected paused true, got false");
+    } finally {
+      await session.dispose();
+    }
+  });
+
   it.each([
     { wmRunning: false, paused: false },
     { wmRunning: true, paused: true },

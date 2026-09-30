@@ -4,6 +4,7 @@
 
 	import {
 		parseScenarioCommand,
+		playbackSteps,
 		type ScenarioSession,
 		type ScenarioStep,
 		type SimulationState,
@@ -38,7 +39,7 @@
 	}
 
 	const scenario = parseHeroScenario();
-	const steps: readonly ScenarioStep[] = scenario.steps ?? [];
+	const steps: readonly ScenarioStep[] = playbackSteps(scenario);
 	const cursorLeadMs = 400;
 
 	let measuredWorkArea: Frame | null = null;
@@ -696,6 +697,7 @@
 	<section class="hero" aria-labelledby="wm-heading">
 		<header class="hero-header">
 			<div class="wordmark"><PaneformWordmark clipId="paneform-hero-clip" /></div>
+			<a class="docs-link" href="/wm/docs/">Docs ↗</a>
 			<h1 id="wm-heading" class="visually-hidden">paneform wm interactive demo</h1>
 		</header>
 
@@ -815,6 +817,9 @@
 	}
 
   .hero-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: var(--space-5) var(--page-gutter); }
+  .docs-link { color: var(--color-page-secondary); font: 600 var(--type-size-control) var(--type-family-system); text-decoration: none; }
+  .docs-link:hover { color: var(--color-page-foreground); }
+  .docs-link:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 3px; }
   .wordmark { width: min(11rem, 42vw); }
   .wordmark :global(svg) { width: 100%; }
   .footer-form { width: 100%; max-width: 26rem; min-width: 0; justify-self: end; }

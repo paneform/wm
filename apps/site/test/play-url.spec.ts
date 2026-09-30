@@ -53,6 +53,7 @@ describe("scenario URL sharing", () => {
           caption: "Raw attempted gesture",
         },
         {
+          playback: "start",
           command: "service start",
           caption: "Focus: caf\u00e9, \u7a97, \ud83e\ude9f",
           expect: { wmRunning: true },
@@ -69,6 +70,7 @@ describe("scenario URL sharing", () => {
     expect(decoded?.presentation?.showWindowSettings).toBe(false);
     expect(decoded?.presentation?.comparison).toEqual(scenario.presentation?.comparison);
     expect(decoded?.steps?.[0]).toEqual(scenario.steps?.[0]);
+    expect(decoded?.steps?.[1]?.playback).toBe("start");
   });
 
   it("loads standard gzip payloads and leaves unrelated fragments alone", async () => {

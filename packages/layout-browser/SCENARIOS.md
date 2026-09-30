@@ -127,11 +127,34 @@ Events use the platform names `window_added`, `window_changed`, `window_dragged`
 
 A step settles after the runner has awaited the input and all work scheduled by that input. The runner does not perform an extra hidden reconcile. `caption` and `duration` are presentation-only. `expect` can check selected state, including `wmRunning`, or name an expected command error code. An expectation may refer to a removed window only when it asserts `exists: false`.
 
+### Preparing the playback start
+
+Mark the first demonstrated step with `"playback": "start"` when earlier steps should prepare the scene before playback:
+
+```json
+"steps": [
+  {
+    "command": "reconcile",
+    "expect": { "focusedWindow": "editor" }
+  },
+  {
+    "playback": "start",
+    "command": "window move left",
+    "caption": "Move Editor to the left.",
+    "expect": { "focusedWindow": "editor" }
+  }
+]
+```
+
+During `createScenarioSession`, the runner executes every preceding command or event in order and checks its expectations. If preparation fails, session creation fails and cleans up the engine. The first snapshot is the prepared scene; `step()` starts with the marked step. At most one start marker is allowed. With no marker, or a marker on the first step, nothing runs during initialization and playback starts at step zero. `duration: 0` remains a presentation choice and does not designate preparation.
+
+Recreating the session repeats preparation, so reset, tests, and playground share links use the same starting scene. Preparation stays in the exported document and the step editor, but does not appear as player-rail stops or in playback counts. The editor's **Start playback here** control moves the boundary; clicking it again removes the marker. Editing preparation resets the session. Actions recorded at playback start are inserted after preparation and become the new first playback step.
+
 ## Presentation
 
 `presentation` is ignored by the headless runner. It keeps UI choices separate from WM configuration. `device` defaults to `"laptop"`; `devices` can override the shell for up to 16 known display IDs with `"laptop"` or `"display"`. Overrides may refer to displays introduced by a later topology step. Unknown display IDs and the reserved key `__proto__` are rejected.
 
-`showKeyboard`, `showDock`, `showTopBar`, `allowMove`, `allowResize`, and `animate` all default to `true`. The keyboard option applies only to laptops; standalone displays never include a keyboard. Visibility options do not alter display work areas or other physical state. `animate: false` makes the player apply steps without key animations, window transitions, or presentation delays.
+`showKeyboard`, `showDock`, `showTopBar`, `allowMove`, `allowResize`, `interactive`, and `animate` all default to `true`. The keyboard option applies only to laptops; standalone displays never include a keyboard. Visibility options do not alter display work areas or other physical state. `animate: false` makes the player apply steps without key animations, window transitions, or presentation delays. `interactive: false` renders a read-only desktop: windows do not respond to drag, resize, close, focus, or dock activation — intended for embedded playback surfaces such as documentation demos.
 
 `showWindowSettings` defaults to `true`. The **Show/Hide window settings** button controls the selected-window inspector independently of window selection. Closing the inspector switches this setting off: later clicks, moves, resizes, and dropdown selections do not reopen it. Showing it again displays the current selection. The setting is retained by resets, JSON export, and share URLs.
 
@@ -169,7 +192,7 @@ Choose **Load local config** to import a JSON/JSONC config and its hotkeys. The 
 
 Click the desktop before using physical hotkeys. Bindings are inactive in text fields and during playback, and explicit config bindings replace the demo defaults. Generic Shift, Control, Option/Alt, and Command modifiers accept either side; `lshift`/`rshift`, `lcontrol`/`rcontrol`, `loption`/`roption`, and `lcommand`/`rcommand` distinguish physical sides by tracking modifier keydown/keyup events. Sided bindings match the exact requested sides, including chords requiring both sides. Tracking clears when the page loses focus or is hidden. Fn is matched when the browser exposes its event or modifier state; browser/OS-reserved shortcuts may remain unavailable. Invalid chords and unsupported actions are listed rather than executed approximately. Imported config stays client-side, but is included in exported JSON and shared scenario links.
 
-Playback does not rewrite the authored starting state. **Return to start** returns to it; subsequent actions insert before the first step. **Use current layout as new start** is the explicit operation that replaces the baseline and clears previous setup history. Export and share always retain the baseline and recorded sequence, including pre-WM setup.
+Playback does not rewrite the authored starting state. **Return to start** rebuilds it and reruns any preparation; subsequent actions insert before the first playback step. **Use current layout as new start** is the explicit operation that replaces the baseline and clears previous setup history. Export and share always retain the baseline and recorded sequence, including pre-WM setup.
 
 Step headings edit the caption directly. Drag a handle to reorder, or focus it and use Space/Enter to pick up/drop, arrow keys to move, and Escape to cancel. Pointer cancellation also restores the prior order. Trash buttons remove steps. Clicking a command opens the token builder; hovering its segments describes commands and variable roles. Those descriptions come from the portable `commandPaths`/`serviceCommandPaths` metadata in `@paneform/layout`, also used for CLI help (including `wm workspace move-window --help`) and available to documentation generators. The browser exposes `scenarioCommandPaths` and `describeScenarioCommandTokens` for its supported service subset.
 
@@ -197,6 +220,8 @@ interface ScenarioSession {
 ```
 
 The document is an exact import, not a recording of native desktop history. Session operations are processed in FIFO order. `apply` validates one live input against the current window and display IDs and returns its settled state. A rejected live input does not block later edits. An unexpected scripted `step` or `run` failure stops that script for the session.
+
+`playbackStartIndex(steps)` returns the marker's index, or zero if omitted. `playbackSteps(document)` returns only the playable suffix for controls. `ScenarioStepResult.index` remains the original document index, including preparation, so errors and results can be traced to the authored file. `apply` executes one supplied input; it does not move the playback boundary.
 
 `parseScenario` performs the semantic checks that JSON Schema cannot express, including command syntax, live references, unique identifiers, presentation display references, lifecycle consistency, and related minimum and maximum values. JSON Schema validation alone checks only the documented structure and field bounds. `parseScenarioCommand` exposes the same service-or-WM parser for autocomplete and validation tools. Headless `runScenario` calls are intended for trusted tests. Browser playback of user-authored scenarios runs in an isolated worker; terminating that worker remains the hard-stop mechanism for CPU stalls.
 

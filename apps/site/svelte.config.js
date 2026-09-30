@@ -1,7 +1,26 @@
 import adapter from "@sveltejs/adapter-vercel";
+import { mdsvex, escapeSvelte } from "mdsvex";
+import { codeToHtml } from "shiki";
+import rehypeSlug from "rehype-slug";
 
 /** @type {import("@sveltejs/kit").Config} */
 const config = {
+  extensions: [".svelte", ".svx"],
+  preprocess: [
+    mdsvex({
+      extensions: [".svx"],
+      rehypePlugins: [rehypeSlug],
+      highlight: {
+        async highlighter(code, lang = "text") {
+          const html = await codeToHtml(code, {
+            lang,
+            themes: { dark: "rose-pine", light: "rose-pine-dawn" },
+          });
+          return `{@html \`${escapeSvelte(html)}\`}`;
+        },
+      },
+    }),
+  ],
   kit: {
     adapter: adapter(),
     paths: {

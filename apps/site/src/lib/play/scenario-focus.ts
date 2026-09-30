@@ -1,5 +1,6 @@
 import {
   parseScenario,
+  playbackStartIndex,
   type LayoutScenario,
   type ScenarioStep,
   type SimulationState,
@@ -64,16 +65,23 @@ export function insertScenarioSteps(
   inserted: readonly ScenarioStep[],
 ) {
   const steps = scenario.steps ?? [];
-  if (!Number.isInteger(cursor) || cursor < -1 || cursor >= steps.length) {
+  const start = playbackStartIndex(steps);
+  if (!Number.isInteger(cursor) || cursor < -1 || cursor >= steps.length - start) {
     throw new Error("An action can only be recorded at the current scenario position.");
   }
-  const index = cursor + 1;
+  const index = start + cursor + 1;
+  const next = [...steps.slice(0, index), ...inserted, ...steps.slice(index)];
+  if (cursor === -1 && inserted.length > 0 && steps[start]?.playback === "start") {
+    const { playback: _marker, ...original } = next[index + inserted.length]!;
+    next[index + inserted.length] = original;
+    next[index] = { ...next[index]!, playback: "start" };
+  }
   return {
-    index: index + inserted.length - 1,
+    index: cursor + inserted.length,
     steps: inserted,
     scenario: parseScenario({
       ...scenario,
-      steps: [...steps.slice(0, index), ...inserted, ...steps.slice(index)],
+      steps: next,
     }),
   };
 }
@@ -133,9 +141,13 @@ export function preservesExecutedSteps(
   cursor: number,
   sessionMatchesCursor: boolean,
 ): boolean {
+  const start = playbackStartIndex(previous);
+  const nextStart = playbackStartIndex(next);
   return (
     sessionMatchesCursor &&
-    next.length > cursor &&
-    JSON.stringify(previous.slice(0, cursor + 1)) === JSON.stringify(next.slice(0, cursor + 1))
+    start === nextStart &&
+    next.length - nextStart > cursor &&
+    JSON.stringify(previous.slice(0, start + cursor + 1)) ===
+      JSON.stringify(next.slice(0, nextStart + cursor + 1))
   );
 }

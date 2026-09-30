@@ -1,12 +1,12 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  let { screen, powered = true, motion = true, paused = false, class: className = "" }: { screen: Snippet; powered?: boolean; motion?: boolean; paused?: boolean; class?: string; } = $props();
+  let { screen, powered = true, motion = true, paused = false, stand = true, class: className = "" }: { screen: Snippet; powered?: boolean; motion?: boolean; paused?: boolean; stand?: boolean; class?: string; } = $props();
 </script>
-<div class={`desktop-display ${className}`} class:powered class:motion class:paused>
-  <div class="studio-shell"><div class="studio-bezel"><div class="studio-screen">{@render screen()}<div class="power-line"></div></div></div></div><div class="studio-power"></div><div class="studio-home"></div>
+<div class={`desktop-display ${className}`} class:powered class:motion class:paused class:bare={!stand}>
+  <div class="studio-shell"><div class="studio-bezel"><div class="studio-screen">{@render screen()}<div class="power-line"></div></div></div></div>{#if stand}<div class="studio-power"></div><div class="studio-home"></div>{/if}
 </div>
 <style>
-  .desktop-display { position: relative; width: 100%; aspect-ratio: var(--studio-total-aspect); pointer-events: none; } .paused,.paused * { animation-play-state: paused !important; }
+  .desktop-display { position: relative; width: 100%; aspect-ratio: var(--studio-total-aspect); pointer-events: none; } .desktop-display.bare { aspect-ratio: var(--studio-shell-aspect); } .paused,.paused * { animation-play-state: paused !important; }
   .studio-shell { width: 100%; aspect-ratio: var(--studio-shell-aspect); padding: var(--stroke-strong); border: var(--stroke-hairline) solid var(--color-line-strong); border-radius: var(--radius-monitor-shell); background: var(--device-shell-gradient); box-shadow: inset 0 0 0 var(--stroke-hairline) var(--color-device-rim), var(--shadow-device); }
   .studio-bezel { width: 100%; height: 100%; padding: var(--studio-bezel); border-radius: calc(var(--radius-monitor-shell) - var(--stroke-hairline)); background: var(--color-display-bezel); box-shadow: inset 0 0 var(--space-1) color-mix(in srgb, var(--color-display-bezel-shadow) 38%, transparent); }
   .studio-screen { position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: var(--radius-monitor-screen); background: var(--color-screen-off); pointer-events: auto; --radius-screen-window: var(--radius-monitor-screen); }

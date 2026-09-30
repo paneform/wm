@@ -2,6 +2,7 @@
   import {
     describeScenarioCommandTokens,
     parseScenario,
+    playbackStartIndex,
     type LayoutScenario,
     type ScenarioEvent,
     type ScenarioStep,
@@ -48,6 +49,7 @@
   const maximumCommandLength = 4_096;
   const stepsPerPage = 20;
   const pageCount = $derived(Math.max(1, Math.ceil(drafts.length / stepsPerPage)));
+  const playbackStart = $derived(playbackStartIndex(drafts.map(({ step }) => step)));
   const visibleDrafts = $derived(
     drafts.slice(page * stepsPerPage, (page + 1) * stepsPerPage).map((draft, offset) => ({
       draft,
@@ -207,6 +209,14 @@
           ? { ...rest, duration: Number(value) }
           : { ...rest, caption: value };
     replace(index, next);
+  }
+
+  function startPlaybackAt(index: number) {
+    const clear = drafts[index]?.step.playback === "start";
+    setDrafts(drafts.map((draft, position) => {
+      const { playback: _marker, ...step } = draft.step;
+      return { ...draft, step: position === index && !clear ? { ...step, playback: "start" } : step };
+    }));
   }
 
   function updateEventText(index: number, eventText: string) {
@@ -421,8 +431,10 @@
           <label>Event JSON<textarea disabled={disabled} maxlength={maximumEventLength} spellcheck="false" value={draft.eventText} oninput={(event) => updateEventText(index, event.currentTarget.value)}></textarea></label>
         {/if}
         <div class="presentation">
+          <button type="button" disabled={disabled} aria-pressed={draft.step.playback === 'start'} onclick={() => startPlaybackAt(index)}>{draft.step.playback === 'start' ? 'Playback starts here' : 'Start playback here'}</button>
           <label>Duration (ms)<input type="number" disabled={disabled} min="0" max="60000" value={draft.step.duration ?? ""} oninput={(event) => updatePresentation(index, "duration", event.currentTarget.value)} /></label>
         </div>
+        <small>{index < playbackStart ? 'Preparation · runs before playback, including expectations' : `Playback step ${index - playbackStart + 1}`}</small>
       </li>
     {/each}
   </ol>

@@ -1,0 +1,57 @@
+{
+  "presentation": {
+    "device": "display",
+    "showDock": false,
+    "showKeyboard": false,
+    "interactive": false
+  },
+  "state": {
+    "topology": [
+      {
+        "id": "display:main",
+        "frame": { "x": 0, "y": 0, "width": 1440, "height": 900 },
+        "workspace": "1"
+      }
+    ],
+    "windows": [
+      {
+        "id": "parked-window",
+        "title": "Parked window",
+        "workspace": "1",
+        "floating": true,
+        "constraints": { "minWidth": 200, "minHeight": 150, "maxWidth": 900, "maxHeight": 600 },
+        "frame": { "x": 80, "y": 80, "width": 640, "height": 400 }
+      }
+    ],
+    "focusedWindow": "parked-window",
+    "focusedWorkspace": "1"
+  },
+  "steps": [
+    {
+      "command": "workspace focus writing",
+      "expect": {
+        "focusedWorkspace": "writing",
+        "windows": {
+          "parked-window": {
+            "floating": true,
+            "frame": { "x": -639, "y": 848, "width": 640, "height": 400 }
+          }
+        }
+      }
+    },
+    {
+      "playback": "start",
+      "command": "window probe-limits parked-window",
+      "caption": "Size limits are measured; the parked frame is restored.",
+      "expect": {
+        "focusedWorkspace": "writing",
+        "windows": {
+          "parked-window": {
+            "floating": true,
+            "frame": { "x": -639, "y": 848, "width": 640, "height": 400 }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "config": { "defaults": { "margins": { "top": 28 } } },
+  "presentation": {
+    "device": "display",
+    "showDock": false,
+    "showKeyboard": false,
+    "interactive": false
+  },
+  "state": {
+    "topology": [
+      {
+        "id": "display:main",
+        "frame": { "x": 0, "y": 0, "width": 1440, "height": 900 },
+        "workspace": "1"
+      }
+    ],
+    "windows": [
+      {
+        "id": "focused-window",
+        "title": "Focused window",
+        "workspace": "1",
+        "frame": { "x": 80, "y": 80, "width": 640, "height": 400 }
+      }
+    ],
+    "focusedWindow": "focused-window",
+    "focusedWorkspace": "1"
+  },
+  "steps": [
+    { "command": "pause", "expect": { "paused": true } },
+    {
+      "playback": "start",
+      "command": "resume",
+      "caption": "The manager resumes and refits the focused window.",
+      "expect": {
+        "paused": false,
+        "windows": {
+          "focused-window": { "frame": { "x": 0, "y": 28, "width": 1440, "height": 872 } }
+        }
+      }
+    }
+  ]
+}

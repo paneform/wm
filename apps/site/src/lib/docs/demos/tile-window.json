@@ -1,0 +1,45 @@
+{
+  "config": { "defaults": { "margins": { "top": 28 } } },
+  "presentation": {
+    "device": "display",
+    "showDock": false,
+    "showKeyboard": false,
+    "interactive": false
+  },
+  "state": {
+    "topology": [
+      {
+        "id": "display:main",
+        "frame": { "x": 0, "y": 0, "width": 1440, "height": 900 },
+        "workspace": "1"
+      }
+    ],
+    "windows": [
+      {
+        "id": "focused-window",
+        "title": "Focused window",
+        "workspace": "1",
+        "floating": true,
+        "frame": { "x": 80, "y": 80, "width": 640, "height": 400 }
+      }
+    ],
+    "focusedWindow": "focused-window",
+    "focusedWorkspace": "1"
+  },
+  "steps": [
+    { "command": "state", "expect": { "windows": { "focused-window": { "floating": true } } } },
+    {
+      "playback": "start",
+      "command": "tile focused-window",
+      "caption": "The focused window returns to tiling and fills the workspace.",
+      "expect": {
+        "windows": {
+          "focused-window": {
+            "floating": false,
+            "frame": { "x": 0, "y": 28, "width": 1440, "height": 872 }
+          }
+        }
+      }
+    }
+  ]
+}

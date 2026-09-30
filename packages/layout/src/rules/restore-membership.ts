@@ -11,6 +11,7 @@ export const restoreMembership: Rule = {
   name: "restore-membership",
   applies: (world: World, ctx: RuleContext): boolean => {
     for (const [id] of ctx.tombstones) {
+      if (ctx.overrides.unmanaged.has(id)) continue;
       if (!world.windows.has(id)) continue;
       if (findMembership(world, id) !== null) continue;
       return true;
@@ -20,6 +21,7 @@ export const restoreMembership: Rule = {
   run: (world: World, ctx: RuleContext): Action[] => {
     const actions: Action[] = [];
     for (const [id, tombstone] of ctx.tombstones) {
+      if (ctx.overrides.unmanaged.has(id)) continue;
       if (!world.windows.has(id)) continue;
       if (findMembership(world, id) !== null) continue;
       if (!world.workspaces.has(tombstone.workspace)) continue;

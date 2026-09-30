@@ -201,6 +201,10 @@ export const ScenarioExpectationSchema = Schema.Struct({
 export type ScenarioExpectation = typeof ScenarioExpectationSchema.Type;
 
 const StepPresentationFields = {
+  playback: Schema.optional(Schema.Literal("start")).annotations({
+    description:
+      "The first playback step. Earlier steps execute and validate during session creation. At most one marker is allowed; without a marker playback begins at the first step.",
+  }),
   caption: Schema.optional(boundedString(2_000, "Presentation text shown with this step.")),
   duration: Schema.optional(
     Schema.Number.pipe(
@@ -285,6 +289,10 @@ export const PresentationSchema = Schema.Struct({
   showWindowSettings: Schema.optional(Schema.Boolean),
   allowMove: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   allowResize: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  interactive: Schema.optionalWith(Schema.Boolean, { default: () => true }).annotations({
+    description:
+      "Whether the rendered desktop responds to pointer interaction (window drag, resize, close, focus, dock). Disable for read-only playback surfaces such as documentation demos.",
+  }),
   animate: Schema.optionalWith(Schema.Boolean, { default: () => true }),
 }).annotations({ description: "Optional UI-only playback and device-shell choices." });
 export type Presentation = typeof PresentationSchema.Encoded;
@@ -338,6 +346,18 @@ export const LayoutScenarioSchema = Schema.Struct({
     "A portable, data-only initial layout and deterministic sequence of commands or events.",
 });
 export type LayoutScenario = typeof LayoutScenarioSchema.Encoded;
+
+/** Index in the authored steps array; an unmarked scenario starts at zero. */
+export function playbackStartIndex(steps: readonly ScenarioStep[]): number {
+  const index = steps.findIndex((step) => step.playback === "start");
+  return index < 0 ? 0 : index;
+}
+
+/** Preparation stays in the document but is excluded from playback controls. */
+export function playbackSteps(scenario: LayoutScenario): readonly ScenarioStep[] {
+  const steps = scenario.steps ?? [];
+  return steps.slice(playbackStartIndex(steps));
+}
 
 type DecodedLayoutScenario = typeof LayoutScenarioSchema.Type;
 
@@ -434,6 +454,8 @@ function preflightScenario(input: unknown): void {
 /* oxlint-enable anti-slop/no-object-parameters, anti-slop/no-unknown-returns, anti-slop/no-unknown-parameters, anti-slop/no-runtime-typeof */
 
 function validateScenario(scenario: DecodedLayoutScenario): void {
+  if ((scenario.steps ?? []).filter((step) => step.playback === "start").length > 1)
+    throw new Error("scenario may contain at most one playback start marker");
   const initialWindowIds = scenario.state.windows.map((window) => window.id);
   const initialDisplayIds = scenario.state.topology.map((display) => display.id);
   const windows = new Set(initialWindowIds);

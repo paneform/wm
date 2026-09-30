@@ -1,0 +1,28 @@
+<p class="docs-breadcrumb">Docs / Getting started / Installation</p>
+
+# Installation
+
+Paneform WM runs on macOS with a local `wm` CLI and service. Start with the local checks, then install and start the service.
+
+## Install and start
+
+Install the CLI using the current project release instructions. Once `wm` is available, register the service:
+
+### installation commands
+
+```text
+wm service install
+wm service start
+```
+
+### Grant permissions
+
+The window manager needs macOS Accessibility permission to control windows and Screen Recording permission to observe them. Run `wm permissions-request` to request access, then use `wm doctor` to check the result.
+
+### Check the service
+
+Run `wm service status` to see whether the service is running. The [doctor reference](/wm/docs/commands/diagnostics/doctor/) explains the local permission check.
+
+## Next steps
+
+Read about [workspaces and layout](/wm/docs/concepts/), or try a [window move](/wm/docs/commands/windows/move-directional/) in the simulator.
