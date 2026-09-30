@@ -853,6 +853,38 @@ describe("engine pipeline (fake platform)", () => {
     expect(h.fake.windowIds()).toContain(id);
   });
 
+  test("app stall events publish diagnostics without reconciling (bean wm-site)", async () => {
+    const h = await bootstrap();
+    await h.run({ type: "reconcile" });
+    const epochBefore = (await h.snapshot()).epoch;
+
+    const diagnostic: { topic: string; payload: { code?: string; detail?: string } }[] = [];
+    await Effect.runFork(
+      Stream.runForEach(h.engine.events(), (event) =>
+        Effect.sync(() => {
+          // SAFETY: engine.events() yields DomainEvent {topic, payload}; the
+          // harness widens it to unknown, so narrow back to the documented shape.
+          const { topic, payload } = event as {
+            topic: string;
+            payload: { code?: string; detail?: string };
+          };
+          if (topic === "diagnostic") diagnostic.push({ topic, payload });
+        }),
+      ),
+    );
+
+    h.fake.emitPlatformEvent({ kind: "ax_stall", pid: 4483, app: "zen" });
+    h.fake.emitPlatformEvent({ kind: "ax_recover", pid: 4483 });
+    await waitFor(() => diagnostic.length >= 2);
+
+    expect(diagnostic[0]?.payload.code).toBe("ax_stall");
+    expect(diagnostic[0]?.payload.detail).toContain("zen");
+    expect(diagnostic[0]?.payload.detail).toContain("4483");
+    expect(diagnostic[1]?.payload.code).toBe("ax_recover");
+    // Telemetry only: no layout pass may run in response to a stall event.
+    expect((await h.snapshot()).epoch).toBe(epochBefore);
+  });
+
   test("workspace reveal parks and re-reveals without losing membership", async () => {
     const h = await bootstrap();
     const a = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
@@ -878,6 +910,83 @@ describe("engine pipeline (fake platform)", () => {
     expect(restored).toBeDefined();
     expect(restoredWorkspace?.visibleOnDisplay).toBe(displayId);
     expect(restored?.frame).toEqual(await frameOf(h, a));
+  });
+
+  test("reveal restores a parked floating member to its pre-park frame (same display)", async () => {
+    const h = await bootstrap([makeDisplay()]);
+    const floating = h.fake.addWindow(
+      makeWindow({ id: "window:reveal-floating", x: 300, y: 180, width: 640, height: 480 }),
+    );
+    await h.run({ type: "reconcile" });
+    await h.run({ type: "floatWindow", windowId: floating });
+    const visibleFrame = h.fake.frameOf(floating);
+    expect(visibleFrame).not.toBeNull();
+
+    // Switching focus parks the floating member at a display corner.
+    await h.run({ type: "focusWorkspace", name: "reveal-scratch" });
+    const parkedFrame = h.fake.frameOf(floating);
+    expect(parkedFrame).not.toEqual(visibleFrame);
+    const parked = await h.snapshot();
+    expect(parked.windows.find((w) => w.id === floating)?.parked).toBe(true);
+
+    // Re-revealing must unpark: exact pre-park frame, not the corner.
+    await h.run({ type: "focusWorkspace", name: "1" });
+    expect(h.fake.frameOf(floating)).toEqual(visibleFrame);
+    const revealed = await h.snapshot();
+    expect(revealed.windows.find((w) => w.id === floating)?.parked).toBe(false);
+    expect(revealed.workspaces.find((ws) => ws.name === "1")?.visibleOnDisplay).toBe(
+      "display:sim-primary",
+    );
+  });
+
+  test("reveal pulls a parked floating member onto the revealing display", async () => {
+    // The live wm-gjic repro: workspace parked on one display (floating member
+    // left at that display's parking corner), then revealed on another.
+    const h = await bootstrap([
+      makeDisplay(),
+      makeDisplay({
+        id: "display:sim-left",
+        frame: { x: -1512, y: 0, width: 1512, height: 982 },
+        workArea: { x: -1512, y: 38, width: 1512, height: 944 },
+      }),
+    ]);
+    const floating = h.fake.addWindow(
+      makeWindow({ id: "window:cross-reveal", displayId: "display:sim-left", x: -1400, y: 200 }),
+    );
+    await h.run({ type: "reconcile" });
+    await h.run({ type: "floatWindow", windowId: floating });
+    await h.run({ type: "moveWorkspaceToDisplay", workspace: "1", displayId: "display:sim-left" });
+    expect((await h.snapshot()).workspaces.find((ws) => ws.name === "1")?.visibleOnDisplay).toBe(
+      "display:sim-left",
+    );
+    const preParkFrame = h.fake.frameOf(floating);
+
+    // Switching focus parks the floating member at the left display's corner.
+    await h.run({ type: "focusWorkspace", name: "reveal-scratch" });
+    const parkedFrame = h.fake.frameOf(floating);
+    expect(parkedFrame).not.toEqual(preParkFrame);
+
+    // Revealing on the primary display must not strand the member on the left
+    // display: the pre-park frame re-anchors into the primary work area.
+    await h.run({
+      type: "moveWorkspaceToDisplay",
+      workspace: "1",
+      displayId: "display:sim-primary",
+    });
+    const snap = await h.snapshot();
+    expect(snap.workspaces.find((ws) => ws.name === "1")?.visibleOnDisplay).toBe(
+      "display:sim-primary",
+    );
+    expect(snap.windows.find((w) => w.id === floating)?.parked).toBe(false);
+
+    const restored = h.fake.frameOf(floating);
+    expect(restored).toBeDefined();
+    // Landed on the primary display, not the parked left-display corner.
+    expect(restored!.x).toBeGreaterThanOrEqual(0);
+    expect(restored).not.toEqual(parkedFrame);
+    // Size preserved; position is the clamped pre-park frame.
+    expect(restored!.width).toBe(preParkFrame!.width);
+    expect(restored!.height).toBe(preParkFrame!.height);
   });
 
   test("stop restores parked tiled and floating windows without changing visible windows or focus", async () => {

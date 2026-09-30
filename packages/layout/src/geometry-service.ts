@@ -65,12 +65,16 @@ export interface GeometryProgressing {
 export type GeometryResult = GeometrySuccess | GeometryProgressing;
 
 export interface GeometryFailure {
-  code: "stale" | "rejected" | "unavailable" | "invalid";
+  code: "stale" | "rejected" | "unresponsive" | "unavailable" | "invalid";
   outcome: GeometryOutcome | "error";
   /** Last observed frame so callers can inspect/recover. */
   observed?: Frame | undefined;
   stable?: boolean | undefined;
   stableReads?: number | undefined;
+  /** Adapter-reported wall-clock duration of the failed write, in ms. */
+  durationMs?: number | undefined;
+  /** Owning app's AX messaging was stalled at settle time. */
+  appStalled?: boolean | undefined;
   detail?: string | undefined;
 }
 
@@ -168,11 +172,18 @@ const writeFramePart = (
   part: StrategyWrite,
   frame: Frame,
   expected: ExpectedWindowIdentity,
-): Effect.Effect<Frame, GeometryFailure> => {
+): Effect.Effect<{ frame: Frame; appStalled: boolean | undefined }, GeometryFailure> => {
   const failMap = (error: { code?: string; detail?: string | undefined }): GeometryFailure => ({
     // Identity-replacement aborts must keep their `stale` semantics
     // (platform-contract §4) instead of flattening to a generic rejection.
-    code: error.code === "stale" ? "stale" : "rejected",
+    // `unresponsive` (AX messaging timeout) must survive too: it distinguishes
+    // a hung app from a refusal, so learning never treats it as a clamp.
+    code:
+      error.code === "stale"
+        ? "stale"
+        : error.code === "unresponsive"
+          ? "unresponsive"
+          : "rejected",
     outcome: "error",
     detail: error.detail ?? "write refused",
   });
@@ -185,13 +196,20 @@ const writeFramePart = (
   return Effect.mapError(result, failMap).pipe(
     Effect.flatMap((observation: WriteObservation) =>
       observation.errorKind === undefined
-        ? Effect.succeed(observation.observed)
+        ? Effect.succeed({ frame: observation.observed, appStalled: observation.appStalled })
         : Effect.fail<GeometryFailure>({
-            code: observation.errorKind === "stale" ? "stale" : "rejected",
+            code:
+              observation.errorKind === "stale"
+                ? "stale"
+                : observation.errorKind === "unresponsive"
+                  ? "unresponsive"
+                  : "rejected",
             outcome: "error",
             observed: observation.observed,
             stable: observation.stable,
             stableReads: observation.stableReads,
+            durationMs: observation.durationMs,
+            appStalled: observation.appStalled,
             detail: `write refused (${observation.errorKind})`,
           }),
     ),
@@ -237,6 +255,7 @@ export function applyGeometryRequest(
       }
 
       let observedFrame = baseline.frame;
+      let writeAppStalled: boolean | undefined;
       for (const part of strategyWrites(strategy)) {
         const identityCheck = yield* Effect.either(readWindow(deps.adapter, request.windowId));
         if (
@@ -250,13 +269,15 @@ export function applyGeometryRequest(
             detail: "window identity changed mid-write",
           });
         }
-        observedFrame = yield* writeFramePart(
+        const written = yield* writeFramePart(
           deps.adapter,
           request.windowId,
           part,
           target,
           expected,
         );
+        observedFrame = written.frame;
+        writeAppStalled = written.appStalled;
       }
 
       const readback = yield* settlePoll(
@@ -268,7 +289,11 @@ export function applyGeometryRequest(
         expected,
       );
 
+      // A stalled app never answered the write: identical readbacks across
+      // attempts are NOT a size clamp. The service must not claim the window
+      // "refused" when the evidence is an unanswered mutation (bean wm-ixs4).
       const repeatedStableSizeClamp =
+        writeAppStalled !== true &&
         previousGuardedReadback !== undefined &&
         previousGuardedReadback.capabilities.resizable === "supported" &&
         readback.observation.capabilities.resizable === "supported" &&
@@ -338,7 +363,8 @@ export function applyGeometryRequest(
           code: "rejected",
           outcome,
           observed: readback.observation.frame,
-          detail: `geometry write ${outcome}`,
+          appStalled: writeAppStalled,
+          detail: `geometry write ${outcome}${writeAppStalled === true ? " (app stalled)" : ""}`,
         });
       }
 

@@ -138,6 +138,32 @@ describe("geometry-service guarded writes", () => {
     }
   });
 
+  test("an unresponsive write fails distinctly and never yields clamp evidence", async () => {
+    // Same evidence shape as a stable clamp (unchanged frame, 3 stable reads)
+    // but the adapter reported an AX messaging timeout: the failure must carry
+    // `unresponsive` — the engine's learning gate only accepts `rejected` —
+    // and surface the adapter-measured duration for stall identification.
+    const adapter = adapterWith(() => ({
+      requested: TARGET,
+      observed: INITIAL,
+      stable: true,
+      stableReads: 3,
+      errorKind: "unresponsive",
+      durationMs: 1520,
+    }));
+
+    const exit = await run(adapter);
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const failure = Cause.failureOption(exit.cause);
+      if (failure._tag === "Some") {
+        expect(failure.value.code).toBe("unresponsive");
+        expect(failure.value.durationMs).toBe(1520);
+      }
+    }
+  });
+
   test("rejects a replacement baseline against the transaction-captured identity", async () => {
     let writes = 0;
     const adapter = adapterWith((_part, _expected, current) => {
@@ -217,6 +243,48 @@ describe("geometry-service guarded writes", () => {
           skipped: [],
         },
       });
+    }
+  });
+
+  test("clamp-shaped evidence from a stalled app never confirms a size clamp", async () => {
+    // Identical evidence shape to the confirmed-clamp case above, but the
+    // adapter reports the owning app's AX messaging as stalled: the window
+    // never answered, so this is an unanswered mutation, not a refusal
+    // (bean wm-ixs4). The request must fail WITHOUT stableClamp learning.
+    const initial = { x: 1134, y: 32, width: 480, height: 950 };
+    const target = { x: 1134, y: 32, width: 378, height: 950 };
+    const adapter = adapterWith(
+      () => ({
+        requested: target,
+        observed: initial,
+        stable: true,
+        stableReads: 3,
+        appStalled: true,
+      }),
+      initial,
+    );
+    const clampContext = {
+      ...context,
+      initialFrame: initial,
+      workArea: { x: 0, y: 32, width: 1512, height: 950 },
+    };
+
+    const exit = await Effect.runPromiseExit(
+      applyGeometryRequest(
+        { adapter, clock: CLOCK },
+        { windowId: "window:1", frame: target, attempts: 3 },
+        clampContext,
+      ),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const failure = Cause.failureOption(exit.cause);
+      if (failure._tag === "Some") {
+        expect(failure.value.code).toBe("rejected");
+        expect(failure.value.appStalled).toBe(true);
+        expect(failure.value.detail).toContain("app stalled");
+      }
     }
   });
 

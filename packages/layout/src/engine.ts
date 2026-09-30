@@ -740,9 +740,18 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     // ------------------------------------------------------------------
 
     const stepFailure = (error: GeometryFailure): StepFailure => ({
-      code: error.code === "stale" ? "inventory_stale" : "geometry_rejected",
+      code:
+        error.code === "stale"
+          ? "inventory_stale"
+          : error.code === "unresponsive"
+            ? "unresponsive"
+            : "geometry_rejected",
       message: error.detail ?? "geometry operation failed",
-      diagnostic: JSON.stringify({ outcome: error.outcome, observed: error.observed ?? null }),
+      diagnostic: JSON.stringify({
+        outcome: error.outcome,
+        observed: error.observed ?? null,
+        durationMs: error.durationMs ?? null,
+      }),
     });
 
     const geometryContextFor = (
@@ -795,13 +804,28 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           ),
         );
         if (result._tag === "Left") {
+          // An AX messaging timeout is evidence of a stalled app — record it.
+          // It must never feed constraint learning (only "rejected" does).
+          if (result.left.code === "unresponsive") {
+            bus.publish("diagnostic", {
+              code: "write_unresponsive",
+              detail: `window ${windowId} (pid ${observation.pid}): ${result.left.detail ?? "AX messaging timed out"}${
+                result.left.durationMs !== undefined
+                  ? ` after ${Math.round(result.left.durationMs)}ms`
+                  : ""
+              }`,
+            });
+          }
           // Resistant behavior marks cooperation (profile-informed skip ahead).
+          // A stalled app cannot refuse anything: rejected evidence during a
+          // stall is an unanswered mutation, not a clamp (bean wm-ixs4).
           const key = profileKeyOfObs(observation);
-          if (key !== null && result.left.code === "rejected") {
+          if (key !== null && result.left.code === "rejected" && result.left.appStalled !== true) {
             setLearning(markCooperation(learning, key, true));
           }
           if (
             result.left.code === "rejected" &&
+            result.left.appStalled !== true &&
             result.left.observed !== undefined &&
             result.left.stable === true &&
             (result.left.stableReads ?? 0) >= 3 &&
@@ -986,6 +1010,29 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         }
       });
 
+    /**
+     * Restored frames for a revealed workspace's floating members still at
+     * their parking spots: the pre-park frame, clamped into the revealing
+     * display's work area (same policy as shutdownTargetFor).
+     */
+    const floatingRestores = (
+      workspace: WorkspaceState,
+      display: DisplayObservation,
+      observationOf: (id: WindowId) => WindowObservation | undefined,
+    ): Array<{ id: WindowId; frame: Frame }> => {
+      const restores: Array<{ id: WindowId; frame: Frame }> = [];
+      for (const id of workspace.floating) {
+        if (!workspace.parkedFrames.has(id)) continue;
+        const observation = observationOf(id);
+        if (observation === undefined || observation.minimized || observation.hidden) continue;
+        if (classify(observation) === "transient") continue;
+        const fallback =
+          shutdownRestoreIntents.get(id)?.frame ?? firstSeen.get(id) ?? observation.frame;
+        restores.push({ id, frame: clampFrameToBounds(fallback, display.workArea) });
+      }
+      return restores;
+    };
+
     const retileVisible = (workspaceName: string): Effect.Effect<void, StepFailure> =>
       Effect.gen(function* () {
         const workspace = world.workspaces.get(workspaceName);
@@ -1003,12 +1050,36 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           gap: settings.gap,
           resolve: resolver,
         });
-        if (!plan.feasible) return;
-        for (const [id, frame] of plan.frames) {
-          const obs = world.windows.get(id);
-          if (obs === undefined || obs.minimized || obs.hidden) continue;
-          if (withinTolerance(obs.frame, frame, 1)) continue;
-          yield* writeFrame(id, frame, 1);
+        if (plan.feasible) {
+          for (const [id, frame] of plan.frames) {
+            const obs = world.windows.get(id);
+            if (obs === undefined || obs.minimized || obs.hidden) continue;
+            if (withinTolerance(obs.frame, frame, 1)) continue;
+            yield* writeFrame(id, frame, 1);
+          }
+        }
+        yield* restoreFloatingMembers(workspaceName, workspace, display);
+      });
+
+    /** Write restored frames for parked floating members and clear their
+     * durable parked intents — reveal is the unpark of floating members. */
+    const restoreFloatingMembers = (
+      workspaceName: WorkspaceName,
+      workspace: WorkspaceState,
+      display: DisplayObservation,
+    ): Effect.Effect<void, StepFailure> =>
+      Effect.gen(function* () {
+        for (const { id, frame } of floatingRestores(workspace, display, (id) =>
+          world.windows.get(id),
+        )) {
+          const result = yield* Effect.either(writeFrame(id, frame, 1));
+          if (result._tag === "Left") return yield* Effect.fail(result.left);
+          const current = world.workspaces.get(workspaceName);
+          if (current !== undefined && current.parkedFrames.has(id)) {
+            const parkedFrames = new Map(current.parkedFrames);
+            parkedFrames.delete(id);
+            commitWorkspace({ ...current, parkedFrames });
+          }
         }
       });
 
@@ -1926,6 +1997,14 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           const obs = acc.observationOf(id);
           if (obs === undefined || obs.minimized || obs.hidden) continue;
           targets.push({ windowId: id, frame });
+          if (!withinTolerance(obs.frame, frame, DEFAULT_TOLERANCE)) {
+            writes.push({ windowId: id, frame });
+          }
+        }
+        for (const { id, frame } of floatingRestores(ws, display, acc.observationOf)) {
+          targets.push({ windowId: id, frame });
+          const obs = acc.observationOf(id);
+          if (obs === undefined) continue;
           if (!withinTolerance(obs.frame, frame, DEFAULT_TOLERANCE)) {
             writes.push({ windowId: id, frame });
           }
@@ -4286,10 +4365,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             if (outcome._tag === "Left") {
               return yield* Effect.fail(
                 new CommandError({
-                  code:
-                    outcome.left.code === "inventory_stale"
-                      ? "inventory_stale"
-                      : "geometry_rejected",
+                  code: mapStepCode(outcome.left.code),
                   message: outcome.left.message,
                 }),
               );
@@ -4972,6 +5048,16 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             fibers,
             Stream.runForEach(adapter.events, (event) =>
               Effect.gen(function* () {
+                // Stall telemetry is identification, not layout input: record
+                // and continue without triggering a reconcile pass.
+                if (event.kind === "ax_stall" || event.kind === "ax_recover") {
+                  const detail =
+                    event.kind === "ax_stall"
+                      ? `pid ${event.pid}${event.app !== undefined ? ` (${event.app})` : ""} — AX messaging timed out`
+                      : `pid ${event.pid} — AX messaging recovered`;
+                  bus.publish("diagnostic", { code: event.kind, detail });
+                  return;
+                }
                 if (!startupReady) {
                   if (options.initialLayout === undefined && event.kind === "focus_changed") {
                     pendingFocusSignals.push(event.windowId);

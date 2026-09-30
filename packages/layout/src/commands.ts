@@ -28,6 +28,7 @@ export const CommandErrorCode = Schema.Literal(
   "geometry_rejected",
   "geometry_verification_failed",
   "topology_unstable",
+  "unresponsive",
   "paused",
   "queue_full",
   "timeout",
@@ -647,6 +648,8 @@ export function mapStepCode(code: string | undefined): CommandErrorCode {
       return "geometry_verification_failed";
     case "rejected":
       return "geometry_rejected";
+    case "unresponsive":
+      return "unresponsive";
     case "not_controllable":
       return "window_not_controllable";
     case "stale":

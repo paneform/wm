@@ -213,6 +213,12 @@ const eventByKind: Record<string, Schema.Struct.Type<never>> = {
   space_changed: Schema.Struct({ kind: Schema.Literal("space_changed") }),
   sleep: Schema.Struct({ kind: Schema.Literal("sleep") }),
   wake: Schema.Struct({ kind: Schema.Literal("wake") }),
+  ax_stall: Schema.Struct({
+    kind: Schema.Literal("ax_stall"),
+    pid: Schema.Number,
+    app: Schema.optional(Schema.String),
+  }),
+  ax_recover: Schema.Struct({ kind: Schema.Literal("ax_recover"), pid: Schema.Number }),
 };
 
 export type ProtocolIssue = { readonly reason: string };
@@ -257,6 +263,7 @@ const KNOWN_CODES = new Set([
   "stale",
   "ambiguous",
   "rejected",
+  "unresponsive",
   "permission",
   "unavailable",
 ]);

@@ -1,7 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { Effect, Exit, Fiber, Stream } from "effect";
+import { Either, Effect, Exit, Fiber, Stream } from "effect";
 import { PassThrough } from "node:stream";
 import { createMacOsSidecarAdapter } from "../src/host.ts";
+import { decodePlatformEvent } from "../src/protocol.ts";
 import type { SidecarProcess, SpawnSidecar } from "../src/sidecar-process.ts";
 import { inheritedStdioSpawn } from "../src/sidecar-process.ts";
 
@@ -452,5 +453,22 @@ describe("MacOsSidecarAdapter geometry wire shape", () => {
     const unguarded = fake.requests.filter((r) => r.op === "setWindowFrame").at(-1);
     expect("expectedIdentity" in (unguarded ?? {})).toBe(false);
     adapter.stop();
+  });
+});
+
+describe("platform event decoding", () => {
+  test("ax_stall and ax_recover decode to engine telemetry events", () => {
+    const stall = decodePlatformEvent({ ev: "ax_stall", pid: 4483, app: "zen" });
+    expect(Either.isRight(stall)).toBe(true);
+    if (Either.isRight(stall)) {
+      expect(stall.right).toEqual({ kind: "ax_stall", pid: 4483, app: "zen" });
+    }
+    const recover = decodePlatformEvent({ ev: "ax_recover", pid: 4483 });
+    expect(Either.isRight(recover)).toBe(true);
+    if (Either.isRight(recover)) {
+      expect(recover.right).toEqual({ kind: "ax_recover", pid: 4483 });
+    }
+    const invalid = decodePlatformEvent({ ev: "ax_stall", app: "zen" });
+    expect(Either.isLeft(invalid)).toBe(true);
   });
 });

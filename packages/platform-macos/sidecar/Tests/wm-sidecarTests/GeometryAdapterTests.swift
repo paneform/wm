@@ -5,8 +5,26 @@ import Testing
 @Test func nativeWriteErrorsAreClassified() {
     #expect(AdapterError.writeFailure(.success) == nil)
     #expect(AdapterError.writeFailure(.invalidUIElement)?.wireCode == "stale")
-    #expect(AdapterError.writeFailure(.cannotComplete)?.wireCode == "not_controllable")
+    // .cannotComplete is an AX messaging timeout: a stalled app, distinct
+    // from permission/attribute problems (bean wm-site).
+    #expect(AdapterError.writeFailure(.cannotComplete)?.wireCode == "unresponsive")
+    #expect(AdapterError.writeFailure(.apiDisabled)?.wireCode == "not_controllable")
+    #expect(AdapterError.writeFailure(.attributeUnsupported)?.wireCode == "not_controllable")
     #expect(AdapterError.writeFailure(.illegalArgument)?.wireCode == "rejected")
+}
+
+@Test func settleEarlyExitRequiresAppliedEvidence() {
+    // Reached the target: always settles early.
+    #expect(GeometryAdapter.shouldSettleEarly(targetSamples: 3, stableSamples: 0, distanceImproved: false))
+    // Stable but never improved toward the target: a never-applied write to a
+    // hung app must keep polling instead of returning false stable evidence
+    // (bean wm-ixs4).
+    #expect(!GeometryAdapter.shouldSettleEarly(targetSamples: 0, stableSamples: 3, distanceImproved: false))
+    // Stable after moving toward the target: a WindowServer-level instant
+    // clamp still settles fast.
+    #expect(GeometryAdapter.shouldSettleEarly(targetSamples: 0, stableSamples: 3, distanceImproved: true))
+    // Not stable yet: keep polling.
+    #expect(!GeometryAdapter.shouldSettleEarly(targetSamples: 0, stableSamples: 2, distanceImproved: true))
 }
 
 @Test func windowMetaPreservesAXWindowIdentity() {

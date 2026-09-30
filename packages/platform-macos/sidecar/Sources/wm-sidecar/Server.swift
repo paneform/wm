@@ -245,6 +245,22 @@ final class SidecarServer {
       return sendError(request, code: "not_found", detail: "unknown window \(id)")
     }
     var target = Rect(frameValue)
+    // Wall-clock duration for failure reports: a long failed write is stall
+    // evidence; an instant one is a refusal.
+    let durationClock = ContinuousClock()
+    let durationStart = durationClock.now
+    func elapsedMs() -> Double {
+      let elapsed = durationClock.now - durationStart
+      return Double(elapsed.components.seconds) * 1_000
+        + Double(elapsed.components.attoseconds) / 1e15
+    }
+    // A write to an app whose AX messaging is currently stalled must never
+    // read as clamp evidence downstream — report the stall fact alongside.
+    func annotated(_ value: WriteValue) -> WriteValue {
+      var value = value
+      value.appStalled = inventory.isStalled(pid: meta.pid)
+      return value
+    }
     do {
       let components: [GeometryAdapter.Component]
       switch mode {
@@ -268,7 +284,7 @@ final class SidecarServer {
         requested: target,
         components: components,
         expectedIdentity: request.expectedIdentity)
-      send(ResultMessage(reqId: requestId(request), result: .write(write)))
+      send(ResultMessage(reqId: requestId(request), result: .write(annotated(write))))
     } catch let error as AdapterError {
       if error != .stale {
         do {
@@ -277,47 +293,51 @@ final class SidecarServer {
           return send(
             ResultMessage(
               reqId: requestId(request),
-              result: .write(
+              result: .write(annotated(
                 WriteValue(
                   requested: target.frameValue,
                   observed: settlement.frame.frameValue,
                   stable: settlement.stable,
                   stableReads: settlement.stableReads,
-                  errorKind: error.wireCode))))
+                  errorKind: error.wireCode,
+                  durationMs: elapsedMs())))))
         } catch let settlementError as AdapterError {
           let observed = inventory.currentObservedFrame(for: meta) ?? target
           return send(
             ResultMessage(
               reqId: requestId(request),
-              result: .write(
+              result: .write(annotated(
                 WriteValue(
                   requested: target.frameValue,
                   observed: observed.frameValue,
                   stable: false,
-                  errorKind: settlementError.wireCode))))
+                  errorKind: settlementError.wireCode,
+                  durationMs: elapsedMs())))))
         } catch {}
       }
       let observed = inventory.currentObservedFrame(for: meta) ?? target
       send(
         ResultMessage(
           reqId: requestId(request),
-          result: .write(
+          result: .write(annotated(
             WriteValue(
               requested: target.frameValue,
               observed: observed.frameValue,
               stable: false,
-              errorKind: error.wireCode))))
+              errorKind: error.wireCode,
+              durationMs: elapsedMs())))))
     } catch {
       let observed = inventory.currentObservedFrame(for: meta) ?? target
       send(
         ResultMessage(
           reqId: requestId(request),
-          result: .write(
+          result: .write(annotated(
             WriteValue(
               requested: target.frameValue,
               observed: observed.frameValue,
               stable: false,
-              errorKind: AdapterError.rejected.wireCode))))
+              errorKind: AdapterError.rejected.wireCode,
+              durationMs: elapsedMs())))))
     }
   }
 

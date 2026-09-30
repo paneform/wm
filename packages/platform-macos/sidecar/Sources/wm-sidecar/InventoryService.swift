@@ -43,6 +43,10 @@ final class InventoryService {
         lastMetas[id]
     }
 
+    /// Whether the app's AX enumeration is currently recorded as stalled —
+    /// reported alongside write outcomes so stalled evidence is identifiable.
+    func isStalled(pid: Int32) -> Bool { stalledPids.contains(pid) }
+
     // MARK: Geometry/focus pass-through (all MainActor, AX bounded per element)
 
     func liveObservation(for meta: WindowMeta) -> WindowValue? {
@@ -129,6 +133,15 @@ final class InventoryService {
         let (axWindows, stalled) = await WindowSource.collectAXWindows(
             applications: applications,
             previouslyStalled: stalledPids)
+        // Report stall transitions: entering the stalled set means the app's
+        // AX messaging timed out during enumeration; leaving it means a probe
+        // found the app responsive again (identification, not policy).
+        for pid in stalled where !stalledPids.contains(pid) {
+            emit(.axStall(pid: pid, app: applications.first { $0.pid == pid }?.name))
+        }
+        for pid in stalledPids where !stalled.contains(pid) {
+            emit(.axRecover(pid: pid))
+        }
         stalledPids = stalled
         let cgWindows = WindowSource.collectCGWindows()
         let joined = Normalizer.normalize(

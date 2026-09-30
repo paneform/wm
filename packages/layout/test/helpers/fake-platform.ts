@@ -403,6 +403,8 @@ export interface FakePlatform {
   /** Deliver an AUTHORITATIVE focus_changed event immediately, bypassing
    * deferral — models a newer platform event whose observation lags. */
   emitFocusEvent(id: WindowId | null): void;
+  /** Inject an arbitrary platform event (telemetry hints, etc.). */
+  emitPlatformEvent(event: PlatformEvent): void;
 
   // Introspection.
   displays(): readonly DisplayObservation[];
@@ -1188,6 +1190,9 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
     releaseDeferredFocus,
     emitFocusEvent: (id: WindowId | null): void => {
       dispatch({ kind: "focus_changed", windowId: id });
+    },
+    emitPlatformEvent: (event: PlatformEvent): void => {
+      dispatch(event);
     },
     displays: (): readonly DisplayObservation[] => sortedDisplays(),
     windowIds: (): readonly WindowId[] => [...windows.keys()],

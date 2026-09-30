@@ -68,6 +68,11 @@ struct WriteValue: Codable, Equatable, Sendable {
   var stable: Bool
   var stableReads: Int? = nil
   var errorKind: String?
+  /** Wall-clock duration of the whole write operation, in milliseconds. */
+  var durationMs: Double?
+  /** Owning app's AX messaging was stalled at settle time — the outcome must
+   * never read as clamp evidence downstream (bean wm-ixs4). */
+  var appStalled: Bool?
 }
 
 struct BatchOperationValue: Decodable, Sendable {
@@ -238,6 +243,8 @@ enum EventMessage: Encodable {
   case sleep
   case wake
   case keybind(action: String)
+  case axStall(pid: Int32, app: String?)
+  case axRecover(pid: Int32)
 
   var name: String {
     switch self {
@@ -250,6 +257,8 @@ enum EventMessage: Encodable {
     case .sleep: "sleep"
     case .wake: "wake"
     case .keybind: "keybind"
+    case .axStall: "ax_stall"
+    case .axRecover: "ax_recover"
     }
   }
 
@@ -267,11 +276,16 @@ enum EventMessage: Encodable {
       try container.encode(windowId, forKey: .windowId)
     case .focusChanged(let windowId):
       try container.encode(windowId, forKey: .windowId)
+    case .axStall(let pid, let app):
+      try container.encode(pid, forKey: .pid)
+      try container.encodeIfPresent(app, forKey: .app)
+    case .axRecover(let pid):
+      try container.encode(pid, forKey: .pid)
     }
   }
 
   private enum CodingKeys: String, CodingKey {
-    case ev, window, windowId, action
+    case ev, window, windowId, action, pid, app
   }
 }
 

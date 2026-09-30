@@ -6,7 +6,11 @@ import { attachWebSocketServer } from "./ws-server.ts";
 import { clockNode } from "./clock-node.ts";
 import { executeEngineCommand } from "./command-handler.ts";
 import { createFileConfigSource, resolveConfigPath } from "./config-file.ts";
-import { createFileObservationStore, resolveObservationPath } from "./observation-file.ts";
+import {
+  createFileObservationStore,
+  resolveObservationPath,
+} from "./observation-file.ts";
+import { createDiagnosticsLog, resolveDiagnosticsPath } from "./diagnostics-log.ts";
 import { buildKeybindCommand, helpFor, parseArgs, USAGE } from "./cli-args.ts";
 import {
   errorReport,
@@ -192,6 +196,22 @@ async function main(): Promise<number> {
     initiallyPaused: parsed.flags["observe-only"] === true,
   }));
   await Effect.runPromise(engine.start());
+  // Durable identification trail for rare failure signals (AX stalls,
+  // unresponsive writes): diagnostic-topic events land in a bounded JSONL
+  // file so post-hoc debugging has evidence even without a live subscriber.
+  const diagnosticsLog = createDiagnosticsLog(resolveDiagnosticsPath());
+  Effect.runFork(
+    Stream.runForEach(engine.events(), (event) =>
+      Effect.sync(() => {
+        if (event.topic === "diagnostic" || event.topic === "repair") {
+          diagnosticsLog.append({
+            ts: new Date().toISOString(),
+            topic: event.topic,
+            payload: event.payload,
+          });
+        }
+      })),
+  );
   if (!nativeConfigReady) {
     await Effect.runPromise(engine.stop());
     adapter.stop();

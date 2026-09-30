@@ -8,6 +8,9 @@ enum AdapterError: Error, Equatable {
     case stale
     case ambiguous
     case rejected
+    /// The app received the request but could not complete it within its
+    /// messaging timeout — a stalled/hung app, not a refusal.
+    case unresponsive
 
     var wireCode: String {
         switch self {
@@ -16,6 +19,7 @@ enum AdapterError: Error, Equatable {
         case .stale: "stale"
         case .ambiguous: "ambiguous"
         case .rejected: "rejected"
+        case .unresponsive: "unresponsive"
         }
     }
 
@@ -23,7 +27,8 @@ enum AdapterError: Error, Equatable {
         switch result {
         case .success: nil
         case .invalidUIElement, .invalidUIElementObserver: .stale
-        case .apiDisabled, .attributeUnsupported, .notImplemented, .cannotComplete: .notControllable
+        case .cannotComplete: .unresponsive
+        case .apiDisabled, .attributeUnsupported, .notImplemented: .notControllable
         default: .rejected
         }
     }
@@ -116,7 +121,11 @@ final class GeometryAdapter {
     ) async throws -> Settlement {
         let element = try resolve(meta)
         try validateIdentity(element: element, meta: meta, expected: expectedIdentity)
-        let settlement = try await settle(element: element, requested: requested)
+        var errors: [String] = []
+        // The mutation was already attempted; the freshest read stands in for
+        // the pre-write frame in the improvement check.
+        let before = Self.readFrame(element, errors: &errors)
+        let settlement = try await settle(element: element, requested: requested, before: before)
         try validateIdentity(element: element, meta: meta, expected: expectedIdentity)
         return settlement
     }
@@ -168,11 +177,24 @@ final class GeometryAdapter {
         components: [Component],
         expectedIdentity: ExpectedIdentityValue? = nil
     ) async throws -> WriteValue {
+        let clock = ContinuousClock()
+        let start = clock.now
+        func durationMs() -> Double {
+            let elapsed = clock.now - start
+            return Double(elapsed.components.seconds) * 1_000
+                + Double(elapsed.components.attoseconds) / 1e15
+        }
         do {
             guard AXIsProcessTrusted() else { throw AdapterError.notControllable }
             let element = try resolve(meta)
             try validateIdentity(element: element, meta: meta, expected: expectedIdentity)
             try validateControllability(element: element, components: components)
+            var beforeErrors: [String] = []
+            // Pre-write frame for the settle improvement check: WindowServer
+            // can clamp a write instantly (parking), so the first settle
+            // sample already sits at the final frame — improvement is only
+            // meaningful against the frame BEFORE the mutation.
+            let before = Self.readFrame(element, errors: &beforeErrors)
 
             try await withEnhancedUserInterfaceDisabled(pid: meta.pid) {
                 for component in components {
@@ -185,14 +207,15 @@ final class GeometryAdapter {
                 }
             }
 
-            let settlement = try await settle(element: element, requested: requested)
+            let settlement = try await settle(element: element, requested: requested, before: before)
             try validateIdentity(element: element, meta: meta, expected: expectedIdentity)
             return WriteValue(
                 requested: requested.frameValue,
                 observed: settlement.frame.frameValue,
                 stable: settlement.stable,
                 stableReads: settlement.stableReads,
-                errorKind: nil)
+                errorKind: nil,
+                durationMs: durationMs())
         } catch let error as AdapterError {
             throw error
         } catch {
@@ -271,15 +294,33 @@ final class GeometryAdapter {
         var stableReads: Int
     }
 
+    /// Pure settle decision for one poll sample.
+    ///
+    /// `distanceImproved` compares the sample's distance-to-target against the
+    /// PRE-WRITE frame's distance: an applied write (even one the app or
+    /// WindowServer immediately clamps) moves the frame toward the target
+    /// before stabilizing, while a never-applied write never improves. The
+    /// stable early-exit therefore requires improvement — a hung target
+    /// exhausts the poll and returns NO stable evidence instead of false
+    /// evidence at the stale frame (bean wm-ixs4).
+    nonisolated static func shouldSettleEarly(
+        targetSamples: Int,
+        stableSamples: Int,
+        distanceImproved: Bool
+    ) -> Bool {
+        if targetSamples >= 3 { return true }
+        return stableSamples >= 3 && distanceImproved
+    }
+
     /// Up to 36 samples, 17 ms apart. Early exit on 3 consecutive target
-    /// matches, or 3 consecutive stable reads (≤0.5 pt movement) whose
-    /// normalized distance stopped improving.
-    private func settle(element: AXUIElement, requested: Rect) async throws -> Settlement {
+    /// matches, or 3 consecutive stable reads (≤0.5 pt movement) that also
+    /// improved on the pre-write distance at least once.
+    private func settle(element: AXUIElement, requested: Rect, before: Rect?) async throws -> Settlement {
         let tolerance = 1.0
         var targetSamples = 0
         var stableSamples = 0
         var previous: Rect?
-        var previousDistance = Double.infinity
+        let beforeDistance = before.map { normalizedDistance($0, to: requested) }
         for _ in 0..<36 {
             var errors: [String] = []
             guard let observed = Self.readFrame(element, errors: &errors) else {
@@ -289,11 +330,15 @@ final class GeometryAdapter {
             targetSamples = matches ? targetSamples + 1 : 0
             stableSamples = previous?.approximatelyEquals(observed, tolerance: 0.5) == true ? stableSamples + 1 : 0
             let distance = normalizedDistance(observed, to: requested)
-            if targetSamples >= 3 || (stableSamples >= 3 && distance >= previousDistance - 0.0001) {
+            let distanceImproved = beforeDistance.map { distance < $0 - 0.0001 } ?? false
+            if Self.shouldSettleEarly(
+                targetSamples: targetSamples,
+                stableSamples: stableSamples,
+                distanceImproved: distanceImproved)
+            {
                 return Settlement(frame: observed, stable: true, stableReads: max(targetSamples, stableSamples))
             }
             previous = observed
-            previousDistance = distance
             try await Task.sleep(for: .milliseconds(settleIntervalMs))
         }
         var errors: [String] = []

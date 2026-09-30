@@ -171,6 +171,7 @@ export const WriteErrorKind = Schema.Literal(
   "not_controllable",
   "stale",
   "ambiguous",
+  "unresponsive",
 );
 export type WriteErrorKind = typeof WriteErrorKind.Type;
 
@@ -205,6 +206,11 @@ export const WriteObservation = Schema.Struct({
   stable: Schema.Boolean,
   stableReads: Schema.optional(Schema.Number),
   errorKind: Schema.optional(WriteErrorKind),
+  /** Wall-clock duration of the adapter's whole write operation, in ms. */
+  durationMs: Schema.optional(Schema.Number),
+  /** Owning app's AX messaging was stalled at settle time — clamp-shaped
+   * evidence from this write must not be learned (bean wm-ixs4). */
+  appStalled: Schema.optional(Schema.Boolean),
 });
 export interface WriteObservation extends Schema.Schema.Type<typeof WriteObservation> {}
 
@@ -214,6 +220,7 @@ export const PlatformErrorCode = Schema.Literal(
   "stale",
   "ambiguous",
   "rejected",
+  "unresponsive",
   "permission",
   "unavailable",
 );
@@ -237,6 +244,13 @@ export const PlatformEvent = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("space_changed") }),
   Schema.Struct({ kind: Schema.Literal("sleep") }),
   Schema.Struct({ kind: Schema.Literal("wake") }),
+  /** Telemetry-only hints: an app's AX messaging started/stopped timing out. */
+  Schema.Struct({
+    kind: Schema.Literal("ax_stall"),
+    pid: Schema.Number,
+    app: Schema.optional(Schema.String),
+  }),
+  Schema.Struct({ kind: Schema.Literal("ax_recover"), pid: Schema.Number }),
 );
 export type PlatformEvent = typeof PlatformEvent.Type;
 
