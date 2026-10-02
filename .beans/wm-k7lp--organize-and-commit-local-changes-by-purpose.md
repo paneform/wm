@@ -5,7 +5,7 @@ status: in-progress
 type: task
 priority: normal
 created_at: 2026-10-02T18:04:20Z
-updated_at: 2026-10-02T19:15:45Z
+updated_at: 2026-10-02T19:30:47Z
 ---
 
 Review the complete working tree and commit the requested local source changes in logical, validated groups. Preserve all existing user work; exclude generated artifacts and external local configuration.
@@ -21,7 +21,8 @@ Review the complete working tree and commit the requested local source changes i
 - [x] Commit compact CLI output, app metadata and verbose diagnostics.
 - [x] Commit command-hierarchy docs navigation.
 - [x] Commit the newly added schema-validated configuration examples.
-- [ ] Commit updated design references and remaining formatting-only changes.
+- [x] Commit updated design references and remaining formatting-only changes.
+- [ ] Commit the newly added nested configuration-field reference.
 - [ ] Validate commit groups, run final checks and verify the working tree is clean.
 
 Each commit includes this tracking bean (and relevant existing beans when useful), matches the conventional commit style, and is inspected before committing. No push requested.
@@ -87,3 +88,11 @@ The interactive mockup invoked window assign 2 but still put destination windows
 ## Design-reference validation
 
 Formatted the remaining design/reference documents and the formatting-only playground import. Parsed the mockup inline JavaScript successfully and ran both numbered workspace-assignment scene definitions through the actual portable engine: the empty destination contains one window and the populated destination contains both windows after assignment. Source state/captions now agree with window assign 2.
+
+## Commit 9
+
+a95f9fa — docs: synchronize command references and interactive design previews. Includes reference/prototype updates and the remaining formatting-only import. The mockup inline script parses and both workspace scenes execute with correct destination membership.
+
+## Latest configuration-reference edits
+
+A further local config-reference.ts/page/style/test change arrived during organization. It adds a nested field reference with required/type/bounds metadata. Preserved this work, corrected its retired display-list spelling, retained the keybinding parser regression, tightened nested schema-path coverage, and fixed an undefined badge color token. All nine config tests, site lint and typecheck pass.

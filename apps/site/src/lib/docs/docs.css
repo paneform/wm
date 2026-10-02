@@ -480,3 +480,41 @@
     letter-spacing: 0.1em;
   }
 }
+
+.docs-config-reference {
+  margin: 0.6rem 0 1.4rem;
+}
+.docs-config-field {
+  margin: 0.55rem 0;
+  padding: 0.15rem 0.75rem;
+  border-left: 2px solid var(--docs-code);
+}
+.docs-config-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0;
+}
+.docs-config-badge {
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--docs-code);
+  color: var(--docs-quiet);
+  font-size: var(--docs-xs);
+}
+.docs-config-badge[data-required="true"] {
+  color: var(--rp-base);
+  background: var(--rp-subtle);
+}
+.docs-config-type {
+  color: var(--docs-quiet);
+  font-size: var(--docs-xs);
+  font-family: ui-monospace, monospace;
+}
+.docs-config-desc {
+  max-width: 46rem;
+  margin: 0.15rem 0 0;
+  color: var(--color-page-secondary);
+  font-size: var(--docs-sm, var(--docs-base));
+}
