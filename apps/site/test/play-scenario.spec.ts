@@ -14,8 +14,8 @@ describe("hero play scenario", () => {
       "window move right",
       "window move left",
       "window focus up",
-      "workspace move-window T",
-      "workspace move-window W",
+      "window assign T",
+      "window assign W",
     ]);
   });
 

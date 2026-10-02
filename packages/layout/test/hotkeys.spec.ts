@@ -117,7 +117,7 @@ const seedWorkspace = async (h: Harness, ids: readonly WindowId[]): Promise<void
     const snap = await h.snapshot();
     const ws1 = snap.workspaces.find((ws) => ws.name === "1");
     if (!ws1?.members.includes(id)) {
-      await h.run({ type: "moveWindowToWorkspace", windowId: id, workspace: "1" });
+      await h.run({ type: "moveWindowToWorkspace", windowId: id, workspace: "1", follow: false });
     }
   }
   await h.run({ type: "reconcile" });
@@ -161,7 +161,66 @@ describe("togglePause", () => {
   });
 });
 
-describe("moveFocusedWindowToWorkspace", () => {
+describe("window assignment", () => {
+  test("no-follow assignment to the current workspace preserves focus", async () => {
+    const h = await bootstrap();
+    const first = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const second = h.fake.addWindow(makeWindow({ x: 400, y: 400 }));
+    await seedWorkspace(h, [first, second]);
+    await h.run({ type: "moveWindowToWorkspace", workspace: "1", follow: false });
+    expect((await h.snapshot()).focusedWindow).toBe(first);
+    expect(h.fake.focusedWindowId()).toBe(first);
+  });
+  test("workspace mode and display movement default to the focused workspace", async () => {
+    const h = await bootstrap();
+    const id = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    await seedWorkspace(h, [id]);
+    await h.run({ type: "setWorkspaceMode", mode: "floating" });
+    expect(workspaceOf(await h.snapshot(), "1")?.mode).toBe("floating");
+    await h.run({ type: "moveWorkspaceToDisplay", displayId: "display:sim-left" });
+    const snapshot = await h.snapshot();
+    expect(workspaceOf(snapshot, "1")?.visibleOnDisplay).toBe("display:sim-left");
+    expect(snapshot.focusedWorkspace).toBe("1");
+  });
+  test("explicit-ID assignment follows and focuses the selected nonfocused window", async () => {
+    const h = await bootstrap();
+    const first = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const second = h.fake.addWindow(makeWindow({ x: 400, y: 400 }));
+    await seedWorkspace(h, [first, second]);
+    await h.run({ type: "moveWindowToWorkspace", windowId: second, workspace: "2" });
+    const snapshot = await h.snapshot();
+    expect(snapshot.focusedWorkspace).toBe("2");
+    expect(snapshot.focusedWindow).toBe(second);
+    expect(h.fake.focusedWindowId()).toBe(second);
+    expect(workspaceOf(snapshot, "1")?.members).toEqual([first]);
+  });
+  test("focused no-follow assignment keeps the source view and focuses a remaining window", async () => {
+    const h = await bootstrap();
+    const first = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const second = h.fake.addWindow(makeWindow({ x: 400, y: 400 }));
+    await seedWorkspace(h, [first, second]);
+    await h.run({ type: "moveWindowToWorkspace", workspace: "2", follow: false });
+    const snapshot = await h.snapshot();
+    expect(snapshot.focusedWorkspace).toBe("1");
+    expect(snapshot.focusedWindow).toBe(second);
+    expect(h.fake.focusedWindowId()).toBe(second);
+    expect(workspaceOf(snapshot, "2")?.members).toEqual([first]);
+    expect(workspaceOf(snapshot, "2")?.visibleOnDisplay).toBeNull();
+  });
+  test("omitted geometry targets resolve to the focused window at execution", async () => {
+    const h = await bootstrap();
+    const id = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    await seedWorkspace(h, [id]);
+    await h.run({ type: "floatWindow" });
+    await h.run({ type: "resizeWindow", size: { width: 600, height: 400 } });
+    await h.run({ type: "moveWindow", point: { x: 80, y: 90 } });
+    expect((await h.snapshot()).windows.find((window) => window.id === id)?.frame).toEqual({
+      x: 80,
+      y: 90,
+      width: 600,
+      height: 400,
+    });
+  });
   test("focused observation updates lastFocusedMember; focus follows", async () => {
     const h = await bootstrap();
     const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
@@ -175,7 +234,7 @@ describe("moveFocusedWindowToWorkspace", () => {
     expect(ws1?.lastFocusedMember).toBe(w1);
     expect(h.fake.focusedWindowId()).toBe(w1);
 
-    await h.run({ type: "moveFocusedWindowToWorkspace", workspace: "scratch" });
+    await h.run({ type: "moveWindowToWorkspace", workspace: "scratch" });
     snap = await h.snapshot();
 
     const scratch = workspaceOf(snap, "scratch");
@@ -196,7 +255,7 @@ describe("moveFocusedWindowToWorkspace", () => {
     h.fake.focusWindowExternal(null);
     await h.run({ type: "reconcile" });
 
-    await h.run({ type: "moveFocusedWindowToWorkspace", workspace: "scratch" });
+    await h.run({ type: "moveWindowToWorkspace", workspace: "scratch" });
     const snap = await h.snapshot();
     expect(workspaceOf(snap, "scratch")?.members).toEqual([w2]);
     expect(workspaceOf(snap, "1")?.members).toEqual([w1]);
@@ -204,7 +263,7 @@ describe("moveFocusedWindowToWorkspace", () => {
 
   test("no focus and no live fallback member is a structured error", async () => {
     const h = await bootstrap();
-    const error = await h.failure({ type: "moveFocusedWindowToWorkspace", workspace: "x" });
+    const error = await h.failure({ type: "moveWindowToWorkspace", workspace: "x" });
     expect(error.code).toBe("window_not_found");
   });
 
@@ -212,7 +271,7 @@ describe("moveFocusedWindowToWorkspace", () => {
     const h = await bootstrap();
     h.fake.addWindow(makeWindow({ subrole: "AXDialog", x: 60, y: 60 }));
     await h.run({ type: "reconcile" });
-    const error = await h.failure({ type: "moveFocusedWindowToWorkspace", workspace: "x" });
+    const error = await h.failure({ type: "moveWindowToWorkspace", workspace: "x" });
     expect(error.code).toBe("window_not_manageable");
   });
 });
@@ -264,7 +323,7 @@ describe("moveFocusedWorkspaceToNextDisplay", () => {
     const h = await bootstrap();
     const docker = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     await h.run({ type: "reconcile" });
-    await h.run({ type: "moveWindowToWorkspace", windowId: docker, workspace: "D" });
+    await h.run({ type: "moveWindowToWorkspace", windowId: docker, workspace: "D", follow: false });
     await h.run({
       type: "moveWorkspaceToDisplay",
       workspace: "D",
@@ -292,7 +351,12 @@ describe("moveFocusedWorkspaceToNextDisplay", () => {
 
     const terminal = h.fake.addWindow(makeWindow({ x: 200, y: 200 }));
     await h.run({ type: "reconcile" });
-    await h.run({ type: "moveWindowToWorkspace", windowId: terminal, workspace: "T" });
+    await h.run({
+      type: "moveWindowToWorkspace",
+      windowId: terminal,
+      workspace: "T",
+      follow: false,
+    });
     await h.run({
       type: "moveWorkspaceToDisplay",
       workspace: "T",
@@ -300,7 +364,7 @@ describe("moveFocusedWorkspaceToNextDisplay", () => {
     });
     h.fake.focusWindowExternal(terminal);
     await h.run({ type: "reconcile" });
-    await h.run({ type: "moveFocusedWindowToWorkspace", workspace: "D" });
+    await h.run({ type: "moveWindowToWorkspace", workspace: "D" });
 
     const moved = await h.snapshot();
     expect(moved.windows.find((window) => window.id === terminal)?.workspace).toBe("D");
@@ -439,7 +503,7 @@ describe("moveDirection", () => {
     await h.run({ type: "focusWindow", windowId: w2 });
     const w3 = h.fake.addWindow(makeWindow({ x: 1100, y: 700 }));
     await h.run({ type: "reconcile" });
-    await h.run({ type: "moveWindowToWorkspace", windowId: w3, workspace: "1" });
+    await h.run({ type: "moveWindowToWorkspace", windowId: w3, workspace: "1", follow: false });
     await h.run({ type: "reconcile" }); // inserts w3 beside w2 along its height
 
     const before = await h.snapshot();
@@ -863,7 +927,7 @@ describe("pause gating for hotkey commands", () => {
 
     expect((await h.failure({ type: "focusDirection", direction: "left" })).code).toBe("paused");
     expect((await h.failure({ type: "moveDirection", direction: "left" })).code).toBe("paused");
-    expect((await h.failure({ type: "moveFocusedWindowToWorkspace", workspace: "s" })).code).toBe(
+    expect((await h.failure({ type: "moveWindowToWorkspace", workspace: "s" })).code).toBe(
       "paused",
     );
     expect((await h.failure({ type: "moveFocusedWorkspaceToNextDisplay" })).code).toBe("paused");
@@ -968,7 +1032,7 @@ describe("transactional compound commands (review issue 1)", () => {
 
     // The reveal parks the vacated source member (w2) — arm it to fail.
     h.fake.swapBackingElement(w2);
-    const error = await h.failure({ type: "moveFocusedWindowToWorkspace", workspace: "scratch" });
+    const error = await h.failure({ type: "moveWindowToWorkspace", workspace: "scratch" });
     expect(["topology_unstable", "inventory_stale"]).toContain(error.code);
 
     const after = await h.snapshot();
@@ -1030,7 +1094,7 @@ describe("destination display preservation (review issue 2)", () => {
 
     h.fake.focusWindowExternal(w1);
     await h.run({ type: "reconcile" });
-    await h.run({ type: "moveFocusedWindowToWorkspace", workspace: "away" });
+    await h.run({ type: "moveWindowToWorkspace", workspace: "away" });
 
     snap = await h.snapshot();
     // Destination display PRESERVED — not yanked to the source's display.
@@ -1095,7 +1159,7 @@ describe("observed unmanageable focus blocks fallback (review issue 5)", () => {
     h.fake.focusWindowExternal(dialog);
     await h.run({ type: "reconcile" });
 
-    const error = await h.failure({ type: "moveFocusedWindowToWorkspace", workspace: "scratch" });
+    const error = await h.failure({ type: "moveWindowToWorkspace", workspace: "scratch" });
     expect(error.code).toBe("window_not_manageable");
     snap = await h.snapshot();
     expect(workspaceOf(snap, "scratch")).toBeUndefined(); // nothing moved
@@ -1217,7 +1281,7 @@ describe("committed/draft isolation (round 2 issue 1)", () => {
     // Park of the vacated member (w2) is the first platform effect — gate it.
     DEADLINE.deadlineMs = 4000;
     gate.arm((id, op) => id === w2 && op === "frame");
-    const pending = h.run({ type: "moveFocusedWindowToWorkspace", workspace: "scratch" });
+    const pending = h.run({ type: "moveWindowToWorkspace", workspace: "scratch" });
     await new Promise((r) => setTimeout(r, 25));
 
     const midSnap = await h.snapshot();
@@ -1578,7 +1642,12 @@ describe("focusWorkspace physically focuses its destination", () => {
     });
     const destination = h.fake.addWindow(makeWindow({ x: -1400, y: 100 }));
     await h.run({ type: "reconcile" });
-    await h.run({ type: "moveWindowToWorkspace", windowId: destination, workspace: "away" });
+    await h.run({
+      type: "moveWindowToWorkspace",
+      windowId: destination,
+      workspace: "away",
+      follow: false,
+    });
     h.fake.focusWindowExternal(primary);
     await h.run({ type: "reconcile" });
 
@@ -1598,7 +1667,12 @@ describe("focusWorkspace physically focuses its destination", () => {
     const primary = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     const destination = h.fake.addWindow(makeWindow({ x: 500, y: 100 }));
     await seedWorkspace(h, [primary, destination]);
-    await h.run({ type: "moveWindowToWorkspace", windowId: destination, workspace: "away" });
+    await h.run({
+      type: "moveWindowToWorkspace",
+      windowId: destination,
+      workspace: "away",
+      follow: false,
+    });
     await h.run({ type: "focusWorkspace", name: "1" });
     h.fake.focusWindowExternal(primary);
     await h.run({ type: "reconcile" });
@@ -1621,8 +1695,8 @@ describe("multi-display focus isolation", () => {
     const m = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     const one = h.fake.addWindow(makeWindow({ x: 500, y: 100 }));
     await seedWorkspace(h, [t, m, one]);
-    await h.run({ type: "moveWindowToWorkspace", windowId: t, workspace: "T" });
-    await h.run({ type: "moveWindowToWorkspace", windowId: m, workspace: "M" });
+    await h.run({ type: "moveWindowToWorkspace", windowId: t, workspace: "T", follow: false });
+    await h.run({ type: "moveWindowToWorkspace", windowId: m, workspace: "M", follow: false });
     await h.run({ type: "moveWorkspaceToDisplay", workspace: "T", displayId: "display:sim-left" });
     await h.run({ type: "focusWorkspace", name: "M" });
 
@@ -1664,7 +1738,7 @@ describe("displaced workspace rollback on multi-display moves (round 3 issue 2)"
     });
     const wU = h.fake.addWindow(makeWindow({ x: -1400, y: 100 }));
     await h.run({ type: "reconcile" });
-    await h.run({ type: "moveWindowToWorkspace", windowId: wU, workspace: "away" });
+    await h.run({ type: "moveWindowToWorkspace", windowId: wU, workspace: "away", follow: false });
     await h.run({ type: "reconcile" });
     let snap = await h.snapshot();
     expect(workspaceOf(snap, "away")?.visibleOnDisplay).toBe("display:sim-left");
@@ -2090,7 +2164,7 @@ describe("pending focus signal lifecycle batching", () => {
     const docker = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
     const primary = h.fake.addWindow(makeWindow({ x: 900, y: 100 }));
     await h.run({ type: "reconcile" });
-    await h.run({ type: "moveWindowToWorkspace", windowId: docker, workspace: "D" });
+    await h.run({ type: "moveWindowToWorkspace", windowId: docker, workspace: "D", follow: false });
     await h.run({
       type: "moveWorkspaceToDisplay",
       workspace: "D",

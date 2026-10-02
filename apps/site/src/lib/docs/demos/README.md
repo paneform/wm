@@ -3,14 +3,20 @@
 Every JSON file here is a complete portable `LayoutScenario`. Use the smallest
 scene that makes the command understandable: usually one or two windows and one
 display. Display-move examples use two displays. The directional reference keeps
-three situations because its behavior depends on the starting layout.
+four situations because its behavior depends on the starting layout.
+
+Use numbered workspace IDs as strings: `"1"` for the starting workspace and
+`"2"` for a destination. Match these IDs in commands, expectations and copy.
+
+Situation titles describe the starting condition when the command runs.
+Use step captions to explain the result.
 
 Describe windows by their visible starting roles: the focused window, its left
 neighbor, or a window in the destination workspace. Keep captions short and use
 the same roles in situation introductions. Previews do not show app names.
 Role-based IDs such as `focused-window` and `left-neighbor` are stable identifiers
 in these scenario files, not special CLI selectors. Use a current window ID from
-`wm windows` when running an explicit-ID command against your live desktop.
+`wm window list` when running an explicit-ID command against your live desktop.
 
 Starting descriptions and step captions share a **32ch, two-line monospace**
 area. Keep each to **64 characters maximum**, with words that wrap into at most
@@ -50,6 +56,6 @@ remain distinct situations on one page, each labeled with its actual command.
 
 Service scenarios start/stop/restart the simulated engine only. Queries verify
 that the desktop stays unchanged; they do not fabricate native CLI output.
-The limit-probe scenario prepares a parked window, as required by the engine.
-Doctor retains its illustrative terminal replay; native installation, permission
+Limit probing is an internal engine API, without a public scenario command.
+Permissions retains its illustrative terminal replay; native installation, permission
 prompts, and transport subscriptions are explicitly outside desktop simulation.

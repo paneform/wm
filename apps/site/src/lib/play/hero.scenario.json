@@ -99,7 +99,7 @@
       "expect": { "focusedWindow": "terminal" }
     },
     {
-      "command": "workspace move-window T",
+      "command": "window assign T",
       "caption": "Send the active pane to workspace T. Form, meet function.",
       "duration": 1600,
       "expect": {
@@ -124,7 +124,7 @@
       "expect": { "focusedWindow": "waitlist" }
     },
     {
-      "command": "workspace move-window W",
+      "command": "window assign W",
       "caption": "Give the waitlist a workspace of its own.",
       "duration": 1600,
       "expect": {

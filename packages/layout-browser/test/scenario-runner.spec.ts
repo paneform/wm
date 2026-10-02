@@ -30,7 +30,7 @@ describe("portable scenario runner", () => {
         { event: { kind: "focus_changed", windowId: "B" }, expect: { focusedWindow: "B" } },
         {
           playback: "start",
-          command: "window move workspace writing",
+          command: "window assign writing",
           expect: { focusedWorkspace: "writing", windows: { B: { workspace: "writing" } } },
         },
       ],
@@ -64,8 +64,8 @@ describe("portable scenario runner", () => {
     "does not execute the first step on load with marker %s",
     async (playback) => {
       const step = playback
-        ? { command: "focus-window B", playback, duration: 0 }
-        : { command: "focus-window B", duration: 0 };
+        ? { command: "window focus --window B", playback, duration: 0 }
+        : { command: "window focus --window B", duration: 0 };
       const session = await createScenarioSession({ ...base, steps: [step] });
       try {
         expect((await session.snapshot()).focusedWindow).toBe("A");
@@ -83,7 +83,7 @@ describe("portable scenario runner", () => {
       ...base,
       steps: [
         { command: "state", expect: { focusedWindow: "B" } },
-        { playback: "start", command: "focus-window B" },
+        { playback: "start", command: "window focus --window B" },
       ],
     };
     await expect(createScenarioSession(input)).rejects.toThrow("Step 1: Expected focusedWindow");
@@ -332,10 +332,10 @@ describe("portable scenario runner", () => {
     const input = {
       ...base,
       steps: [
-        { command: "retile", caption: "Take form.", duration: 60_000 },
-        { command: "wm focus-window B", expect: { focusedWindow: "B" } },
+        { command: "workspace retile", caption: "Take form.", duration: 60_000 },
+        { command: "wm window focus --window B", expect: { focusedWindow: "B" } },
         {
-          command: 'workspace move-window "quiet work"',
+          command: 'window assign "quiet work"',
           expect: {
             focusedWorkspace: "quiet work",
             windows: { B: { workspace: "quiet work" } },
@@ -359,7 +359,7 @@ describe("portable scenario runner", () => {
           event: { kind: "window_removed", windowId: "C" },
           expect: { windows: { C: { exists: false } } },
         },
-        { command: "float A" },
+        { command: "window float --window A" },
         {
           event: {
             kind: "window_changed",
@@ -423,14 +423,17 @@ describe("portable scenario runner", () => {
     }
     await runScenario({
       ...paused,
-      steps: [{ command: "move-window A 50 50", expect: { error: "paused" } }],
+      steps: [{ command: "window move position 50 50 --window A", expect: { error: "paused" } }],
     });
     await expect(
-      runScenario({ ...paused, steps: [{ command: "move-window A 50 50" }] }),
+      runScenario({ ...paused, steps: [{ command: "window move position 50 50 --window A" }] }),
     ).rejects.toThrow("Step 1: paused");
     const session = await createScenarioSession({
       ...base,
-      steps: [{ command: "state", expect: { focusedWindow: "B" } }, { command: "retile" }],
+      steps: [
+        { command: "state", expect: { focusedWindow: "B" } },
+        { command: "workspace retile" },
+      ],
     });
     try {
       await expect(session.step()).rejects.toThrow("Expected focusedWindow");
@@ -453,7 +456,7 @@ describe("portable scenario runner", () => {
             ],
           },
         },
-        { command: "workspace move-display 1 display:side" },
+        { command: "workspace move display display:side --workspace 1" },
         { event: { kind: "sleep" } },
         { event: { kind: "wake" } },
         { event: { kind: "space_changed" } },
@@ -463,7 +466,10 @@ describe("portable scenario runner", () => {
   });
 
   it("queues concurrent steps and disposes safely during execution", async () => {
-    const session = await createScenarioSession({ ...base, steps: [{ command: "retile" }] });
+    const session = await createScenarioSession({
+      ...base,
+      steps: [{ command: "workspace retile" }],
+    });
     const first = session.step();
     const second = session.step();
     await expect(first).resolves.not.toBeNull();
@@ -482,7 +488,11 @@ describe("portable scenario runner", () => {
           { id: "B", frame: { x: 500, y: 0, width: 500, height: 800 } },
         ],
       },
-      steps: [{ command: "state" }, { command: "resize-window A 700 700" }, { command: "state" }],
+      steps: [
+        { command: "state" },
+        { command: "window resize 700 700 --window A" },
+        { command: "state" },
+      ],
     } satisfies LayoutScenario;
     const sequential = await createScenarioSession(input);
     const settledFrames = [(await sequential.snapshot()).windows[0]?.frame];
@@ -550,10 +560,13 @@ describe("portable scenario runner", () => {
         event: { kind: "window_added", window: { id: "C", frame } },
         expect: { windows: { C: { workspace: "1" } } },
       });
-      await session.apply({ command: "move-window C 20 30", expect: { error: "wm_not_running" } });
-      await expect(session.apply({ command: "move-window C 20 30" })).rejects.toThrow(
-        "wm_not_running",
-      );
+      await session.apply({
+        command: "window move position 20 30 --window C",
+        expect: { error: "wm_not_running" },
+      });
+      await expect(
+        session.apply({ command: "window move position 20 30 --window C" }),
+      ).rejects.toThrow("wm_not_running");
       await session.apply({ event: { kind: "focus_changed", windowId: "C" } });
       await session.apply({ event: { kind: "window_removed", windowId: "C" } });
       expect((await session.snapshot()).windows).toEqual([]);
@@ -650,7 +663,7 @@ describe("portable scenario runner", () => {
   it("replays captured live steps to the same final state", async () => {
     const steps = [
       { event: { kind: "focus_changed" as const, windowId: "B" } },
-      { command: "float B" },
+      { command: "window float --window B" },
       { event: { kind: "window_removed" as const, windowId: "A" } },
     ];
     const live = await createScenarioSession(base);
@@ -676,7 +689,9 @@ describe("portable scenario runner", () => {
           ],
         },
       });
-      const moved = await session.apply({ command: "workspace move-display 1 display:side" });
+      const moved = await session.apply({
+        command: "workspace move display display:side --workspace 1",
+      });
       expect(moved.topology).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ id: "display:main", workspace: null }),
@@ -701,7 +716,9 @@ describe("portable scenario runner", () => {
       },
     });
     try {
-      const moved = await session.apply({ command: "workspace move-display 2 display:main" });
+      const moved = await session.apply({
+        command: "workspace move display display:main --workspace 2",
+      });
       expect(moved).toMatchObject({
         focusedWorkspace: null,
         topology: [{ id: "display:main", workspace: "2" }],

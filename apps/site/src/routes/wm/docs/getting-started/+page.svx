@@ -17,7 +17,7 @@ wm service start
 
 ### Grant permissions
 
-The window manager needs macOS Accessibility permission to control windows and Screen Recording permission to observe them. Run `wm permissions-request` to request access, then use `wm doctor` to check the result.
+The window manager needs macOS Accessibility permission to control windows and Screen Recording permission to observe them. Run `wm permissions request` to request access, then use `wm permissions` to check the result.
 
 ### Check the service
 

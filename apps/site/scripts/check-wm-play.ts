@@ -1670,8 +1670,9 @@ async function checkPlaybackStart(client: CdpClient): Promise<void> {
 
 async function checkDocsDemos(client: CdpClient): Promise<void> {
   const cases = [
-    { slug: "windows/move-directional", situations: 3, displays: 1 },
-    { slug: "windows/move-to-workspace", situations: 3, displays: 1 },
+    { slug: "windows/move-directional", situations: 4, displays: 1 },
+    { slug: "windows/focus-directional", situations: 3, displays: 1 },
+    { slug: "windows/assign", situations: 3, displays: 1 },
     { slug: "workspaces/move-to-next-display", situations: 1, displays: 2 },
     { slug: "windows/float", situations: 1, displays: 1 },
   ];
@@ -2059,22 +2060,22 @@ async function checkWorkspaceIndicators(client: CdpClient): Promise<void> {
       workspace: "1",
     },
     {
-      slug: "windows/move-to-workspace",
+      slug: "windows/assign",
       situation: "empty",
       windows: 2,
       target: "focused-window",
       from: "display:main",
       to: "display:main",
-      workspace: "writing",
+      workspace: "2",
     },
     {
-      slug: "windows/move-to-workspace",
-      situation: "example",
+      slug: "windows/assign",
+      situation: "nonfocused",
       windows: 2,
       target: "left-neighbor",
       from: "display:main",
       to: "display:main",
-      workspace: "writing",
+      workspace: "2",
     },
   ];
   for (const example of examples) {

@@ -3,7 +3,8 @@ import {
   describeCommandTokens,
   parseCommandText,
   serviceCommandPaths,
-  tokenizeCommandText,
+  isEngineCommand,
+  formatCommandParseError,
   type Command,
   type CommandPath,
 } from "@paneform/layout";
@@ -33,13 +34,14 @@ export const describeScenarioCommandTokens = (text: string) => {
 };
 
 export function parseScenarioCommand(input: string): ScenarioCommand {
-  const words = tokenizeCommandText(input);
-  if (words[0] === "wm") words.shift();
-  if (words[0] === "service" && words.length === 2) {
-    const action = words[1];
-    if (action === "start" || action === "stop" || action === "restart") {
-      return { type: "service", action };
-    }
-  }
-  return parseCommandText(input);
+  const result = parseCommandText(input);
+  if (!result.ok) throw new Error(formatCommandParseError(result.error));
+  const command = result.value;
+  if (isEngineCommand(command)) return command;
+  if (
+    command.type === "service" &&
+    (command.action === "start" || command.action === "stop" || command.action === "restart")
+  )
+    return { type: "service", action: command.action };
+  throw new Error("This host command is unavailable in scenarios");
 }

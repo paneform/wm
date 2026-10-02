@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { Effect, Stream } from "effect";
 import { CommandError, type Command, type StateSnapshot } from "@paneform/layout";
-import { decodeWireMessage } from "@paneform/layout";
+import { decodeWireMessage, decodeCommandSync } from "@paneform/layout";
 import { createFileConfigSource } from "../src/config-file.ts";
 import { attachWebSocketServer } from "../src/ws-server.ts";
 import { clockNode } from "../src/clock-node.ts";
@@ -12,6 +12,17 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 describe("daemon over the wire (node-host integration)", () => {
+  test("frame setting is accepted internally but rejected by the public wire schema", () => {
+    const command = {
+      type: "setWindowFrame",
+      windowId: "window:1",
+      frame: { x: 10, y: 20, width: 800, height: 600 },
+    };
+    expect(decodeCommandSync(command)).toEqual(command);
+    expect(() =>
+      decodeWireMessage(JSON.stringify({ v: 1, type: "request", id: "frame", command })),
+    ).toThrow();
+  });
   test("engine command result is wrapped exactly once by the wire response", async () => {
     const result = { type: "ok" as const, detail: "resumed" };
     const engine = { execute: () => Effect.succeed(result) };
@@ -38,7 +49,9 @@ describe("daemon over the wire (node-host integration)", () => {
     const reply = await new Promise<string>((resolve, reject) => {
       client.on("message", (raw) => resolve(String(raw)));
       client.on("error", reject);
-      client.send(JSON.stringify({ v: 1, type: "request", id: "fail", command: { type: "resume" } }));
+      client.send(
+        JSON.stringify({ v: 1, type: "request", id: "fail", command: { type: "resume" } }),
+      );
     });
 
     expect(JSON.parse(reply)).toMatchObject({
@@ -106,7 +119,7 @@ describe("daemon over the wire (node-host integration)", () => {
 
     const commands = [
       { type: "togglePause" },
-      { type: "moveFocusedWindowToWorkspace", workspace: "2" },
+      { type: "moveWindowToWorkspace", workspace: "2" },
       { type: "moveFocusedWorkspaceToNextDisplay" },
       { type: "focusDirection", direction: "left" },
       { type: "moveDirection", direction: "down" },
@@ -118,9 +131,7 @@ describe("daemon over the wire (node-host integration)", () => {
       const reply = await new Promise<string>((resolve, reject) => {
         client.on("message", (raw) => resolve(String(raw)));
         client.on("error", reject);
-        client.send(
-          JSON.stringify({ v: 1, type: "request", id: `hk-${index}`, command }),
-        );
+        client.send(JSON.stringify({ v: 1, type: "request", id: `hk-${index}`, command }));
       });
       client.close();
       const decoded = decodeWireMessage(reply);
@@ -150,19 +161,22 @@ describe("daemon over the wire (node-host integration)", () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
-  test("limit probe command and structured result round-trip over the wire", () => {
-    const request = decodeWireMessage(JSON.stringify({
-      v: 1,
-      type: "request",
-      id: "probe-1",
-      command: { type: "probeWindowLimits", windowId: "window:1" },
-    }));
-    expect(request).toMatchObject({ command: { type: "probeWindowLimits", windowId: "window:1" } });
+  test("internal limit probes are rejected as public requests", () => {
+    expect(() =>
+      decodeWireMessage(
+        JSON.stringify({
+          v: 1,
+          type: "request",
+          id: "probe-1",
+          command: { type: "probeWindowLimits", windowId: "window:1" },
+        }),
+      ),
+    ).toThrow();
 
     const result = {
       type: "windowLimitsProbe",
       windowId: "window:1",
-      identity: "[1,\"AXWindow\",null]",
+      identity: '[1,"AXWindow",null]',
       originalFrame: { x: 10, y: 20, width: 800, height: 600 },
       restoredFrame: { x: 10, y: 20, width: 800, height: 600 },
       testedRanges: { width: { min: 1, max: 1512 }, height: { min: 1, max: 944 } },
@@ -174,13 +188,15 @@ describe("daemon over the wire (node-host integration)", () => {
       },
       profileUpdated: true,
     };
-    const response = decodeWireMessage(JSON.stringify({
-      v: 1,
-      type: "response",
-      id: "probe-1",
-      ok: true,
-      data: result,
-    }));
+    const response = decodeWireMessage(
+      JSON.stringify({
+        v: 1,
+        type: "response",
+        id: "probe-1",
+        ok: true,
+        data: result,
+      }),
+    );
     expect(response).toMatchObject({ ok: true, data: result });
   });
 

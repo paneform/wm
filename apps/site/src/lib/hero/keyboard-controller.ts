@@ -14,10 +14,10 @@ export function keyboardCommand(command: HeroCommand): string {
       return `window move ${command.direction}`;
     case "focusDirection":
       return `window focus ${command.direction}`;
-    case "moveFocusedWindowToWorkspace":
-      return `workspace move-window ${quoteCommandToken(command.workspace)}`;
+    case "moveWindowToWorkspace":
+      return `window assign ${quoteCommandToken(command.workspace)}`;
     case "moveFocusedWorkspaceToNextDisplay":
-      return "workspace move next";
+      return "workspace move display next";
     case "focusWorkspace":
       return `workspace focus ${quoteCommandToken(command.workspace)}`;
   }

@@ -4,13 +4,18 @@ import {
   commandPaths,
   formatCommandHelp,
   serviceCommandPaths,
+  parseCommandInvocation,
+  commandHelpPaths,
+  isEngineCommand,
+  type CommandParseError,
+  type ServiceAction,
   type Command,
 } from "@paneform/layout";
 
 export { buildCommand, buildKeybindCommand };
 
 /** Commands executed locally (sidecar spawn) instead of over the daemon WebSocket. */
-export type LocalCommand = "doctor" | "permissions-request";
+export type LocalCommand = "permissions" | "permissions-request";
 
 export interface ParsedArgs {
   command: Command | null;
@@ -19,53 +24,36 @@ export interface ParsedArgs {
   flags: Record<string, string | boolean>;
   help: boolean;
   serve: boolean;
+  service: ServiceAction | null;
+  error: CommandParseError | null;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
-  const flags: Record<string, string | boolean> = Object.create(null);
-  const positional: string[] = [];
-  let serve = false;
-  let help = false;
-  let localCommand: LocalCommand | null = null;
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i]!;
-    if (arg === "--help" || arg === "-h") help = true;
-    else if (arg === "--port") flags["port"] = argv[++i] ?? "";
-    else if (arg === "--url") flags["url"] = argv[++i] ?? "";
-    else if (arg === "--sidecar") flags["sidecar"] = argv[++i] ?? "";
-    else if (arg.startsWith("--")) flags[arg.slice(2)] = true;
-    else positional.push(arg);
-  }
-  const verb = positional[0];
-  if (verb === "serve") {
-    serve = true;
-    positional.shift();
-  } else if (verb === "doctor") {
-    localCommand = "doctor";
-  } else if (verb === "permissions" && positional[1] === "request") {
-    localCommand = "permissions-request";
-  }
-  const commandFlags = { ...flags };
-  for (const flag of ["port", "url", "sidecar", "observe-only", "open-settings"])
-    delete commandFlags[flag];
-  const command =
-    verb === undefined || help || serve || localCommand !== null
-      ? null
-      : buildCommand(verb, positional.slice(1), commandFlags);
-  return { command, localCommand, positional, flags, help, serve };
+  const help = argv.includes("--help") || argv.includes("-h");
+  const positional = argv.filter((token) => token !== "--help" && token !== "-h");
+  const result = help ? null : parseCommandInvocation(argv);
+  const parsed = result?.ok ? result.value.command : null;
+  return {
+    command: parsed && isEngineCommand(parsed) ? parsed : null,
+    localCommand:
+      parsed?.type === "permissions"
+        ? parsed.action === "request"
+          ? "permissions-request"
+          : "permissions"
+        : null,
+    positional,
+    flags: result?.ok ? { ...result.value.options } : {},
+    help,
+    serve: parsed?.type === "serve",
+    service: parsed?.type === "service" ? parsed.action : null,
+    error: result && !result.ok ? result.error : null,
+  };
 }
 
 /** Contextual help uses the same descriptions as guided command clients. */
 export function helpFor(words: readonly string[]): string {
   if (words.length === 0) return USAGE;
-  const paths = [...commandPaths, ...serviceCommandPaths].filter(
-    (path) =>
-      words.length <= path.tokens.length &&
-      words.every((word, index) => {
-        const token = path.tokens[index]!;
-        return token.kind === "slot" || token.value === word;
-      }),
-  );
+  const paths = commandHelpPaths(words);
   if (paths.length === 0) return USAGE;
   const argumentsHelp = new Map<string, string>();
   for (const path of paths)
@@ -83,7 +71,7 @@ Client:
 Commands:
 ${formatCommandHelp(commandPaths)}
 Local (no daemon required):
-  wm doctor                  Report macOS permissions as JSON; read-only
+  wm permissions             Report macOS permissions as JSON; read-only
   wm permissions request     Trigger TCC prompts via the sidecar, then report status
                              (--open-settings deep links System Settings panes)
 Service:

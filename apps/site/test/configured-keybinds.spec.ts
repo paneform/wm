@@ -98,14 +98,14 @@ describe("configured keybinds", () => {
     const tracker = createModifierTracker();
     tracker.keydown(event("ShiftRight", { shiftKey: true }));
     tracker.keydown(event("AltLeft", { shiftKey: true, altKey: true }));
-    const bindings = { "rshift alt 1": "workspace move-window 1" };
+    const bindings = { "rshift alt 1": "window assign 1" };
     expect(
       eventToConfiguredCommand(
         event("Digit1", { shiftKey: true, altKey: true }),
         bindings,
         tracker.pressed,
       ),
-    ).toBe("workspace move-window 1");
+    ).toBe("window assign 1");
     expect(
       eventToConfiguredCommand(
         event("Digit1", { shiftKey: true, altKey: true, ctrlKey: true }),

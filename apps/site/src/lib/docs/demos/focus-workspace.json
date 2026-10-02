@@ -24,7 +24,7 @@
       {
         "id": "destination-window",
         "title": "Destination window",
-        "workspace": "writing",
+        "workspace": "2",
         "frame": { "x": 0, "y": 28, "width": 1440, "height": 872 }
       }
     ],
@@ -35,10 +35,10 @@
     { "command": "reconcile", "expect": { "focusedWorkspace": "1" } },
     {
       "playback": "start",
-      "command": "workspace focus writing",
+      "command": "workspace focus 2",
       "caption": "The destination workspace opens; its window takes focus.",
       "expect": {
-        "focusedWorkspace": "writing",
+        "focusedWorkspace": "2",
         "focusedWindow": "destination-window",
         "windows": {
           "destination-window": { "frame": { "x": 0, "y": 28, "width": 1440, "height": 872 } }

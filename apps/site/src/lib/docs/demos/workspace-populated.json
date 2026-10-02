@@ -26,7 +26,7 @@
       {
         "id": "destination-window",
         "title": "Destination window",
-        "workspace": "writing",
+        "workspace": "2",
         "frame": { "x": 0, "y": 28, "width": 1440, "height": 872 }
       }
     ],
@@ -45,24 +45,24 @@
             "workspace": "1",
             "frame": { "x": 0, "y": 28, "width": 1440, "height": 872 }
           },
-          "destination-window": { "workspace": "writing" }
+          "destination-window": { "workspace": "2" }
         }
       }
     },
     {
       "playback": "start",
-      "command": "window move workspace writing",
+      "command": "window assign 2",
       "caption": "The destination window makes room for the focused window.",
       "expect": {
-        "focusedWorkspace": "writing",
+        "focusedWorkspace": "2",
         "focusedWindow": "focused-window",
         "windows": {
           "focused-window": {
-            "workspace": "writing",
+            "workspace": "2",
             "frame": { "x": 724, "y": 28, "width": 716, "height": 872 }
           },
           "destination-window": {
-            "workspace": "writing",
+            "workspace": "2",
             "frame": { "x": 0, "y": 28, "width": 716, "height": 872 }
           }
         }

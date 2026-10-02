@@ -1,5 +1,12 @@
 {
-  "config": { "defaults": { "gap": 8, "margins": { "top": 28 } } },
+  "config": {
+    "defaults": {
+      "gap": 8,
+      "margins": {
+        "top": 28
+      }
+    }
+  },
   "presentation": {
     "device": "display",
     "showDock": false,
@@ -10,38 +17,86 @@
     "topology": [
       {
         "id": "display:main",
-        "frame": { "x": 0, "y": 0, "width": 1440, "height": 900 },
+        "frame": {
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900
+        },
+        "primary": true,
         "workspace": "1"
       }
     ],
     "windows": [
       {
-        "id": "focused-window",
+        "id": "left-window",
         "title": "Initially focused window",
         "workspace": "1",
-        "frame": { "x": 0, "y": 28, "width": 720, "height": 872 }
+        "frame": {
+          "x": 0,
+          "y": 28,
+          "width": 480,
+          "height": 872
+        }
       },
       {
-        "id": "right-neighbor",
-        "title": "Right neighbor",
+        "id": "middle-window",
+        "title": "Middle window",
         "workspace": "1",
-        "frame": { "x": 720, "y": 28, "width": 720, "height": 872 }
+        "frame": {
+          "x": 480,
+          "y": 28,
+          "width": 480,
+          "height": 872
+        }
+      },
+      {
+        "id": "right-window",
+        "title": "Right window",
+        "workspace": "1",
+        "frame": {
+          "x": 960,
+          "y": 28,
+          "width": 480,
+          "height": 872
+        }
       }
     ],
-    "focusedWindow": "focused-window",
+    "focusedWindow": "left-window",
     "focusedWorkspace": "1"
   },
   "steps": [
-    { "command": "reconcile", "expect": { "focusedWindow": "focused-window" } },
+    {
+      "command": "reconcile",
+      "expect": {
+        "focusedWindow": "left-window"
+      }
+    },
     {
       "playback": "start",
-      "command": "focus-window right-neighbor",
-      "caption": "The right neighbor takes focus; neither window moves.",
+      "command": "window focus --window right-window",
+      "caption": "Focus jumps by ID, skipping the middle window.",
       "expect": {
-        "focusedWindow": "right-neighbor",
+        "focusedWindow": "right-window",
         "windows": {
-          "focused-window": { "frame": { "x": 0, "width": 716 } },
-          "right-neighbor": { "frame": { "x": 724, "width": 716 } }
+          "left-window": {
+            "frame": {
+              "x": 0,
+              "width": 476
+            }
+          },
+          "middle-window": {
+            "frame": {
+              "x": 484,
+              "width": 472
+            }
+          },
+          "right-window": {
+            "frame": {
+              "x": 964,
+              "width": 476
+            }
+          }
         }
       }
     }

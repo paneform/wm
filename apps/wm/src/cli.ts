@@ -1,17 +1,21 @@
 #!/usr/bin/env node
 import { Effect, Stream } from "effect";
-import { ConfigInvalidError, createEngine, type Command } from "@paneform/layout";
+import {
+  ConfigInvalidError,
+  createEngine,
+  formatCommandParseError,
+  parseCommandText,
+  isEngineCommand,
+  type Command,
+} from "@paneform/layout";
 import type { MacOsSidecarAdapter } from "@paneform/wm-macos";
 import { attachWebSocketServer } from "./ws-server.ts";
 import { clockNode } from "./clock-node.ts";
 import { executeEngineCommand } from "./command-handler.ts";
 import { createFileConfigSource, resolveConfigPath } from "./config-file.ts";
-import {
-  createFileObservationStore,
-  resolveObservationPath,
-} from "./observation-file.ts";
+import { createFileObservationStore, resolveObservationPath } from "./observation-file.ts";
 import { createDiagnosticsLog, resolveDiagnosticsPath } from "./diagnostics-log.ts";
-import { buildKeybindCommand, helpFor, parseArgs, USAGE } from "./cli-args.ts";
+import { helpFor, parseArgs, USAGE } from "./cli-args.ts";
 import {
   errorReport,
   exitCodeFor,
@@ -37,16 +41,18 @@ const printReport = (report: unknown): void => {
   console.log(JSON.stringify(report, null, 2));
 };
 
-/** `wm doctor` / `wm permissions request`: spawn the sidecar directly — the
+/** `wm permissions` / `wm permissions request`: spawn the sidecar directly — the
  * daemon WebSocket is never contacted and the engine is never started. */
 async function runPermissionsCommand(
   command: PermissionCommand,
   flags: Record<string, string | boolean>,
 ): Promise<number> {
-    const { createMacOsSidecarAdapter } = await import("@paneform/wm-macos");
+  const { createMacOsSidecarAdapter } = await import("@paneform/wm-macos");
   const requestedPath = flags["sidecar"];
   const sidecarOptions =
-    typeof requestedPath === "string" && requestedPath.length > 0 ? { sidecarPath: requestedPath } : {};
+    typeof requestedPath === "string" && requestedPath.length > 0
+      ? { sidecarPath: requestedPath }
+      : {};
   try {
     const adapter = await Effect.runPromise(createMacOsSidecarAdapter(sidecarOptions));
     const report = await runPermissionFlow(command, adapterToPermissionClient(adapter), {
@@ -66,30 +72,57 @@ async function gateDaemonPermissions(adapter: MacOsSidecarAdapter): Promise<numb
   const ready = await adapter.whenReady;
   if (!ready.accessibility) {
     adapter.stop();
-    console.error(JSON.stringify({
-      ready: false,
-      error: {
-        code: "permission",
-        message: "Accessibility is not granted to wm-sidecar; the daemon cannot observe or manage windows.",
-        remediation: 'Run "wm permissions request" and approve the prompt, then restart "wm serve".',
-      },
-    }));
+    console.error(
+      JSON.stringify({
+        ready: false,
+        error: {
+          code: "permission",
+          message:
+            "Accessibility is not granted to wm-sidecar; the daemon cannot observe or manage windows.",
+          remediation:
+            'Run "wm permissions request" and approve the prompt, then restart "wm serve".',
+        },
+      }),
+    );
     return 1;
   }
   if (!ready.screenRecording) {
-    console.error(JSON.stringify({
-      warning: {
-        code: "permission_degraded",
-        message: "Screen Recording is not granted; window titles and off-process app names degrade.",
-        remediation: 'Optional: run "wm permissions request" or open System Settings > Privacy & Security > Screen Recording.',
-      },
-    }));
+    console.error(
+      JSON.stringify({
+        warning: {
+          code: "permission_degraded",
+          message:
+            "Screen Recording is not granted; window titles and off-process app names degrade.",
+          remediation:
+            'Optional: run "wm permissions request" or open System Settings > Privacy & Security > Screen Recording.',
+        },
+      }),
+    );
   }
   return 0;
 }
 
 async function main(): Promise<number> {
   const parsed = parseArgs(process.argv.slice(2));
+  if (parsed.error) {
+    console.error(formatCommandParseError(parsed.error));
+    return 1;
+  }
+  if (parsed.service !== null) {
+    const { spawn } = await import("node:child_process");
+    const { fileURLToPath } = await import("node:url");
+    const script =
+      process.env["WM_SERVICE_SCRIPT"] ??
+      fileURLToPath(new URL("../../../scripts/wm-service.sh", import.meta.url));
+    return new Promise<number>((resolve, reject) => {
+      const child = spawn("/bin/bash", [script, parsed.service!], {
+        stdio: "inherit",
+        env: { ...process.env, PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+      });
+      child.once("error", reject);
+      child.once("exit", (code) => resolve(code ?? 1));
+    });
+  }
   if (parsed.help || (parsed.command === null && !parsed.serve && parsed.localCommand === null)) {
     console.log(parsed.help ? helpFor(parsed.positional) : USAGE);
     return parsed.help ? 0 : parsed.command === null && !parsed.serve ? 1 : 0;
@@ -112,7 +145,12 @@ async function main(): Promise<number> {
       }, 5_000);
       socket.on("open", () => {
         socket.send(
-          JSON.stringify({ v: 1, type: "request", id: crypto.randomUUID(), command: parsed.command }),
+          JSON.stringify({
+            v: 1,
+            type: "request",
+            id: crypto.randomUUID(),
+            command: parsed.command,
+          }),
         );
       });
       socket.on("message", (raw) => {
@@ -154,8 +192,8 @@ async function main(): Promise<number> {
       nativeStdio
         ? { sidecarPath: "native-host", spawn: platform.inheritedStdioSpawn() }
         : typeof requestedSidecar === "string" && requestedSidecar.length > 0
-        ? { sidecarPath: requestedSidecar }
-        : {},
+          ? { sidecarPath: requestedSidecar }
+          : {},
     ),
   );
   if ((await gateDaemonPermissions(adapter)) !== 0) {
@@ -168,11 +206,16 @@ async function main(): Promise<number> {
     const keybinds = config.keybinds ?? {};
     return Effect.gen(function* () {
       const commands = yield* Effect.try({
-        try: () => new Map(Object.values(keybinds).map((action) => {
-          const command = buildKeybindCommand(action);
-          if (command === null) throw new Error(`invalid keybind action: ${action}`);
-          return [action, command] as const;
-        })),
+        try: () =>
+          new Map(
+            Object.values(keybinds).map((action) => {
+              const parsed = parseCommandText(action);
+              if (!parsed.ok) throw new Error(formatCommandParseError(parsed.error));
+              if (!isEngineCommand(parsed.value))
+                throw new Error(`Keybindings cannot execute host command: ${action}`);
+              return [action, parsed.value] as const;
+            }),
+          ),
         catch: (error) => new ConfigInvalidError([String(error)]),
       });
       const alwaysSwallow = Object.entries(keybinds)
@@ -181,20 +224,22 @@ async function main(): Promise<number> {
           return command?.type === "togglePause" || command?.type === "resume";
         })
         .map(([chord]) => chord);
-      yield* adapter.configureKeybinds(keybinds, alwaysSwallow).pipe(
-        Effect.mapError((error) => new ConfigInvalidError([String(error)])),
-      );
+      yield* adapter
+        .configureKeybinds(keybinds, alwaysSwallow)
+        .pipe(Effect.mapError((error) => new ConfigInvalidError([String(error)])));
       keybindCommands = commands;
       nativeConfigReady = true;
     });
   });
-  const engine = await Effect.runPromise(createEngine({
-    adapter,
-    configSource,
-    observationStore: createFileObservationStore(resolveObservationPath()),
-    clock: clockNode,
-    initiallyPaused: parsed.flags["observe-only"] === true,
-  }));
+  const engine = await Effect.runPromise(
+    createEngine({
+      adapter,
+      configSource,
+      observationStore: createFileObservationStore(resolveObservationPath()),
+      clock: clockNode,
+      initiallyPaused: parsed.flags["observe-only"] === true,
+    }),
+  );
   await Effect.runPromise(engine.start());
   // Durable identification trail for rare failure signals (AX stalls,
   // unresponsive writes): diagnostic-topic events land in a bounded JSONL
@@ -210,7 +255,8 @@ async function main(): Promise<number> {
             payload: event.payload,
           });
         }
-      })),
+      }),
+    ),
   );
   if (!nativeConfigReady) {
     await Effect.runPromise(engine.stop());
@@ -229,7 +275,8 @@ async function main(): Promise<number> {
         catch: (error) => error,
       }).pipe(
         Effect.catchAll((error) =>
-          Effect.sync(() => console.error(`[keybind] command failed: ${String(error)}`))),
+          Effect.sync(() => console.error(`[keybind] command failed: ${String(error)}`)),
+        ),
         Effect.asVoid,
       );
     }),
@@ -255,13 +302,12 @@ async function main(): Promise<number> {
       const shutdown = Effect.runPromise(engine.stop()).then((report) => {
         console.error(`[wm] shutdown restored=${report.restored} failed=${report.failed}`);
       });
-      void Promise.race([
-        shutdown,
-        new Promise<void>((done) => setTimeout(done, 60_000)),
-      ]).finally(() => {
+      void Promise.race([shutdown, new Promise<void>((done) => setTimeout(done, 60_000))]).finally(
+        () => {
           if (stopAdapter) adapter.stop();
           resolve(exitCode);
-      });
+        },
+      );
     };
     process.on("SIGINT", () => {
       console.error("[wm] received SIGINT");

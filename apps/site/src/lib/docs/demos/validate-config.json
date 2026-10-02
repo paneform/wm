@@ -29,7 +29,7 @@
     { "command": "state", "expect": { "focusedWorkspace": "1" } },
     {
       "playback": "start",
-      "command": "validate-config",
+      "command": "config validate",
       "caption": "The scenario config is valid; the desktop is unchanged.",
       "expect": {
         "windows": {

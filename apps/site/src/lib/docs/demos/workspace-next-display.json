@@ -38,7 +38,7 @@
     },
     {
       "playback": "start",
-      "command": "workspace move next",
+      "command": "workspace move display next",
       "caption": "The focused workspace and its window move to the next display.",
       "expect": {
         "focusedWorkspace": "1",

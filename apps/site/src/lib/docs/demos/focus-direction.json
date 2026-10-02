@@ -32,16 +32,27 @@
     "focusedWorkspace": "1"
   },
   "steps": [
-    { "command": "reconcile", "expect": { "focusedWindow": "focused-window" } },
+    {
+      "command": "reconcile",
+      "expect": {
+        "focusedWindow": "focused-window",
+        "focusedWorkspace": "1",
+        "windows": {
+          "left-neighbor": { "frame": { "x": 0, "y": 28, "width": 716, "height": 872 } },
+          "focused-window": { "frame": { "x": 724, "y": 28, "width": 716, "height": 872 } }
+        }
+      }
+    },
     {
       "playback": "start",
       "command": "window focus left",
       "caption": "The left neighbor takes focus; neither window moves.",
       "expect": {
         "focusedWindow": "left-neighbor",
+        "focusedWorkspace": "1",
         "windows": {
-          "left-neighbor": { "frame": { "x": 0, "width": 716 } },
-          "focused-window": { "frame": { "x": 724, "width": 716 } }
+          "left-neighbor": { "frame": { "x": 0, "y": 28, "width": 716, "height": 872 } },
+          "focused-window": { "frame": { "x": 724, "y": 28, "width": 716, "height": 872 } }
         }
       }
     }

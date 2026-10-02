@@ -283,27 +283,31 @@ describe("file observation store", () => {
 
 describe("parseArgs / buildCommand", () => {
   test("contextual help shares command and argument descriptions", () => {
-    expect(helpFor(["workspace", "move-window"])).toContain("The name of a workspace.");
-    expect(helpFor(["workspace", "move-window"])).toContain("window ID");
+    expect(helpFor(["window", "assign"])).toContain("The name of a workspace.");
+    expect(helpFor(["window", "assign"])).toContain("window ID");
     expect(helpFor(["service", "start"])).toContain(
       "Start the window manager and manage the current desktop.",
     );
     expect(helpFor([])).toBe(USAGE);
+    const nativeHelp = helpFor(["window", "assign", "--sidecar", "/tmp/wm"]);
+    expect(nativeHelp).toContain("window assign");
+    expect(nativeHelp).not.toContain("service start");
   });
   test("does not silently discard reserved-property flags", () => {
     expect(parseArgs(["retile", "--__proto__"]).command).toBeNull();
     expect(parseArgs(["workspace", "move-window", "A", "--__proto__"]).command).toBeNull();
   });
   test("human-friendly keybind actions map directly to engine commands", () => {
-    expect(buildKeybindCommand("window move workspace S")).toEqual({
-      type: "moveFocusedWindowToWorkspace",
+    expect(buildKeybindCommand("window assign S")).toEqual({
+      type: "moveWindowToWorkspace",
       workspace: "S",
+      follow: true,
     });
     expect(buildKeybindCommand("workspace focus S")).toEqual({
       type: "focusWorkspace",
       name: "S",
     });
-    expect(buildKeybindCommand("workspace pause --toggle")).toEqual({ type: "togglePause" });
+    expect(buildKeybindCommand("pause --toggle")).toEqual({ type: "togglePause" });
     expect(buildKeybindCommand("not a command")).toBeNull();
   });
   test("--help short-circuits to usage", () => {
@@ -315,35 +319,30 @@ describe("parseArgs / buildCommand", () => {
 
   test("verbs map onto engine commands", () => {
     expect(buildCommand("state", [])).toEqual({ type: "getState" });
-    expect(buildCommand("focus-window", ["window:cg:1"])).toEqual({
+    expect(buildCommand("window", ["focus", "--window", "window:cg:1"])).toEqual({
       type: "focusWindow",
       windowId: "window:cg:1",
     });
-    expect(buildCommand("move-window", ["w1", "10", "20"])).toEqual({
+    expect(buildCommand("window", ["move", "position", "10", "20", "--window", "w1"])).toEqual({
       type: "moveWindow",
       windowId: "w1",
       point: { x: 10, y: 20 },
     });
-    expect(buildCommand("observe-window", ["window:cg:1"])).toEqual({
+    expect(buildCommand("window", ["observe", "--window", "window:cg:1"])).toEqual({
       type: "getWindow",
       windowId: "window:cg:1",
     });
-    expect(buildCommand("window", ["probe-limits", "window:cg:1"])).toEqual({
-      type: "probeWindowLimits",
-      windowId: "window:cg:1",
-    });
-    expect(buildCommand("debug-frame", ["set", "w1", "10", "20", "800", "600"])).toEqual({
-      type: "setWindowFrame",
-      windowId: "w1",
-      frame: { x: 10, y: 20, width: 800, height: 600 },
-    });
+    expect(buildCommand("window", ["probe-limits", "window:cg:1"])).toBeNull();
+    expect(
+      buildCommand("window", ["frame", "set", "10", "20", "800", "600", "--window", "w1"]),
+    ).toBeNull();
     expect(buildCommand("debug-frame", ["set", "w1", "10", "20", "0", "600"])).toBeNull();
     expect(buildCommand("debug-frame", ["set", "w1", "x", "20", "800", "600"])).toBeNull();
     expect(buildCommand("workspace", ["focus", "dev"])).toEqual({
       type: "focusWorkspace",
       name: "dev",
     });
-    expect(buildCommand("reload-config", ["full"])).toEqual({
+    expect(buildCommand("config", ["reload", "full"])).toEqual({
       type: "reloadConfig",
       mode: "full",
     });
@@ -367,38 +366,43 @@ describe("parseArgs / buildCommand", () => {
 });
 
 describe("skhd hotkey syntax parity (bean wm-pmys)", () => {
-  test("`wm workspace pause --toggle` maps to togglePause", () => {
-    // Exact skhdrc line: `wm workspace pause --toggle`
-    const parsed = parseArgs(["workspace", "pause", "--toggle"]);
+  test("`wm pause --toggle` maps to togglePause", () => {
+    const parsed = parseArgs(["pause", "--toggle"]);
     expect(parsed.command).toEqual({ type: "togglePause" });
     expect(buildCommand("workspace", ["pause"], {})).toBeNull(); // requires --toggle
   });
 
-  test("`wm workspace move-window NAME` moves the FOCUSED window", () => {
+  test("`wm window assign NAME` assigns the FOCUSED window", () => {
     for (const name of ["1", "9", "A", "W"]) {
-      expect(parseArgs(["workspace", "move-window", name]).command).toEqual({
-        type: "moveFocusedWindowToWorkspace",
+      expect(parseArgs(["window", "assign", name]).command).toEqual({
+        type: "moveWindowToWorkspace",
         workspace: name,
+        follow: true,
       });
     }
   });
 
-  test("`wm workspace move-window ID NAME` keeps the explicit-ID form", () => {
-    expect(parseArgs(["workspace", "move-window", "win:7", "dev"]).command).toEqual({
+  test("explicit target and no-follow are independent", () => {
+    expect(
+      parseArgs(["window", "assign", "dev", "--window", "win:7", "--no-follow"]).command,
+    ).toEqual({
       type: "moveWindowToWorkspace",
       windowId: "win:7",
       workspace: "dev",
+      follow: false,
     });
     expect(buildCommand("workspace", ["move-window"], {})).toBeNull();
   });
 
-  test("`wm workspace move next` maps to moveFocusedWorkspaceToNextDisplay", () => {
-    expect(parseArgs(["workspace", "move", "next"]).command).toEqual({
+  test("`wm workspace move display next` maps to moveFocusedWorkspaceToNextDisplay", () => {
+    expect(parseArgs(["workspace", "move", "display", "next"]).command).toEqual({
       type: "moveFocusedWorkspaceToNextDisplay",
     });
     expect(buildCommand("workspace", ["move", "prev"], {})).toBeNull();
     // The explicit display form is unaffected.
-    expect(parseArgs(["workspace", "move-display", "dev", "display:x"]).command).toEqual({
+    expect(
+      parseArgs(["workspace", "move", "display", "display:x", "--workspace", "dev"]).command,
+    ).toEqual({
       type: "moveWorkspaceToDisplay",
       workspace: "dev",
       displayId: "display:x",
@@ -463,10 +467,11 @@ describe("skhd hotkey syntax parity (bean wm-pmys)", () => {
       type: "focusDirection",
       direction: "left",
     });
-    expect(parseArgs(["workspace", "move-window", "win:1", "dev"]).command).toEqual({
+    expect(parseArgs(["window", "assign", "dev", "--window", "win:1"]).command).toEqual({
       type: "moveWindowToWorkspace",
       windowId: "win:1",
       workspace: "dev",
+      follow: true,
     });
   });
 });

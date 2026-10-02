@@ -1,6 +1,6 @@
 <script lang="ts">
   const lines = [
-    "$ wm doctor",
+    "$ wm permissions",
     "{",
     '  "accessibility": "granted",',
     '  "screenRecording": "granted"',

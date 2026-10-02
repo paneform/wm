@@ -6,7 +6,7 @@ export interface InvocationRow {
   note?: string;
 }
 
-const examples = { w1: "<window>", writing: "<workspace>", "display:main": "<display>" } as const;
+const examples = { w1: "<window>", '"2"': '"<workspace>"', "display:main": "<display>" } as const;
 function placeholders(value: string): string {
   return Object.entries(examples)
     .reduce((text, [example, name]) => text.replaceAll(example, name), value)
@@ -28,7 +28,9 @@ export function invocationRows(doc: DocumentedCommand): InvocationRow[] {
     syntax: `"<chord>": "${action}"`,
     note: "Assign a shortcut to a concrete command in your config.",
   });
-  const command = parseCommandText(first.example);
+  const result = parseCommandText(first.example);
+  if (!result.ok) return rows;
+  const command = result.value;
   rows.push({
     method: "WebSocket",
     syntax: placeholders(JSON.stringify(command, null, 2)),

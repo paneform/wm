@@ -36,7 +36,7 @@
     },
     {
       "playback": "start",
-      "command": "resize-window focused-window 900 600",
+      "command": "window resize 900 600 --window focused-window",
       "caption": "The focused window grows to the requested size without moving.",
       "expect": {
         "windows": {

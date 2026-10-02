@@ -148,22 +148,11 @@ func runNativeHost(
 func runCLI(_ arguments: [String], runtime: BundledRuntime) throws -> Int32 {
   let child = Process()
   child.executableURL = runtime.node
-  child.arguments = [runtime.entry.path] + arguments + ["--sidecar", runtime.nativeExecutable.path]
-  child.environment = childEnvironment()
-  child.standardInput = FileHandle.standardInput
-  child.standardOutput = FileHandle.standardOutput
-  child.standardError = FileHandle.standardError
-  try child.run()
-  child.waitUntilExit()
-  return child.terminationStatus
-}
-
-func runService(_ arguments: [String], runtime: BundledRuntime) throws -> Int32 {
-  let child = Process()
-  child.executableURL = URL(fileURLWithPath: "/bin/bash")
-  child.arguments = [runtime.serviceScript.path] + arguments
+  let hasSidecarOption = arguments.contains { $0 == "--sidecar" || $0.hasPrefix("--sidecar=") }
+  child.arguments = [runtime.entry.path] + arguments
+    + (hasSidecarOption ? [] : ["--sidecar", runtime.nativeExecutable.path])
   child.environment = childEnvironment([
-    "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+    "WM_SERVICE_SCRIPT": runtime.serviceScript.path,
     "WM_NATIVE_HOST": runtime.nativeExecutable.path,
   ])
   child.standardInput = FileHandle.standardInput

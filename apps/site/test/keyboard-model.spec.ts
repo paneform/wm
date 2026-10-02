@@ -163,7 +163,7 @@ describe("canonical keyboard model", () => {
           expect.objectContaining({
             id: `move-window-${key}`,
             keys: ["lshift", "rshift", key],
-            command: { type: "moveFocusedWindowToWorkspace", workspace },
+            command: { type: "moveWindowToWorkspace", workspace },
           }),
           expect.objectContaining({
             id: `focus-workspace-${key}`,

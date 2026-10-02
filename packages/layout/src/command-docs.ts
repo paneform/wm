@@ -1,5 +1,6 @@
 import {
-  buildCommand,
+  parseCommandTokens,
+  isEngineCommand,
   commandPaths,
   serviceCommandPaths,
   type CommandPath,
@@ -40,8 +41,21 @@ const pages: Partial<Record<Command["type"], { slug: string; title: string; summ
     title: "Focus a neighboring window",
     summary: "Focus a neighboring window in a direction.",
   },
-  moveFocusedWindowToWorkspace: { slug: "windows/move-to-workspace", title: "Move to workspace" },
-  moveWindowToWorkspace: { slug: "windows/move-to-workspace", title: "Move to workspace" },
+  moveWindowToWorkspace: { slug: "windows/assign", title: "Assign window to workspace" },
+  getWindow: { slug: "windows/observe", title: "Observe window" },
+  getWindows: { slug: "windows/list", title: "List windows" },
+  getWorkspaces: { slug: "workspaces/list", title: "List workspaces" },
+  getDisplays: { slug: "displays/list", title: "List displays" },
+  focusWindow: { slug: "windows/focus", title: "Focus window" },
+  moveWindow: { slug: "windows/move-position", title: "Move window to position" },
+  resizeWindow: { slug: "windows/resize", title: "Resize window" },
+  floatWindow: { slug: "windows/float", title: "Float window" },
+  tileWindow: { slug: "windows/tile", title: "Tile window" },
+  manageWindow: { slug: "windows/manage", title: "Manage window" },
+  unmanageWindow: { slug: "windows/unmanage", title: "Unmanage window" },
+  reloadConfig: { slug: "config/reload", title: "Reload configuration" },
+  validateConfig: { slug: "config/validate", title: "Validate configuration" },
+  togglePause: { slug: "system/pause", title: "Pause" },
   focusWorkspace: { slug: "workspaces/focus", title: "Focus workspace" },
   moveWorkspaceToDisplay: {
     slug: "workspaces/move-to-display",
@@ -59,21 +73,18 @@ const errorsByType: Partial<Record<Command["type"], DocumentedError[]>> = {
   moveDirection: [
     { code: "paused", meaning: "The manager is paused.", action: "Run wm resume, then retry." },
   ],
-  moveFocusedWindowToWorkspace: [
-    { code: "paused", meaning: "The manager is paused.", action: "Run wm resume, then retry." },
-  ],
   moveWindowToWorkspace: [
     {
       code: "window_not_found",
       meaning: "The specified window ID is not live.",
-      action: "Find a current ID with wm windows and retry.",
+      action: "Find a current ID with wm window list and retry.",
     },
   ],
 };
 
 const samples = {
   window: "w1",
-  workspace: "writing",
+  workspace: "2",
   display: "display:main",
   coordinate: "100",
   dimension: "600",
@@ -83,11 +94,8 @@ function describePath(path: CommandPath) {
   const words = path.tokens.map((token) =>
     token.kind === "literal" ? token.value : samples[token.slot],
   );
-  const flags = Object.fromEntries(
-    words.filter((word) => word.startsWith("--")).map((word) => [word.slice(2), true]),
-  );
-  const args = words.slice(1).filter((word) => !word.startsWith("--"));
-  const command = buildCommand(words[0]!, args, flags);
+  const result = parseCommandTokens(words);
+  const command = result.ok && isEngineCommand(result.value) ? result.value : null;
   const required = path.minimumTokens ?? words.length;
   const syntax = path.tokens
     .map((token, index) => {

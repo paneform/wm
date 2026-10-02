@@ -38,7 +38,7 @@
     },
     {
       "playback": "start",
-      "command": "retile 1",
+      "command": "workspace retile --workspace 1",
       "caption": "The windows are refitted into full-height tiles.",
       "expect": {
         "windows": {

@@ -27,12 +27,12 @@
   },
   "steps": [
     {
-      "command": "unmanage focused-window",
+      "command": "window unmanage --window focused-window",
       "expect": { "windows": { "focused-window": { "workspace": null } } }
     },
     {
       "playback": "start",
-      "command": "manage focused-window",
+      "command": "window manage --window focused-window",
       "caption": "The focused window joins the workspace and is tiled.",
       "expect": {
         "windows": {

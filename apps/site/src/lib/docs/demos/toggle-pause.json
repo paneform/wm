@@ -28,7 +28,7 @@
     { "command": "state", "expect": { "paused": false } },
     {
       "playback": "start",
-      "command": "workspace pause --toggle",
+      "command": "pause --toggle",
       "caption": "The running manager switches to paused.",
       "expect": { "paused": true }
     }

@@ -29,7 +29,7 @@
     { "command": "reconcile", "expect": { "windows": { "focused-window": { "workspace": "1" } } } },
     {
       "playback": "start",
-      "command": "unmanage focused-window",
+      "command": "window unmanage --window focused-window",
       "caption": "The focused window leaves manager control but stays open.",
       "expect": { "windows": { "focused-window": { "exists": true, "workspace": null } } }
     }

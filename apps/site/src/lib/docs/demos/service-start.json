@@ -1,5 +1,11 @@
 {
-  "config": { "defaults": { "margins": { "top": 28 } } },
+  "config": {
+    "defaults": {
+      "margins": {
+        "top": 28
+      }
+    }
+  },
   "presentation": {
     "device": "display",
     "showDock": false,
@@ -10,7 +16,13 @@
     "topology": [
       {
         "id": "display:main",
-        "frame": { "x": 0, "y": 0, "width": 1440, "height": 900 },
+        "frame": {
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900
+        },
+        "primary": true,
         "workspace": "1"
       }
     ],
@@ -19,7 +31,34 @@
         "id": "focused-window",
         "title": "Focused window",
         "workspace": "1",
-        "frame": { "x": 80, "y": 80, "width": 640, "height": 400 }
+        "frame": {
+          "x": 80,
+          "y": 80,
+          "width": 640,
+          "height": 400
+        }
+      },
+      {
+        "id": "second-window",
+        "title": "Second window",
+        "workspace": "1",
+        "frame": {
+          "x": 220,
+          "y": 180,
+          "width": 640,
+          "height": 400
+        }
+      },
+      {
+        "id": "third-window",
+        "title": "Third window",
+        "workspace": "1",
+        "frame": {
+          "x": 360,
+          "y": 280,
+          "width": 640,
+          "height": 400
+        }
       }
     ],
     "focusedWindow": "focused-window",
@@ -28,19 +67,47 @@
   },
   "steps": [
     {
-      "event": { "kind": "focus_changed", "windowId": "focused-window" },
-      "expect": { "wmRunning": false }
+      "event": {
+        "kind": "focus_changed",
+        "windowId": "focused-window"
+      },
+      "expect": {
+        "wmRunning": false
+      }
     },
     {
       "playback": "start",
       "command": "service start",
-      "caption": "The manager starts and tiles the focused window.",
+      "caption": "The manager starts and tiles the overlapping windows.",
       "expect": {
         "wmRunning": true,
         "windows": {
           "focused-window": {
             "workspace": "1",
-            "frame": { "x": 0, "y": 28, "width": 1440, "height": 872 }
+            "frame": {
+              "x": 0,
+              "y": 28,
+              "width": 716,
+              "height": 432
+            }
+          },
+          "second-window": {
+            "workspace": "1",
+            "frame": {
+              "x": 724,
+              "y": 28,
+              "width": 716,
+              "height": 872
+            }
+          },
+          "third-window": {
+            "workspace": "1",
+            "frame": {
+              "x": 0,
+              "y": 468,
+              "width": 716,
+              "height": 432
+            }
           }
         }
       }

@@ -61,6 +61,7 @@ describe("compound destination topology refresh", () => {
         type: "moveWindowToWorkspace",
         windowId: targetMember,
         workspace: "target",
+        follow: false,
       }),
     );
     await Effect.runPromise(
@@ -68,6 +69,7 @@ describe("compound destination topology refresh", () => {
         type: "moveWindowToWorkspace",
         windowId: focusedMember,
         workspace: "focused",
+        follow: false,
       }),
     );
     await Effect.runPromise(

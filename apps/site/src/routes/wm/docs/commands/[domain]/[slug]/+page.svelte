@@ -33,7 +33,7 @@
 {#if doc.forms.some((form) => form.syntax.includes('<')) || doc.slug.endsWith('-directional')}
   <table><tbody><tr><th>Name</th><th>Usage</th></tr>
     {#each [...new Set(doc.forms.flatMap((form) => [...form.syntax.matchAll(/<([^>]+)>/g)].map((match) => match[1]!)).concat(doc.slug.endsWith('-directional') ? ['direction'] : []))] as slot}
-      <tr><td data-label="Name"><code>{slot}</code></td><td data-label="Usage">{slot === 'workspace' ? 'A workspace name. Quote names containing spaces.' : slot === 'window' ? 'A current window ID from wm windows.' : slot === 'display' ? 'A connected display ID from wm displays.' : slot === 'direction' ? 'left, right, up, down' : 'A value in display-coordinate units.'}</td></tr>
+      <tr><td data-label="Name"><code>{slot}</code></td><td data-label="Usage">{slot === 'workspace' ? 'A workspace name. Quote names containing spaces.' : slot === 'window' ? 'A current window ID from wm window list.' : slot === 'display' ? 'A connected display ID from wm display list.' : slot === 'direction' ? 'left, right, up, down' : 'A value in display-coordinate units.'}</td></tr>
     {/each}
   </tbody></table>
 {:else}<p>This command has no arguments.</p>{/if}

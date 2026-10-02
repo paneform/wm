@@ -5,7 +5,7 @@ status: in-progress
 type: task
 priority: normal
 created_at: 2026-10-02T18:04:20Z
-updated_at: 2026-10-02T18:20:43Z
+updated_at: 2026-10-02T18:34:49Z
 ---
 
 Review the complete working tree and commit the requested local source changes in logical, validated groups. Preserve all existing user work; exclude generated artifacts and external local configuration.
@@ -16,7 +16,7 @@ Review the complete working tree and commit the requested local source changes i
 - [x] Commit Developer ID packaging defaults and ignore the generated root Swift cache.
 - [x] Commit full-extent directional stack exchange with its regression scenario.
 - [x] Commit focused-window styling and compact demo-card presentation.
-- [ ] Commit per-display workspace indicators and animation/browser checks.
+- [x] Commit per-display workspace indicators and animation/browser checks.
 - [ ] Commit the shared command grammar, JSON contracts and caller/example migrations.
 - [ ] Commit compact CLI output, app metadata and verbose diagnostics.
 - [ ] Commit command-hierarchy docs navigation.
@@ -42,3 +42,13 @@ dfd729e — fix(layout): exchange full-span windows with adjacent stacks. Includ
 ## Commit 3
 
 18958c0 — style(site): clarify window focus and compact demo cards. Staged only focus colors, adaptive card sizing, single-example pip hiding and their browser assertions. Carousel/caption checks pass.
+
+## Commit 4
+
+48de325 — fix(site): keep docs workspace indicators on their owning displays. Includes ownership/animation helpers, fixture support and six scenario tests. Browser-check paths in this commit use the then-current command catalog; the command migration updates them next.
+
+A newer local service-start demo edit appeared during organization (three overlapping windows). Preserve it and validate its expectations before including it with the scenario updates.
+
+## Contracts staging validation
+
+Exported the staged index to an isolated temporary workspace and installed only cached locked dependencies. The exact staged command/contracts tree passes all 1,003 TypeScript/Swift tests, root lint, typechecks and production/native builds. This verifies the split without relying on unstaged compact-output or navigation code. The newer service-start and explicit-ID focus demo edits also pass scenario expectations in that staged tree.

@@ -38,7 +38,7 @@
     },
     {
       "playback": "start",
-      "command": "workspace move-display 1 display:second",
+      "command": "workspace move display display:second --workspace 1",
       "caption": "The workspace and its window move to the specified display.",
       "expect": {
         "windows": {

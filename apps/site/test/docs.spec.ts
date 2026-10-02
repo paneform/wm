@@ -23,7 +23,10 @@ describe("documentation sources", () => {
       expect(demoDefinitions(doc).length, doc.slug).toBeGreaterThan(0);
       for (const form of doc.forms) {
         expect(form.description).not.toBe("");
-        if (form.type && form.example) expect(parseCommandText(form.example).type).toBe(form.type);
+        if (form.type && form.example) {
+          const result = parseCommandText(form.example);
+          expect(result.ok && result.value.type).toBe(form.type);
+        }
       }
       for (const issue of doc.errors) {
         expect(Schema.decodeUnknownSync(CommandErrorCode)(issue.code)).toBe(issue.code);
@@ -34,7 +37,7 @@ describe("documentation sources", () => {
       expect(new Set(situations.map((item) => item.slug)).size).toBe(situations.length);
     }
     // The explicit-ID form is a separate situation on the focused-workspace page.
-    expect(demosForCommand("windows/move-to-workspace")).toHaveLength(3);
+    expect(demosForCommand("windows/assign")).toHaveLength(3);
   });
 
   it("links every scenario file exactly once without missing or orphaned files", () => {

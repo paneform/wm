@@ -32,7 +32,7 @@
     },
     {
       "playback": "start",
-      "command": "float focused-window",
+      "command": "window float --window focused-window",
       "caption": "The focused window leaves tiling but stays in its workspace.",
       "expect": { "windows": { "focused-window": { "floating": true, "workspace": "1" } } }
     }

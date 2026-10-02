@@ -28,7 +28,7 @@
     { "command": "state", "expect": { "windows": { "focused-window": { "workspace": "1" } } } },
     {
       "playback": "start",
-      "command": "windows",
+      "command": "window list",
       "caption": "Live windows are listed without changing the layout.",
       "expect": {
         "windows": {

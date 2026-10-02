@@ -55,6 +55,17 @@ function type(
 }
 
 describe("guided command model", () => {
+  it("loads alternate flag order and equals-style values through the shared parser", () => {
+    const context = deriveCommandContext(scenario, [], 0);
+    const state = commandStateFromText(
+      'window --window="editor one" assign --no-follow "Deep Work"',
+      context,
+    );
+    expect(state).not.toBeNull();
+    expect(completedCommand(state!)).toBe(
+      'window assign "Deep Work" --window "editor one" --no-follow',
+    );
+  });
   it("preserves the selected target when a quoted token is reopened and accepted unchanged", async () => {
     const frame = { x: 0, y: 0, width: 1200, height: 800 };
     const document = parseScenario({
@@ -69,7 +80,9 @@ describe("guided command model", () => {
       },
     });
     const context = deriveCommandContext(document);
-    const reopened = reopenCommandToken(commandStateFromText('focus-window " A "', context)!);
+    const reopened = reopenCommandToken(
+      commandStateFromText('window focus --window " A "', context)!,
+    );
     const choice = commandChoices(reopened, context)[0]!;
     expect(choice.value).toBe(" A ");
     const command = completedCommand(acceptCommandChoice(reopened, choice))!;
@@ -86,9 +99,16 @@ describe("guided command model", () => {
       roots.find(({ value }) => value === "window")!,
     );
     expect(commandChoices(window, context).map(({ value }) => value)).toEqual([
-      "probe-limits",
+      "list",
+      "float",
+      "tile",
+      "manage",
+      "unmanage",
+      "observe",
       "focus",
       "move",
+      "resize",
+      "assign",
     ]);
   });
 
@@ -102,7 +122,7 @@ describe("guided command model", () => {
   it("keeps incomplete and invalid numbers out of completed commands", () => {
     const context = deriveCommandContext(scenario, [], 0);
     let state = emptyCommandState();
-    for (const query of ["move-window", "editor one"]) {
+    for (const query of ["window", "move", "position"]) {
       const choice = commandChoices({ ...state, query }, context).find(
         ({ value }) => value === query,
       )!;
@@ -118,31 +138,42 @@ describe("guided command model", () => {
 
   it("requires positive dimensions but permits negative coordinates", () => {
     const context = deriveCommandContext(scenario, [], 0);
-    expect(commandStateFromText('move-window "editor one" -10 2.5', context)).not.toBeNull();
-    expect(commandStateFromText('resize-window "editor one" -1 20', context)).toBeNull();
+    expect(
+      commandStateFromText('window move position -10 2.5 --window "editor one"', context),
+    ).not.toBeNull();
+    expect(commandStateFromText('window resize -1 20 --window "editor one"', context)).toBeNull();
   });
 
   it("offers typed coordinates as choices for Space-style transitions", () => {
     const context = deriveCommandContext(scenario, [], 0);
     let state = emptyCommandState();
-    for (const query of ["move-window", "editor one", "-10.5", "20"]) {
+    for (const query of ["window", "move", "position", "-10.5", "20", "--window", "editor one"]) {
       const queried = { ...state, query };
       const choice = commandChoices(queried, context).find(({ value }) => value === query);
       expect(choice, query).toBeDefined();
       state = acceptCommandChoice(state, choice!);
     }
-    expect(completedCommand(state)).toBe('move-window "editor one" -10.5 20');
+    expect(completedCommand(state)).toBe('window move position -10.5 20 --window "editor one"');
   });
 
   it("advances from a typed new workspace to a known display", () => {
     const context = deriveCommandContext(scenario, [], 0);
     let state = emptyCommandState();
-    for (const query of ["workspace", "move-display", '"Quiet Room"', "main display"]) {
+    for (const query of [
+      "workspace",
+      "move",
+      "display",
+      "main display",
+      "--workspace",
+      '"Quiet Room"',
+    ]) {
       const choice = commandChoices({ ...state, query }, context)[0];
       expect(choice, query).toBeDefined();
       state = acceptCommandChoice(state, choice!);
     }
-    expect(completedCommand(state)).toBe('workspace move-display "Quiet Room" "main display"');
+    expect(completedCommand(state)).toBe(
+      'workspace move display "main display" --workspace "Quiet Room"',
+    );
   });
 
   it("tracks draft-added and removed windows and prefix topology", () => {
@@ -175,24 +206,29 @@ describe("guided command model", () => {
       },
     });
     const context = deriveCommandContext(local);
-    let typed = type(emptyCommandState(), "focus-window", context)!;
+    let typed = emptyCommandState();
+    for (const token of ["window", "focus", "--window"]) typed = type(typed, token, context)!;
     const quotedChoice = commandChoices({ ...typed, query: '"editor \\"one\\""' }, context)[0];
     expect(quotedChoice?.value).toBe('editor "one"');
     typed = acceptCommandChoice(typed, quotedChoice!);
-    expect(completedCommand(typed)).toBe('focus-window "editor \\"one\\""');
-    const windowState = commandStateFromText('focus-window "editor \\"one\\""', context)!;
-    expect(serializeCommandTokens(windowState.accepted)).toBe('focus-window "editor \\"one\\""');
+    expect(completedCommand(typed)).toBe('window focus --window "editor \\"one\\""');
+    const windowState = commandStateFromText('window focus --window "editor \\"one\\""', context)!;
+    expect(serializeCommandTokens(windowState.accepted)).toBe(
+      'window focus --window "editor \\"one\\""',
+    );
     expect(
-      commandStateFromText('workspace move-display 1 "main \\"display\\""', context),
+      commandStateFromText('workspace move display "main \\"display\\"" --workspace 1', context),
     ).not.toBeNull();
   });
 
   it("provides short slot hints without reporting errors", () => {
     const context = deriveCommandContext(scenario, [], 0);
-    let state = type(emptyCommandState(), "move-window", context)!;
+    let state = emptyCommandState();
+    for (const token of ["window", "move", "position", "0", "0", "--window"])
+      state = type(state, token, context)!;
     expect(commandSlotHint(state)).toBe("Choose window");
     state = acceptCommandChoice(state, commandChoices(state, context)[0]!);
-    expect(commandSlotHint(state)).toBe("Enter x coordinate");
+    expect(commandSlotHint(state)).toBe("Command complete");
     let workspace = type(emptyCommandState(), "workspace", context)!;
     workspace = type(workspace, "focus", context)!;
     expect(commandSlotHint(workspace)).toBe("Enter workspace name");
@@ -201,19 +237,21 @@ describe("guided command model", () => {
   it("sanitizes known workspace paths but retains allow-new workspace paths", () => {
     const context = deriveCommandContext(scenario, [], 0);
     const removed = { ...context, workspaces: ["1"] };
-    const known = commandStateFromText('workspace mode "Deep Work" bsp', context)!;
+    const known = commandStateFromText('workspace mode bsp --workspace "Deep Work"', context)!;
     expect(sanitizeCommandState(known, removed).accepted.map(({ value }) => value)).toEqual([
       "workspace",
       "mode",
+      "bsp",
+      "--workspace",
     ]);
     const allowNew = commandStateFromText(
-      'workspace move-display "Deep Work" "main display"',
+      'workspace move display "main display" --workspace "Deep Work"',
       context,
     )!;
     expect(sanitizeCommandState(allowNew, removed)).toBe(allowNew);
   });
 
-  it("preserves the ambiguous window and workspace branch labels", () => {
+  it("keeps window targeting separate from workspace destinations", () => {
     const local = parseScenario({
       state: {
         topology: [
@@ -224,21 +262,23 @@ describe("guided command model", () => {
     });
     const context = deriveCommandContext(local);
     let state = emptyCommandState();
-    state = type(state, "workspace", context)!;
-    state = type(state, "move-window", context)!;
+    state = type(state, "window", context)!;
+    state = type(state, "assign", context)!;
     expect(
       commandChoices(state, context)
         .filter(({ value }) => value === "same")
         .map(({ label }) => label)
         .sort(),
-    ).toEqual(["Window", "Workspace"]);
+    ).toEqual(["Workspace"]);
   });
 
   it("prefills complete edits, optional arguments, service commands, and reopens tokens", () => {
     const context = deriveCommandContext(scenario, [], 0);
-    expect(completedCommand(commandStateFromText("retile", context)!)).toBe("retile");
-    expect(completedCommand(commandStateFromText("reload-config full", context)!)).toBe(
-      "reload-config full",
+    expect(completedCommand(commandStateFromText("workspace retile", context)!)).toBe(
+      "workspace retile",
+    );
+    expect(completedCommand(commandStateFromText("config reload full", context)!)).toBe(
+      "config reload full",
     );
     expect(completedCommand(commandStateFromText("service restart", context)!)).toBe(
       "service restart",
@@ -251,9 +291,9 @@ describe("guided command model", () => {
       "right",
       "up",
       "down",
-      "workspace",
+      "position",
     ]);
-    const reload = commandStateFromText("reload-config", context)!;
+    const reload = commandStateFromText("config reload", context)!;
     expect(commandChoices(reload, context).map(({ value }) => value)).toEqual(["delta", "full"]);
     const service = reopenCommandToken(commandStateFromText("service start", context)!);
     expect(commandChoices({ ...service, query: "" }, context).map(({ value }) => value)).toEqual([
@@ -266,7 +306,8 @@ describe("guided command model", () => {
   it("reserves case-sensitive exact references before the bounded prefix list", () => {
     const windows = [...Array.from({ length: 50 }, (_, index) => `editor-${index}`), "editor"];
     const context = { windows, displays: [], workspaces: [] };
-    const focus = type(emptyCommandState(), "focus-window", context)!;
+    let focus = emptyCommandState();
+    for (const token of ["window", "focus", "--window"]) focus = type(focus, token, context)!;
     expect(commandChoices({ ...focus, query: "editor" }, context)[0]?.value).toBe("editor");
     expect(
       commandChoices(
@@ -283,10 +324,10 @@ describe("guided command model", () => {
       workspaces: ["--toggle", "--__proto__"],
     };
     for (const command of [
-      "focus-window --toggle",
+      "window focus --window --toggle",
       "workspace focus --__proto__",
-      "workspace move-window A --__proto__",
-      "workspace move-display safe --toggle",
+      "window assign safe --window --__proto__",
+      "workspace move display --toggle",
     ]) {
       expect(commandStateFromText(command, context), command).toBeNull();
     }
@@ -298,13 +339,13 @@ describe("guided command model", () => {
     const workspaces = [" w ", "w\t1"];
     const context = { windows, displays, workspaces };
     for (const id of windows) {
-      const state = commandStateFromText(`focus-window ${serializeRaw(id)}`, context)!;
+      const state = commandStateFromText(`window focus --window ${serializeRaw(id)}`, context)!;
       const command = completedCommand(state)!;
-      expect(state.accepted[1]?.value).toBe(id);
+      expect(state.accepted[3]?.value).toBe(id);
       expect(parseScenarioCommand(command)).toEqual({ type: "focusWindow", windowId: id });
     }
     const move = commandStateFromText(
-      `workspace move-display ${serializeRaw(workspaces[0]!)} ${serializeRaw(displays[0]!)}`,
+      `workspace move display ${serializeRaw(displays[0]!)} --workspace ${serializeRaw(workspaces[0]!)}`,
       context,
     )!;
     expect(parseScenarioCommand(completedCommand(move)!)).toEqual({

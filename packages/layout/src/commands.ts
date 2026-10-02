@@ -54,46 +54,50 @@ const SizeStruct = Schema.Struct({ width: Schema.Number, height: Schema.Number }
 export const Command = Schema.Union(
   Schema.Struct({ type: Schema.Literal("getState") }),
   Schema.Struct({ type: Schema.Literal("getWindows") }),
-  Schema.Struct({ type: Schema.Literal("getWindow"), windowId: Schema.String }),
+  Schema.Struct({ type: Schema.Literal("getWindow"), windowId: Schema.optional(Schema.String) }),
   Schema.Struct({ type: Schema.Literal("getDisplays") }),
   Schema.Struct({ type: Schema.Literal("getWorkspaces") }),
   Schema.Struct({ type: Schema.Literal("getTransaction"), id: Schema.String }),
   Schema.Struct({ type: Schema.Literal("probeWindowLimits"), windowId: Schema.String }),
-  Schema.Struct({ type: Schema.Literal("focusWindow"), windowId: Schema.String }),
+  Schema.Struct({ type: Schema.Literal("focusWindow"), windowId: Schema.optional(Schema.String) }),
   Schema.Struct({
     type: Schema.Literal("setWindowFrame"),
-    windowId: Schema.String,
+    windowId: Schema.optional(Schema.String),
     frame: Frame,
     tolerance: Schema.optional(Schema.Number),
   }),
   Schema.Struct({
     type: Schema.Literal("moveWindow"),
-    windowId: Schema.String,
+    windowId: Schema.optional(Schema.String),
     point: PointStruct,
   }),
   Schema.Struct({
     type: Schema.Literal("resizeWindow"),
-    windowId: Schema.String,
+    windowId: Schema.optional(Schema.String),
     size: SizeStruct,
   }),
-  Schema.Struct({ type: Schema.Literal("floatWindow"), windowId: Schema.String }),
-  Schema.Struct({ type: Schema.Literal("tileWindow"), windowId: Schema.String }),
-  Schema.Struct({ type: Schema.Literal("manageWindow"), windowId: Schema.String }),
-  Schema.Struct({ type: Schema.Literal("unmanageWindow"), windowId: Schema.String }),
+  Schema.Struct({ type: Schema.Literal("floatWindow"), windowId: Schema.optional(Schema.String) }),
+  Schema.Struct({ type: Schema.Literal("tileWindow"), windowId: Schema.optional(Schema.String) }),
+  Schema.Struct({ type: Schema.Literal("manageWindow"), windowId: Schema.optional(Schema.String) }),
+  Schema.Struct({
+    type: Schema.Literal("unmanageWindow"),
+    windowId: Schema.optional(Schema.String),
+  }),
   Schema.Struct({ type: Schema.Literal("focusWorkspace"), name: Schema.String }),
   Schema.Struct({
     type: Schema.Literal("moveWindowToWorkspace"),
-    windowId: Schema.String,
+    windowId: Schema.optional(Schema.String),
     workspace: Schema.String,
+    follow: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     type: Schema.Literal("moveWorkspaceToDisplay"),
-    workspace: Schema.String,
+    workspace: Schema.optional(Schema.String),
     displayId: Schema.String,
   }),
   Schema.Struct({
     type: Schema.Literal("setWorkspaceMode"),
-    workspace: Schema.String,
+    workspace: Schema.optional(Schema.String),
     mode: WorkspaceModeSchema,
   }),
   Schema.Struct({ type: Schema.Literal("retile"), workspace: Schema.optional(Schema.String) }),
@@ -103,10 +107,6 @@ export const Command = Schema.Union(
   // skhd hotkey parity (bean wm-pmys): focused/focused-relative mutations the
   // engine resolves against committed observations — the CLI only maps syntax.
   Schema.Struct({ type: Schema.Literal("togglePause") }),
-  Schema.Struct({
-    type: Schema.Literal("moveFocusedWindowToWorkspace"),
-    workspace: Schema.String,
-  }),
   Schema.Struct({ type: Schema.Literal("moveFocusedWorkspaceToNextDisplay") }),
   Schema.Struct({ type: Schema.Literal("focusDirection"), direction: Direction }),
   Schema.Struct({ type: Schema.Literal("moveDirection"), direction: Direction }),
@@ -129,7 +129,7 @@ export type Command = typeof Command.Type;
 export function coalesceKeyFor(command: Command): string | undefined {
   switch (command.type) {
     case "focusWindow":
-      return `focus:${command.windowId}`;
+      return command.windowId === undefined ? undefined : `focus:${command.windowId}`;
     case "focusWorkspace":
       return `focusWs:${command.name}`;
     case "pause":
@@ -486,8 +486,16 @@ export function createCommandBus(deps: CommandBusDeps): CommandBus {
           };
         case "getWindows":
           return { type: "windows", windows: [...world.windows.values()].map((w) => ({ ...w })) };
-        case "getWindow":
-          return { type: "window", window: world.windows.get(command.windowId) ?? null };
+        case "getWindow": {
+          const id =
+            command.windowId ??
+            world.focusIntent?.id ??
+            [...world.windows.values()].find((window) => window.focused)?.id;
+          return {
+            type: "window",
+            window: id === undefined ? null : (world.windows.get(id) ?? null),
+          };
+        }
         case "getDisplays":
           return { type: "displays", displays: world.topology.displays.map((d) => ({ ...d })) };
         case "getWorkspaces":
@@ -516,7 +524,7 @@ export function createCommandBus(deps: CommandBusDeps): CommandBus {
         case "validateConfig":
           return yield* deps.validateConfigCandidate();
         case "reloadConfig":
-          return yield* deps.reloadConfig(command.mode ?? "full");
+          return yield* deps.reloadConfig(command.mode ?? "delta");
         case "subscribe":
           return {
             type: "subscribed",
@@ -628,7 +636,7 @@ function windowIdOf(command: Command): string | null {
     case "unmanageWindow":
     case "moveWindowToWorkspace":
     case "probeWindowLimits":
-      return command.windowId;
+      return command.windowId ?? null;
     default:
       return null;
   }

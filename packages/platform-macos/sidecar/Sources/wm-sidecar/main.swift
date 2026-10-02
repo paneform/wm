@@ -41,13 +41,6 @@ if arguments.first == "sidecar" {
     FileHandle.standardError.write(Data("native host failed: \(error)\n".utf8))
     exit(1)
   }
-} else if arguments.first == "service" {
-  do {
-    exit(try runService(Array(arguments.dropFirst()), runtime: BundledRuntime.locate()))
-  } catch {
-    FileHandle.standardError.write(Data("service command failed: \(error)\n".utf8))
-    exit(1)
-  }
 } else {
   do {
     exit(try runCLI(arguments, runtime: BundledRuntime.locate()))

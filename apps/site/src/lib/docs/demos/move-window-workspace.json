@@ -38,13 +38,13 @@
     },
     {
       "playback": "start",
-      "command": "workspace move-window left-neighbor writing",
+      "command": "window assign 2 --window left-neighbor --no-follow",
       "caption": "The left neighbor moves; the focused window stays in view.",
       "expect": {
         "focusedWorkspace": "1",
         "focusedWindow": "focused-window",
         "windows": {
-          "left-neighbor": { "workspace": "writing" },
+          "left-neighbor": { "workspace": "2" },
           "focused-window": {
             "workspace": "1",
             "frame": { "x": 0, "y": 28, "width": 1440, "height": 872 }

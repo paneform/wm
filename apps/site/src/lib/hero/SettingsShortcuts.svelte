@@ -71,7 +71,7 @@
       id: "move-workspace-display",
       bindings: [singleBinding([key("lshift"), key("rshift")], key("tab"))],
       action: "move workspace to next display",
-      help: help("workspace move next"),
+      help: help("workspace move display next"),
     },
     {
       id: "move-workspace",
@@ -80,7 +80,7 @@
         rangeBinding([key("lshift"), key("rshift")], [workspaceKeys[2], workspaceKeys[3]], `A–Z, except ${excluded}`),
       ],
       action: "move window to workspace",
-      help: help("workspace move-window <workspace>"),
+      help: help("window assign <workspace>"),
     },
     ...directionalRows.map((chord) => {
       const direction = "direction" in chord.command ? chord.command.direction : "";

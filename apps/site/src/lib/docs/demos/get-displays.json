@@ -28,7 +28,7 @@
     { "command": "state", "expect": { "focusedWorkspace": "1" } },
     {
       "playback": "start",
-      "command": "displays",
+      "command": "display list",
       "caption": "Connected displays are listed; the desktop stays unchanged.",
       "expect": {
         "focusedWorkspace": "1",

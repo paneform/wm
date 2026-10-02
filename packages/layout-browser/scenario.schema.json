@@ -854,8 +854,8 @@
                     "examples": [
                       "window focus right",
                       "window move left",
-                      "workspace move-window T",
-                      "retile"
+                      "window assign T",
+                      "workspace retile"
                     ],
                     "minLength": 1
                   },

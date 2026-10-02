@@ -36,7 +36,7 @@
     },
     {
       "playback": "start",
-      "command": "workspace mode 1 bsp",
+      "command": "workspace mode bsp --workspace 1",
       "caption": "BSP mode tiles the focused window to fill the workspace.",
       "expect": {
         "windows": {

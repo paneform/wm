@@ -255,7 +255,7 @@ export const tokens = {
 } as const;
 
 export type HeroCommand =
-  | { type: "moveFocusedWindowToWorkspace"; workspace: HeroWorkspace }
+  | { type: "moveWindowToWorkspace"; workspace: HeroWorkspace }
   | { type: "moveDirection"; direction: "left" | "down" | "up" | "right" }
   | { type: "focusDirection"; direction: "left" | "down" | "up" | "right" }
   | { type: "moveFocusedWorkspaceToNextDisplay" }
@@ -317,7 +317,7 @@ export const heroKeyboardChords: readonly KeyboardChord[] = [
         id: `move-window-${key}`,
         keys: ["lshift", "rshift", key],
         trigger: key,
-        command: { type: "moveFocusedWindowToWorkspace" as const, workspace },
+        command: { type: "moveWindowToWorkspace" as const, workspace },
         readout: `move window workspace ${workspace}`,
       },
       {
@@ -343,7 +343,7 @@ function sameCommand(left: HeroCommand, right: HeroCommand): boolean {
   if (left.type === "moveDirection" || left.type === "focusDirection") {
     return "direction" in right && left.direction === right.direction;
   }
-  if (left.type === "moveFocusedWindowToWorkspace" || left.type === "focusWorkspace") {
+  if (left.type === "moveWindowToWorkspace" || left.type === "focusWorkspace") {
     return "workspace" in right && left.workspace === right.workspace;
   }
   return true;

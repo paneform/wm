@@ -220,7 +220,7 @@ export const ScenarioStepSchema = Schema.Union(
     command: boundedString(4_096, "One wm CLI command parsed as data, never by a shell.").pipe(
       Schema.minLength(1),
       Schema.annotations({
-        examples: ["window focus right", "window move left", "workspace move-window T", "retile"],
+        examples: ["window focus right", "window move left", "window assign T", "workspace retile"],
       }),
     ),
     ...StepPresentationFields,
@@ -497,7 +497,7 @@ function validateScenario(scenario: DecodedLayoutScenario): void {
       if (command.type !== "service") {
         if (command.type === "subscribe")
           throw new Error(`step ${index + 1} uses unsupported subscribe`);
-        if ("windowId" in command)
+        if ("windowId" in command && command.windowId !== undefined)
           requireReference(windows, command.windowId, `step ${index + 1} command`);
         if ("displayId" in command)
           requireReference(displays, command.displayId, `step ${index + 1} command`);

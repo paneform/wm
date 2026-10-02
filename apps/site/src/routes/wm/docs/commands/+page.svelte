@@ -8,4 +8,4 @@
   <h2 id={group}>{group}</h2>
   <div class="related">{#each commandDocs.filter((doc) => doc.domain === group) as doc}<a href={commandHref(doc.slug)}>{doc.title}<small>{doc.forms[0]?.syntax}</small></a>{/each}</div>
 {/each}
-<h2 id="diagnostics">Diagnostics</h2><div class="related"><a href="/wm/docs/commands/diagnostics/doctor/">wm doctor<small>Check local permissions</small></a></div>
+<h2 id="diagnostics">Diagnostics</h2><div class="related"><a href="/wm/docs/commands/diagnostics/permissions/">wm permissions<small>Check local permissions</small></a></div>

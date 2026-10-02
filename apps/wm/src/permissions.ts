@@ -1,7 +1,7 @@
 import type { PermissionStatus, SettingsTarget } from "@paneform/wm-macos";
 
 /**
- * Local (no-daemon) permission workflows behind `wm doctor` and
+ * Local (no-daemon) permission workflows behind `wm permissions` and
  * `wm permissions request`. The client surface is promise-shaped and fully
  * injectable so tests stay headless: no sidecar process, no TCC prompts.
  *
@@ -10,7 +10,7 @@ import type { PermissionStatus, SettingsTarget } from "@paneform/wm-macos";
  * degraded and only lowers metadata quality.
  */
 
-export type PermissionCommand = "doctor" | "permissions-request";
+export type PermissionCommand = "permissions" | "permissions-request";
 
 export interface ReadyInfo {
   readonly version: string;
@@ -53,8 +53,7 @@ const ACCESSIBILITY_GUIDANCE =
 const SCREEN_RECORDING_GUIDANCE =
   'Screen Recording is not granted; window titles and off-process app names degrade (the daemon still runs). Optional: run "wm permissions request" or open System Settings > Privacy & Security > Screen Recording.';
 
-export const exitCodeFor = (report: PermissionReport | ErrorReport): number =>
-  report.ok ? 0 : 1;
+export const exitCodeFor = (report: PermissionReport | ErrorReport): number => (report.ok ? 0 : 1);
 
 export const buildPermissionReport = (
   command: PermissionCommand,
@@ -127,9 +126,9 @@ export const runPermissionFlow = async (
       options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS,
     );
     const permissions =
-      command === "permissions-request" ?
-        await client.requestPermissions()
-      : await client.permissionsStatus();
+      command === "permissions-request"
+        ? await client.requestPermissions()
+        : await client.permissionsStatus();
     if (command === "permissions-request" && options.openSettingsAfterRequest === true) {
       if (!permissions.accessibility) await client.openSettings("accessibility");
       if (!permissions.screenRecording) await client.openSettings("screenRecording");
@@ -143,10 +142,7 @@ export const runPermissionFlow = async (
   }
 };
 
-export const errorReport = (
-  command: PermissionCommand,
-  cause: unknown,
-): ErrorReport => ({
+export const errorReport = (command: PermissionCommand, cause: unknown): ErrorReport => ({
   command,
   ok: false,
   error: { message: cause instanceof Error ? cause.message : String(cause) },

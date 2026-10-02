@@ -1,0 +1,71 @@
+{
+  "config": { "defaults": { "gap": 8, "margins": { "top": 28 } } },
+  "presentation": {
+    "device": "display",
+    "showDock": false,
+    "showKeyboard": false,
+    "showTopBar": true,
+    "interactive": false
+  },
+  "state": {
+    "topology": [
+      {
+        "id": "display:main",
+        "frame": { "x": 0, "y": 0, "width": 1440, "height": 900 },
+        "primary": true,
+        "workspace": "1"
+      }
+    ],
+    "windows": [
+      {
+        "id": "left-neighbor",
+        "title": "Left neighbor",
+        "workspace": "1",
+        "frame": { "x": 0, "y": 28, "width": 720, "height": 872 }
+      },
+      {
+        "id": "window-above",
+        "title": "Window above",
+        "workspace": "1",
+        "frame": { "x": 720, "y": 28, "width": 720, "height": 436 }
+      },
+      {
+        "id": "focused-window",
+        "title": "Focused window",
+        "workspace": "1",
+        "frame": { "x": 720, "y": 464, "width": 720, "height": 436 }
+      }
+    ],
+    "focusedWindow": "focused-window",
+    "focusedWorkspace": "1",
+    "wmRunning": true
+  },
+  "steps": [
+    {
+      "command": "reconcile",
+      "expect": {
+        "focusedWindow": "focused-window",
+        "focusedWorkspace": "1",
+        "windows": {
+          "left-neighbor": { "frame": { "x": 0, "y": 28, "width": 716, "height": 872 } },
+          "window-above": { "frame": { "x": 724, "y": 28, "width": 716, "height": 432 } },
+          "focused-window": { "frame": { "x": 724, "y": 468, "width": 716, "height": 432 } }
+        }
+      }
+    },
+    {
+      "playback": "start",
+      "command": "window move left",
+      "caption": "Focused window moves left; the window above fills the right.",
+      "expect": {
+        "focusedWindow": "focused-window",
+        "focusedWorkspace": "1",
+        "windows": {
+          "left-neighbor": { "frame": { "x": 0, "y": 28, "width": 716, "height": 432 } },
+          "window-above": { "frame": { "x": 724, "y": 28, "width": 716, "height": 872 } },
+          "focused-window": { "frame": { "x": 0, "y": 468, "width": 716, "height": 432 } }
+        }
+      }
+    }
+  ]
+}

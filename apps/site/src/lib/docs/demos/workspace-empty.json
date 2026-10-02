@@ -54,14 +54,14 @@
     },
     {
       "playback": "start",
-      "command": "window move workspace writing",
+      "command": "window assign 2",
       "caption": "Focused window moves; the view follows to the empty workspace.",
       "expect": {
-        "focusedWorkspace": "writing",
+        "focusedWorkspace": "2",
         "focusedWindow": "focused-window",
         "windows": {
           "focused-window": {
-            "workspace": "writing",
+            "workspace": "2",
             "frame": { "x": 0, "y": 28, "width": 1440, "height": 872 }
           },
           "right-neighbor": { "workspace": "1" }

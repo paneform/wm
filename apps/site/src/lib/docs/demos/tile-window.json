@@ -30,7 +30,7 @@
     { "command": "state", "expect": { "windows": { "focused-window": { "floating": true } } } },
     {
       "playback": "start",
-      "command": "tile focused-window",
+      "command": "window tile --window focused-window",
       "caption": "The focused window returns to tiling and fills the workspace.",
       "expect": {
         "windows": {

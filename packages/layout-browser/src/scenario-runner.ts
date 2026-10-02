@@ -83,7 +83,7 @@ function requireMember(members: ReadonlyMap<string, ScenarioMember>, id: string)
 }
 
 function resolveCommand(command: Command, members: ReadonlyMap<string, ScenarioMember>): Command {
-  return "windowId" in command
+  return "windowId" in command && command.windowId !== undefined
     ? { ...command, windowId: requireMember(members, command.windowId).nativeId }
     : command;
 }

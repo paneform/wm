@@ -22,7 +22,15 @@ export const WireRequest = Schema.Struct({
   v: V,
   type: Schema.Literal("request"),
   id: Schema.String,
-  command: Command,
+  command: Command.pipe(
+    Schema.filter(
+      (command): boolean =>
+        command.type !== "probeWindowLimits" && command.type !== "setWindowFrame",
+      {
+        message: () => "Limit probing and frame setting are internal APIs, not public commands",
+      },
+    ),
+  ),
 });
 export type WireRequest = Schema.Schema.Type<typeof WireRequest>;
 

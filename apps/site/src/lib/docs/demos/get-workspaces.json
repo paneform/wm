@@ -28,7 +28,7 @@
     { "command": "state", "expect": { "focusedWorkspace": "1" } },
     {
       "playback": "start",
-      "command": "workspaces",
+      "command": "workspace list",
       "caption": "Workspace membership is read without changing the view.",
       "expect": {
         "focusedWorkspace": "1",

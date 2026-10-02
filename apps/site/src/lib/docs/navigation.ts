@@ -1,7 +1,14 @@
 import { commandDocs } from "@paneform/layout";
 
 export const docsBase = "/wm/docs";
-export const commandGroups = ["windows", "workspaces", "system", "service"] as const;
+export const commandGroups = [
+  "windows",
+  "workspaces",
+  "displays",
+  "config",
+  "system",
+  "service",
+] as const;
 export const commandHref = (slug: string) => `${docsBase}/commands/${slug}/`;
 export const guideLinks = [
   { title: "Installation", href: `${docsBase}/getting-started/` },

@@ -148,6 +148,9 @@ describe("layout scenario schema", () => {
   });
 
   it("uses shared token syntax and help for service commands", () => {
+    expect(() =>
+      parseScenarioCommand("window frame set 10 20 800 600 --window terminal"),
+    ).toThrow();
     expect(parseScenarioCommand('wm service "start"')).toEqual({
       type: "service",
       action: "start",
@@ -328,10 +331,13 @@ describe("layout scenario schema", () => {
       { ...base(), steps: [{ command: "state", event: { kind: "wake" } }] },
     ],
     ["malformed command", { ...base(), steps: [{ command: "rm -rf /" }] }],
-    ["unknown command window", { ...base(), steps: [{ command: "focus-window missing" }] }],
+    [
+      "unknown command window",
+      { ...base(), steps: [{ command: "window focus --window missing" }] },
+    ],
     [
       "unknown command display",
-      { ...base(), steps: [{ command: "workspace move-display 1 missing" }] },
+      { ...base(), steps: [{ command: "workspace move display missing --workspace 1" }] },
     ],
     [
       "unknown event window",
@@ -421,13 +427,13 @@ describe("layout scenario schema", () => {
       ...base(),
       steps: [
         { event: { kind: "window_added", window: { id: "editor", frame } } },
-        { command: "focus-window editor" },
+        { command: "window focus --window editor" },
         {
           event: { kind: "window_removed", windowId: "editor" },
           expect: { windows: { editor: { exists: false } } },
         },
         { event: { kind: "topology_changed", topology: [{ id: "display:new", frame }] } },
-        { command: "workspace move-display 1 display:new" },
+        { command: "workspace move display display:new --workspace 1" },
       ],
     });
     expect(scenario.steps).toHaveLength(5);

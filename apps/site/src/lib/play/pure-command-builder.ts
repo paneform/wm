@@ -1,4 +1,5 @@
 import {
+  parseCommandInvocation,
   quoteCommandToken,
   tokenizeCommandText,
   type CommandPath,
@@ -323,6 +324,9 @@ export function commandStateFromText(
     return null;
   }
   if (words[0] === "wm") words.shift();
+  const parsed = parseCommandInvocation(words);
+  if (!parsed.ok) return null;
+  words = [...parsed.value.tokens];
   const matchingPaths: number[] = [];
   for (const [pathIndex, path] of scenarioCommandPaths.entries()) {
     const minimum = path.minimumTokens ?? path.tokens.length;

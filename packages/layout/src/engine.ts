@@ -3835,9 +3835,53 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         }),
       );
 
-    const applyMutation = (command: Command): Effect.Effect<CommandResult, CommandError> =>
+    type ResolveTarget<C> = C extends Command
+      ? C extends { type: "getWindow" }
+        ? C
+        : "windowId" extends keyof C
+          ? Omit<C, "windowId"> & { windowId: string }
+          : C extends { type: "moveWorkspaceToDisplay" | "setWorkspaceMode" }
+            ? Omit<C, "workspace"> & { workspace: string }
+            : C
+      : never;
+    type ResolvedCommand = ResolveTarget<Command>;
+    const resolveCommandTarget = (raw: Command): Effect.Effect<ResolvedCommand, CommandError> =>
+      Effect.gen(function* () {
+        const windowTypes = [
+          "focusWindow",
+          "setWindowFrame",
+          "moveWindow",
+          "resizeWindow",
+          "floatWindow",
+          "tileWindow",
+          "manageWindow",
+          "unmanageWindow",
+          "moveWindowToWorkspace",
+        ];
+        if (windowTypes.includes(raw.type) && "windowId" in raw && raw.windowId !== undefined) {
+          // SAFETY: This window mutation already has its required explicit target.
+          return raw as ResolvedCommand;
+        }
+        if (windowTypes.includes(raw.type)) {
+          // SAFETY: Every window mutation without a target gets a live resolved ID.
+          return { ...raw, windowId: yield* resolveFocusedMoveTarget() } as ResolvedCommand;
+        }
+        if (raw.type === "moveWorkspaceToDisplay" || raw.type === "setWorkspaceMode") {
+          const workspace = raw.workspace ?? focusedWorkspaceForCommand()?.name;
+          if (workspace === undefined)
+            return yield* Effect.fail(
+              new CommandError({ code: "workspace_not_found", message: "no focused workspace" }),
+            );
+          // SAFETY: Both workspace-targeted mutations now have a defined workspace.
+          return { ...raw, workspace } as ResolvedCommand;
+        }
+        // SAFETY: Remaining variants have no optional mutation target to resolve.
+        return raw as ResolvedCommand;
+      });
+    const applyMutation = (raw: Command): Effect.Effect<CommandResult, CommandError> =>
       Effect.gen(function* () {
         yield* failIfStopping();
+        const command = yield* resolveCommandTarget(raw);
         switch (command.type) {
           case "pause":
             yield* setNativeHotkeySwallowing(false);
@@ -3860,8 +3904,44 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             if (!next) yield* Effect.ignore(gatedReconcile());
             break;
           }
-          case "moveFocusedWindowToWorkspace": {
-            const windowId = yield* resolveFocusedMoveTarget();
+          case "moveWindowToWorkspace": {
+            const windowId = command.windowId;
+            if (command.follow === false) {
+              const sourceWs = workspaceContaining(windowId);
+              if (sourceWs?.name === command.workspace) break;
+              const movingFocused =
+                world.focusIntent?.id === windowId || world.windows.get(windowId)?.focused === true;
+              const remainingFocus = movingFocused
+                ? (memberIdsOf(sourceWs?.name ?? "").find((id) => id !== windowId) ?? null)
+                : null;
+              const affected = [
+                ...new Set([
+                  windowId,
+                  ...(sourceWs ? memberIdsOf(sourceWs.name) : []),
+                  ...memberIdsOf(command.workspace),
+                ]),
+              ];
+              yield* executeCompound(
+                { kind: "known", ids: affected },
+                ({ intents, base }) =>
+                  (w0) => {
+                    const w = moveWindowBetweenWorkspacesIn(w0, windowId, command.workspace, base);
+                    intents.push({ kind: "retile", workspace: command.workspace });
+                    if (
+                      sourceWs &&
+                      sourceWs.name !== command.workspace &&
+                      sourceWs.visibleOnDisplay !== null
+                    )
+                      intents.push({ kind: "retile", workspace: sourceWs.name });
+                    return movingFocused && remainingFocus === null
+                      ? { ...w, focusIntent: null }
+                      : w;
+                  },
+                undefined,
+                () => remainingFocus,
+              );
+              break;
+            }
             // Actual membership drives the display decision — NOT
             // world.focusedWorkspace (review issue 2).
             const sourceWs =
@@ -3917,6 +3997,8 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   }
                   return w;
                 },
+              undefined,
+              () => windowId,
             );
             break;
           }
@@ -4133,38 +4215,6 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             doTile(command.windowId);
             yield* Effect.ignore(gatedReconcile());
             break;
-          case "moveWindowToWorkspace": {
-            const sourceWs = workspaceContaining(command.windowId);
-            const affected = Array.from(
-              new Set([
-                command.windowId,
-                ...(sourceWs ? memberIdsOf(sourceWs.name) : []),
-                ...memberIdsOf(command.workspace),
-              ]),
-            );
-            yield* executeCompound(
-              { kind: "known", ids: affected },
-              ({ intents, base }) =>
-                (w0) => {
-                  const w = moveWindowBetweenWorkspacesIn(
-                    w0,
-                    command.windowId,
-                    command.workspace,
-                    base,
-                  );
-                  intents.push({ kind: "retile", workspace: command.workspace });
-                  if (
-                    sourceWs !== undefined &&
-                    sourceWs.name !== command.workspace &&
-                    sourceWs.visibleOnDisplay !== null
-                  ) {
-                    intents.push({ kind: "retile", workspace: sourceWs.name });
-                  }
-                  return w;
-                },
-            );
-            break;
-          }
           case "focusWorkspace": {
             // NO live mutation here: a missing workspace is created only
             // inside the draft reducer (review round 3, issue 1). Displaced

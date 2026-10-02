@@ -28,7 +28,7 @@
     { "command": "state", "expect": { "windows": { "focused-window": { "exists": true } } } },
     {
       "playback": "start",
-      "command": "observe-window focused-window",
+      "command": "window observe --window focused-window",
       "caption": "Read the focused window’s state without moving or resizing it.",
       "expect": {
         "windows": {

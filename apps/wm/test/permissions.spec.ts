@@ -21,7 +21,9 @@ interface FakeClientOptions {
   failRequest?: Error;
 }
 
-const makeClient = (options: FakeClientOptions = {}): PermissionClient & {
+const makeClient = (
+  options: FakeClientOptions = {},
+): PermissionClient & {
   stop: ReturnType<typeof vi.fn>;
 } => {
   const status = options.status ?? denied;
@@ -45,8 +47,8 @@ const makeClient = (options: FakeClientOptions = {}): PermissionClient & {
 
 describe("parseArgs local permission commands", () => {
   test("doctor routes locally without an engine command", () => {
-    const parsed = parseArgs(["doctor"]);
-    expect(parsed.localCommand).toBe("doctor");
+    const parsed = parseArgs(["permissions"]);
+    expect(parsed.localCommand).toBe("permissions");
     expect(parsed.command).toBeNull();
     expect(parsed.serve).toBe(false);
   });
@@ -59,18 +61,18 @@ describe("parseArgs local permission commands", () => {
   });
 
   test("--sidecar captures the executable path", () => {
-    const parsed = parseArgs(["doctor", "--sidecar", "/opt/wm/wm-sidecar"]);
+    const parsed = parseArgs(["permissions", "--sidecar", "/opt/wm/wm-sidecar"]);
     expect(parsed.flags["sidecar"]).toBe("/opt/wm/wm-sidecar");
   });
 
-  test("bare permissions verb is not a local command (usage path)", () => {
+  test("bare permissions verb reports permission status locally", () => {
     const parsed = parseArgs(["permissions"]);
-    expect(parsed.localCommand).toBeNull();
+    expect(parsed.localCommand).toBe("permissions");
     expect(parsed.command).toBeNull();
   });
 
   test("daemon verbs are unaffected", () => {
-    const parsed = parseArgs(["windows"]);
+    const parsed = parseArgs(["window", "list"]);
     expect(parsed.localCommand).toBeNull();
     expect(parsed.command).toEqual({ type: "getWindows" });
   });
@@ -78,7 +80,7 @@ describe("parseArgs local permission commands", () => {
 
 describe("buildPermissionReport", () => {
   test("fully granted reports ok with no guidance", () => {
-    const report = buildPermissionReport("doctor", granted, {
+    const report = buildPermissionReport("permissions", granted, {
       path: "/fake/wm-sidecar",
       version: "wm-sidecar 0.1.0",
     });
@@ -93,11 +95,13 @@ describe("buildPermissionReport", () => {
     expect(report.ok).toBe(false);
     expect(exitCodeFor(report)).toBe(1);
     expect(report.guidance.join("\n")).toContain("Accessibility is not granted");
-    expect(report.guidance.join("\n")).toContain("System Settings > Privacy & Security > Accessibility");
+    expect(report.guidance.join("\n")).toContain(
+      "System Settings > Privacy & Security > Accessibility",
+    );
   });
 
   test("degraded screen recording alone stays ok but warns", () => {
-    const report = buildPermissionReport("doctor", degraded);
+    const report = buildPermissionReport("permissions", degraded);
     expect(report.ok).toBe(true);
     expect(exitCodeFor(report)).toBe(0);
     expect(report.guidance.join("\n")).toContain("Screen Recording is not granted");
@@ -107,13 +111,13 @@ describe("buildPermissionReport", () => {
 describe("runPermissionFlow", () => {
   test("doctor is read-only: queries status and stops the client", async () => {
     const client = makeClient({ status: granted });
-    const report = await runPermissionFlow("doctor", client);
+    const report = await runPermissionFlow("permissions", client);
 
     expect(client.permissionsStatus).toHaveBeenCalledOnce();
     expect(client.requestPermissions).not.toHaveBeenCalled();
     expect(client.openSettings).not.toHaveBeenCalled();
     expect(client.stop).toHaveBeenCalledOnce();
-    expect(report.command).toBe("doctor");
+    expect(report.command).toBe("permissions");
     expect(report.permissions).toEqual(granted);
     expect(report.sidecar?.path).toBe("/fake/wm-sidecar");
     expect(report.sidecar?.version).toBe("wm-sidecar 0.1.0");
@@ -143,7 +147,9 @@ describe("runPermissionFlow", () => {
       status: denied,
       failRequest: new Error("sidecar exited"),
     });
-    await expect(runPermissionFlow("permissions-request", client)).rejects.toThrow("sidecar exited");
+    await expect(runPermissionFlow("permissions-request", client)).rejects.toThrow(
+      "sidecar exited",
+    );
     expect(client.stop).toHaveBeenCalledOnce();
   });
 
@@ -151,13 +157,13 @@ describe("runPermissionFlow", () => {
     const client = makeClient({ status: denied });
     Object.defineProperty(client, "whenReady", { value: new Promise(() => {}) });
     await expect(
-      runPermissionFlow("doctor", client, { handshakeTimeoutMs: 20 }),
+      runPermissionFlow("permissions", client, { handshakeTimeoutMs: 20 }),
     ).rejects.toThrow("sidecar handshake timed out after 20ms");
     expect(client.stop).toHaveBeenCalledOnce();
   });
 
   test("errors convert to structured reports with exit code 1", () => {
-    const report = errorReport("doctor", new Error("spawn failed"));
+    const report = errorReport("permissions", new Error("spawn failed"));
     expect(exitCodeFor(report)).toBe(1);
     expect(report.error.message).toBe("spawn failed");
   });

@@ -34,7 +34,7 @@
     },
     {
       "playback": "start",
-      "command": "move-window focused-window 320 200",
+      "command": "window move position 320 200 --window focused-window",
       "caption": "The focused window moves without changing size.",
       "expect": {
         "windows": {

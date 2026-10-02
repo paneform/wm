@@ -17,9 +17,9 @@ export type CommandDemo =
   | { kind: "unavailable"; reason: string };
 export type CommandDemoManifest = { readonly [Id in DemoCommandId]: CommandDemo };
 
-const one = (file: ScenarioFile, title: string, intro: string) => ({
+const one = (file: ScenarioFile, title: string, intro: string, slug = "example") => ({
   kind: "desktop" as const,
-  situations: [{ file, slug: "example", title, intro }] as const,
+  situations: [{ file, slug, title, intro }] as const,
 });
 
 /** Engine identities, rather than page spellings, make this exhaustive and keep aliases grouped. */
@@ -30,8 +30,8 @@ export const demoManifest = {
       {
         file: "move-swap.json",
         slug: "neighbor",
-        title: "Borders a window",
-        intro: "The focused window has a neighbor to its left.",
+        title: "Borders two windows",
+        intro: "Two stacked windows border the focused window on the left.",
       },
       {
         file: "move-shared-edge.json",
@@ -45,16 +45,22 @@ export const demoManifest = {
         title: "Exclusive edge",
         intro: "The focused window is alone at the left edge.",
       },
+      {
+        file: "move-taller-neighbor.json",
+        slug: "taller-neighbor",
+        title: "Borders a taller window",
+        intro: "A taller window is left; another is above the focused window.",
+      },
     ],
   },
-  moveFocusedWindowToWorkspace: {
+  moveWindowToWorkspace: {
     kind: "desktop",
     situations: [
       {
         file: "workspace-empty.json",
         slug: "empty",
         title: "Empty destination",
-        intro: "The focused window is on workspace 1; writing is empty.",
+        intro: "Focused window on workspace 1; workspace 2 is empty.",
       },
       {
         file: "workspace-populated.json",
@@ -62,19 +68,38 @@ export const demoManifest = {
         title: "Populated destination",
         intro: "The destination workspace already contains a window.",
       },
+      {
+        file: "move-window-workspace.json",
+        slug: "nonfocused",
+        title: "Nonfocused window",
+        intro: "The left neighbor is assigned; the focused window stays here.",
+      },
     ],
   },
-  moveWindowToWorkspace: one(
-    "move-window-workspace.json",
-    "Move by ID",
-    "Move the left neighbor by ID; keep the focused window in view.",
-  ),
-  focusWindow: one("focus-window.json", "Focus by ID", "Focus the right neighbor by its ID."),
-  focusDirection: one(
-    "focus-direction.json",
-    "Neighbor focus",
-    "Focus the window to the left of the focused window.",
-  ),
+  focusWindow: one("focus-window.json", "Focus by ID", "Focus the right-most window by its ID."),
+  focusDirection: {
+    kind: "desktop",
+    situations: [
+      {
+        file: "focus-direction.json",
+        slug: "example",
+        title: "Borders a window",
+        intro: "The focused window has a neighbor to its left.",
+      },
+      {
+        file: "focus-two-neighbors.json",
+        slug: "two-neighbors",
+        title: "Borders two windows",
+        intro: "Two stacked windows border the focused window on the left.",
+      },
+      {
+        file: "focus-exclusive-edge.json",
+        slug: "exclusive-edge",
+        title: "Exclusive edge",
+        intro: "The focused window is alone at the left edge.",
+      },
+    ],
+  },
   moveWindow: one(
     "move-window.json",
     "Set position",
@@ -85,11 +110,7 @@ export const demoManifest = {
     "Set size",
     "Resize the focused floating window without moving it.",
   ),
-  setWindowFrame: one(
-    "set-window-frame.json",
-    "Set frame",
-    "Set the focused window’s position and size together.",
-  ),
+  setWindowFrame: { kind: "unavailable", reason: "Internal API only; not a public command." },
   floatWindow: one(
     "float-window.json",
     "Leave tiling",
@@ -110,11 +131,7 @@ export const demoManifest = {
     "Release window",
     "Release the focused window from window-manager control.",
   ),
-  probeWindowLimits: one(
-    "probe-window-limits.json",
-    "Parked window",
-    "Measure a parked window, then restore its frame.",
-  ),
+  probeWindowLimits: { kind: "unavailable", reason: "Internal API only; not a public command." },
   focusWorkspace: one(
     "focus-workspace.json",
     "Switch workspace",
@@ -147,6 +164,7 @@ export const demoManifest = {
     "toggle-pause.json",
     "Toggle pause",
     "Switch the manager from running to paused.",
+    "toggle",
   ),
   reloadConfig: one(
     "reload-config.json",
@@ -215,7 +233,7 @@ export const demoManifest = {
     kind: "unavailable",
     reason: "Unregisters a native launchd service; the browser cannot perform uninstallation.",
   },
-  "diagnostics/doctor": {
+  "diagnostics/permissions": {
     kind: "unavailable",
     reason:
       "Checks actual macOS permissions locally; its docs page uses an illustrative terminal transcript instead.",

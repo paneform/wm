@@ -29,7 +29,7 @@
     { "command": "state", "expect": { "focusedWorkspace": "1" } },
     {
       "playback": "start",
-      "command": "reload-config delta",
+      "command": "config reload delta",
       "caption": "The scenario’s in-memory config reloads successfully.",
       "expect": {
         "wmRunning": true,

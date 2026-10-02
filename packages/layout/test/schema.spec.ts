@@ -217,7 +217,7 @@ describe("wire message round-trips", () => {
       v: 1,
       type: "request",
       id: "req-1",
-      command: { type: "setWindowFrame", windowId: "win:abc123", frame: FRAME },
+      command: { type: "moveWindow", windowId: "win:abc123", point: { x: FRAME.x, y: FRAME.y } },
     } as const;
     expect(decodeWireMessage(encodeWireMessage(request))).toEqual(request);
   });
@@ -373,7 +373,7 @@ describe("hotkey parity commands — wire round-trips (bean wm-pmys)", () => {
   test("every new hotkey command survives a wire encode/decode round-trip", () => {
     const commands = [
       { type: "togglePause" },
-      { type: "moveFocusedWindowToWorkspace", workspace: "2" },
+      { type: "moveWindowToWorkspace", workspace: "2" },
       { type: "moveFocusedWorkspaceToNextDisplay" },
       { type: "focusDirection", direction: "left" },
       { type: "moveDirection", direction: "up" },
