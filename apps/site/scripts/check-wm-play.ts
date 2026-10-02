@@ -2037,6 +2037,123 @@ async function checkDocsCarousel(client: CdpClient): Promise<void> {
   );
 }
 
+async function checkWorkspaceIndicators(client: CdpClient): Promise<void> {
+  const fixture = "[data-carousel-fixture]";
+  const examples = [
+    {
+      slug: "workspaces/move-to-next-display",
+      situation: "example",
+      windows: 1,
+      target: "focused-window",
+      from: "display:main",
+      to: "display:second",
+      workspace: "1",
+    },
+    {
+      slug: "workspaces/move-to-display",
+      situation: "example",
+      windows: 1,
+      target: "focused-window",
+      from: "display:main",
+      to: "display:second",
+      workspace: "1",
+    },
+    {
+      slug: "windows/move-to-workspace",
+      situation: "empty",
+      windows: 2,
+      target: "focused-window",
+      from: "display:main",
+      to: "display:main",
+      workspace: "writing",
+    },
+    {
+      slug: "windows/move-to-workspace",
+      situation: "example",
+      windows: 2,
+      target: "left-neighbor",
+      from: "display:main",
+      to: "display:main",
+      workspace: "writing",
+    },
+  ];
+  for (const example of examples) {
+    await navigate(client, new URL("../docs/commands/windows/move-directional/", pageUrl), {
+      width: 1440,
+      height: 1000,
+    });
+    await waitFor(
+      client,
+      "docs hydration before indicator fixture",
+      "document.querySelector('.situations button.played')",
+    );
+    await evaluate(
+      client,
+      `(async () => {
+      const { mountCommandDemo } = await import('/src/lib/docs/carousel.fixture.ts');
+      window.carouselCleanup = mountCommandDemo(${JSON.stringify(example.slug)}, ${JSON.stringify(example.situation)});
+      return true;
+    })()`,
+      true,
+    );
+    await waitFor(
+      client,
+      "indicator fixture mount",
+      `document.querySelector('${fixture} .situations button')`,
+    );
+    await evaluate(
+      client,
+      `document.querySelector('${fixture} .situations button').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`,
+    );
+    const valid = `(() => {
+      const apps = [...document.querySelectorAll('${fixture} .workspace-apps .workspace-app')];
+      return apps.length === ${example.windows} && apps.every((app) => app.dataset.windowId) && new Set(apps.map((app) => app.dataset.windowId)).size === apps.length;
+    })()`;
+    assert(
+      await evaluate(client, valid),
+      "Window indicators were duplicated or unassociated before playback",
+    );
+    assert(
+      await evaluate(
+        client,
+        `document.querySelector('${fixture} .workspace-app[data-window-id="${example.target}"]').closest('.preview-screen').dataset.displayId === '${example.from}'`,
+      ),
+      "Indicator started on the wrong display",
+    );
+    await evaluate(client, `document.querySelector('${fixture} .situations button').click(); true`);
+    await waitFor(
+      client,
+      "window indicator travels during playback",
+      `document.querySelector('${fixture} .travel-app[data-window-id="${example.target}"]')`,
+    );
+    assert(
+      await evaluate(client, valid),
+      "Window indicators were duplicated or unassociated during animation",
+    );
+    assert(
+      await evaluate(
+        client,
+        `(() => {
+      const app = document.querySelector('${fixture} .workspace-app[data-window-id="${example.target}"]');
+      return app.closest('.preview-screen').dataset.displayId === '${example.to}' && app.closest('.workspace-chip').dataset.workspace === '${example.workspace}';
+    })()`,
+      ),
+      "Indicator did not transfer to the destination chip/display",
+    );
+    await waitFor(
+      client,
+      "indicator animation cleanup",
+      `!document.querySelector('${fixture} .travel-app, ${fixture} .workspace-app-placeholder')`,
+    );
+    assert(await evaluate(client, valid), "Indicator count changed after cleanup");
+    await screenshot(
+      client,
+      `docs-indicators-${example.slug.replaceAll("/", "-")}-${example.situation}.png`,
+    );
+    await evaluate(client, "window.carouselCleanup().then(() => true)", true);
+  }
+}
+
 async function checkDocsTiming(client: CdpClient): Promise<void> {
   for (const count of [1, 2]) {
     await navigate(client, new URL("../docs/commands/windows/move-directional/", pageUrl), {
@@ -2207,6 +2324,8 @@ async function check(): Promise<void> {
     await client.command("Runtime.enable");
     if (process.env.WM_PLAY_CHECK === "docs-timing") {
       await checkDocsTiming(client);
+    } else if (process.env.WM_PLAY_CHECK === "docs-indicators") {
+      await checkWorkspaceIndicators(client);
     } else if (process.env.WM_PLAY_CHECK === "docs-carousel") {
       await checkDocsCarousel(client);
     } else if (process.env.WM_PLAY_CHECK === "docs-demos") {

@@ -2,7 +2,7 @@
   import { onMount, tick } from "svelte";
   import { createScenarioSession, playbackSteps, type ScenarioSession, type SimulationState } from "@paneform/layout-browser";
   import DemoPreview from "./DemoPreview.svelte";
-  import { animateWorkspaceIndicator, captureWorkspaceIndicator } from "./demo-indicator.js";
+  import { animateWorkspaceIndicators, captureWorkspaceIndicators } from "./demo-indicator.js";
   import type { DemoSituation } from "./demo-data.js";
   import { carouselSelection, carouselTarget } from "./carousel.js";
   import { DEMO_CAPTION_COLUMNS, formatDemoCaption } from "./demo-caption.js";
@@ -133,12 +133,12 @@
     try {
       const result = await candidate.step();
       if (generation !== token || !result) return;
-      const focusedId = snapshots[index]?.focusedWindow;
-      const origin = focusedId ? captureWorkspaceIndicator(tiles[index]!, focusedId) : null;
+      const previous = snapshots[index];
+      const origins = previous ? captureWorkspaceIndicators(tiles[index]!, previous) : [];
       snapshots[index] = result.state;
       await tick();
       if (generation !== token) return;
-      clearMove = animateWorkspaceIndicator(tiles[index]!, origin, result.state);
+      clearMove = animateWorkspaceIndicators(tiles[index]!, origins, result.state);
       if (situations[index]!.slug === "exclusive-edge") {
         flash = index;
         flashTimer = setTimeout(() => (flash = -1), DEMO_TIMING.flashFadeMs);
@@ -317,6 +317,7 @@
   .situations::-webkit-scrollbar { display: none; }
   .situations button { flex: 0 0 var(--demo-card-width); position: relative; display: grid; grid-template-rows: var(--demo-preview-height) auto minmax(0, 1fr); gap: .3rem; align-items: start; min-width: 0; padding: .65rem; border: 1px solid var(--docs-line); border-radius: var(--radius-small); background: var(--demo-sunken); color: var(--rp-text); cursor: pointer; font: inherit; scroll-snap-align: start; overflow: hidden; }
   .situations button.active { background: var(--demo-raised); }
+  .situations button :global(.travel-app) { position: absolute; z-index: 2; width: 5px; height: 5px; border-radius: 1.5px; background: var(--rp-gold); pointer-events: none; }
   .situations button:focus-visible { outline-offset: -2px; }
     .situation-title { display: block; margin: 0; color: var(--docs-label); font: 600 var(--docs-xs)/1.3 var(--type-family-keyboard); text-align: center; }
     .step-caption { display: block; inline-size: calc(var(--demo-caption-columns) * 1ch); block-size: 2lh; margin-inline: auto; font: var(--docs-xs)/1.4 var(--type-family-product); color: var(--docs-quiet); letter-spacing: 0; text-align: left; white-space: pre; }
