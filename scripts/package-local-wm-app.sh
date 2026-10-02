@@ -10,7 +10,7 @@ PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH
 APP_ROOT="$HOME/.local/libexec/wm"
 APP="${WM_APP_PATH:-$APP_ROOT/wm.app}"
-SIGNING_SELECTOR="${WM_CODESIGN_IDENTITY:-WM Local Code Signing}"
+SIGNING_SELECTOR="${WM_CODESIGN_IDENTITY:-Developer ID Application: Allan Deutsch (WCW44PJWTC)}"
 SIGNING_KEYCHAIN="${WM_CODESIGN_KEYCHAIN:-}"
 SIGNING_SELECTOR_LOWER="$(printf '%s' "$SIGNING_SELECTOR" | tr '[:upper:]' '[:lower:]')"
 LOCK_KEYCHAIN=false
@@ -68,7 +68,7 @@ case "$APP" in
   *) echo "WM_APP_PATH must be an app bundle directly under $APP_ROOT" >&2; exit 1 ;;
 esac
 
-if [[ -z "${WM_CODESIGN_IDENTITY+x}" && -z "${WM_CODESIGN_KEYCHAIN+x}" ]]; then
+if [[ "$SIGNING_SELECTOR" == "WM Local Code Signing" && -z "${WM_CODESIGN_KEYCHAIN+x}" ]]; then
   SIGNING_KEYCHAIN="$HOME/Library/Keychains/wm-local-signing.keychain-db"
   [[ -e "$SIGNING_KEYCHAIN" ]] || {
     echo "local signing keychain not found: $SIGNING_KEYCHAIN" >&2
@@ -100,7 +100,7 @@ done < <(list_identities)
 
 if (( ${#matches[@]} != 1 )); then
   echo "expected one code-signing identity for '$SIGNING_SELECTOR', found ${#matches[@]}" >&2
-  echo "run scripts/create-local-signing-identity.sh or set WM_CODESIGN_IDENTITY to an exact name or fingerprint" >&2
+  echo "install the Developer ID Application certificate or set WM_CODESIGN_IDENTITY to an exact name or fingerprint" >&2
   exit 1
 fi
 SIGNING_FINGERPRINT="${matches[0]}"
