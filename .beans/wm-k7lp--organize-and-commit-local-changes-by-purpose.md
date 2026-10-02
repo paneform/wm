@@ -5,7 +5,7 @@ status: in-progress
 type: task
 priority: normal
 created_at: 2026-10-02T18:04:20Z
-updated_at: 2026-10-02T18:49:20Z
+updated_at: 2026-10-02T19:01:39Z
 ---
 
 Review the complete working tree and commit the requested local source changes in logical, validated groups. Preserve all existing user work; exclude generated artifacts and external local configuration.
@@ -19,7 +19,8 @@ Review the complete working tree and commit the requested local source changes i
 - [x] Commit per-display workspace indicators and animation/browser checks.
 - [x] Commit the shared command grammar, JSON contracts and caller/example migrations.
 - [x] Commit compact CLI output, app metadata and verbose diagnostics.
-- [ ] Commit command-hierarchy docs navigation.
+- [x] Commit command-hierarchy docs navigation.
+- [ ] Commit the newly added schema-validated configuration examples.
 - [ ] Commit updated design references and remaining formatting-only changes.
 - [ ] Validate commit groups, run final checks and verify the working tree is clean.
 
@@ -68,3 +69,13 @@ a3d9db7 — feat(wm): provide compact command output and verbose diagnostics. In
 ## Navigation staging validation
 
 The exact staged navigation tree passes all 284 site tests, site lint, typecheck and production build in the isolated index workspace. It includes the grammar-derived sidebar/index, concise breadcrumbs/search labels and host-command destinations.
+
+## Commit 7
+
+1cb3199 — feat(site): derive docs navigation from the command hierarchy. All 284 site tests, lint, typecheck and production build pass against its exact staged tree.
+
+## Additional reviewed local edits
+
+New config-examples.ts/docs-config.spec.ts edits appeared during organization. Found retired wm displays/workspace move-window strings in those examples; copying the latter would fail command parsing. Updated to the canonical vocabulary and made keybind examples validate through the single parser, not just the permissive string schema.
+
+The interactive mockup invoked window assign 2 but still put destination windows in writing (docs/mockups/docs-experience.html, SCENES/buildScenario). This made the populated-destination preview behave as an empty destination. Aligned its workspace state and captions to 1/2 before committing the design reference.
