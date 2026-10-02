@@ -518,3 +518,7 @@
   color: var(--color-page-secondary);
   font-size: var(--docs-sm, var(--docs-base));
 }
+.docs-unit {
+  border-bottom: 1px dotted var(--docs-quiet);
+  cursor: help;
+}

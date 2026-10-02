@@ -5,6 +5,8 @@
 
   const { name, preferredDisplay, assign, ...effectiveDefaults } = GLOBAL_DEFAULT_SETTINGS;
 
+  const POINTS_TIP = "macOS logical units: 1pt = 1px on standard-density displays, 2px on Retina";
+
   const sections = configFieldDocs.map((field) => ({
     field,
     reference: configReference.find((entry) => entry.key === field.key)!,
@@ -16,13 +18,24 @@
   <h2 id={`field-${field.key}`}>{field.key}</h2>
   <p>{field.summary}</p>
   <pre><code>{JSON.stringify(field.example, null, 2)}</code></pre>
+  {#if field.table !== undefined}
+    <table><tbody><tr><th>{field.table.headers[0]}</th><th>{field.table.headers[1]}</th></tr>
+      {#each field.table.rows as [label, value]}
+        <tr><td data-label={field.table!.headers[0]}><code>{label}</code></td><td data-label={field.table!.headers[1]}>{value}</td></tr>
+      {/each}
+    </tbody></table>
+  {/if}
+  {#if field.notes.length > 0}<ul>{#each field.notes as note}<li>{note}</li>{/each}</ul>{/if}
   <div class="docs-config-reference">
     {#each flattenReference(reference) as row}
       <div class="docs-config-field" style={`padding-left: ${row.depth * 1.25}rem`}>
         <p class="docs-config-head">
           <code>{row.key}</code>
           <span class="docs-config-badge" data-required={row.required}>{row.required ? "required" : "optional"}</span>
-          <span class="docs-config-type">{row.typeText}</span>
+          <span class="docs-config-type"
+            >{row.typeText}{#if row.unit !== undefined}
+              <span class="docs-unit" title={POINTS_TIP}>{row.unit}</span>{/if}</span
+          >
         </p>
         <p class="docs-config-desc">{row.description}</p>
       </div>

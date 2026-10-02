@@ -11,12 +11,18 @@ import type { Config } from "@paneform/layout";
 import type { ParseError } from "effect/ParseResult";
 import { Either, Schema } from "effect";
 
+export interface ConfigFieldTable {
+  readonly headers: readonly [string, string];
+  readonly rows: readonly (readonly [string, string])[];
+}
+
 export interface ConfigFieldDoc<K extends keyof Config & string = keyof Config & string> {
   readonly key: K;
   readonly summary: string;
   /** The value written under this key in a config document. */
   readonly example: Config[K];
   readonly notes: readonly string[];
+  readonly table?: ConfigFieldTable;
 }
 
 /** Hand-written examples; validateConfigFieldDoc checks each against the
@@ -75,9 +81,25 @@ export const configFieldDocs: readonly [
     key: "keybinds",
     summary: "Chord-to-command bindings, applied natively while the daemon runs.",
     example: { "rshift 1": "workspace focus 1", "lshift rshift 2": "window assign 2" },
-    notes: [
-      "Modifiers are side-aware: rshift and lshift match those physical keys; shift matches either.",
-    ],
+    notes: ["Modifiers are unordered within a chord."],
+    table: {
+      headers: ["Modifier", "Matches"],
+      rows: [
+        ["shift", "either physical shift key"],
+        ["lshift", "left shift key only"],
+        ["rshift", "right shift key only"],
+        ["control", "either physical control key"],
+        ["lcontrol", "left control key only"],
+        ["rcontrol", "right control key only"],
+        ["option", "either physical option key"],
+        ["loption", "left option key only"],
+        ["roption", "right option key only"],
+        ["command", "either physical command key"],
+        ["lcommand", "left command key only"],
+        ["rcommand", "right command key only"],
+        ["fn", "the fn key (no side variants)"],
+      ],
+    },
   },
   {
     key: "experiments",
