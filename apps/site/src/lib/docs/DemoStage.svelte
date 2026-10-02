@@ -291,6 +291,7 @@
     {/each}
   </div>
   </div>
+  {#if situations.length > 1}
   <div class="carousel-dots" role="group" aria-label="Example navigation">
     {#each situations as situation, index (situation.slug)}
       <button type="button" bind:this={pips[index]} class:active={selected === index}
@@ -300,6 +301,7 @@
         onclick={() => choose(index)}></button>
     {/each}
   </div>
+  {/if}
   {#if error}<p class="demo-error" role="alert">{error}</p>{/if}
 </div>
 
@@ -313,7 +315,7 @@
   .scroller.scroll-start::before, .scroller.scroll-end::after { opacity: 1; }
   .situations { position: relative; display: flex; gap: .25rem; padding: .25rem; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; scroll-padding-inline: .25rem; scrollbar-width: none; }
   .situations::-webkit-scrollbar { display: none; }
-  .situations button { flex: 0 0 var(--demo-card-width); position: relative; display: grid; grid-template-rows: var(--demo-preview-height) auto minmax(0, 1fr); gap: .3rem; align-items: start; height: 240px; min-width: 0; padding: .65rem; border: 1px solid var(--docs-line); border-radius: var(--radius-small); background: var(--demo-sunken); color: var(--rp-text); cursor: pointer; font: inherit; scroll-snap-align: start; overflow: hidden; }
+  .situations button { flex: 0 0 var(--demo-card-width); position: relative; display: grid; grid-template-rows: var(--demo-preview-height) auto minmax(0, 1fr); gap: .3rem; align-items: start; min-width: 0; padding: .65rem; border: 1px solid var(--docs-line); border-radius: var(--radius-small); background: var(--demo-sunken); color: var(--rp-text); cursor: pointer; font: inherit; scroll-snap-align: start; overflow: hidden; }
   .situations button.active { background: var(--demo-raised); }
   .situations button:focus-visible { outline-offset: -2px; }
     .situation-title { display: block; margin: 0; color: var(--docs-label); font: 600 var(--docs-xs)/1.3 var(--type-family-keyboard); text-align: center; }

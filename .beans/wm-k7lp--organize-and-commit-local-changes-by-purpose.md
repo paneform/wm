@@ -5,7 +5,7 @@ status: in-progress
 type: task
 priority: normal
 created_at: 2026-10-02T18:04:20Z
-updated_at: 2026-10-02T18:16:40Z
+updated_at: 2026-10-02T18:18:43Z
 ---
 
 Review the complete working tree and commit the requested local source changes in logical, validated groups. Preserve all existing user work; exclude generated artifacts and external local configuration.
@@ -14,7 +14,7 @@ Review the complete working tree and commit the requested local source changes i
 
 - [x] Review all tracked/untracked source changes and identify shared-file staging boundaries.
 - [x] Commit Developer ID packaging defaults and ignore the generated root Swift cache.
-- [ ] Commit full-extent directional stack exchange with its regression scenario.
+- [x] Commit full-extent directional stack exchange with its regression scenario.
 - [ ] Commit focused-window styling and compact demo-card presentation.
 - [ ] Commit per-display workspace indicators and animation/browser checks.
 - [ ] Commit the shared command grammar, JSON contracts and caller/example migrations.
@@ -34,3 +34,7 @@ Packaging syntax and root cache exclusion checks pass. Developer ID selection wa
 ## Commit 1
 
 b58123b — build(wm): default local app packaging to Developer ID signing. Includes the generated root Swift cache ignore and packaging issue report.
+
+## Commit 2
+
+dfd729e — fix(layout): exchange full-span windows with adjacent stacks. Includes the three-window reference scenario and geometric regression tests. All 26 geometric tests and 47 docs checks pass.

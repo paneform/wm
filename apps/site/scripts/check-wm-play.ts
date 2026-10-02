@@ -1807,7 +1807,7 @@ async function checkDocsCarousel(client: CdpClient): Promise<void> {
         "A single or crowded example stretched beyond its card width",
       );
       assert(
-        layout.cardHeights.every((value) => value === 240) &&
+        layout.cardHeights.every((value) => Math.abs(value - layout.cardHeights[0]!) < 1) &&
           layout.tops.every((value) => Math.abs(value - layout.tops[0]!) < 1),
         "Examples stacked or changed height",
       );
@@ -1832,7 +1832,8 @@ async function checkDocsCarousel(client: CdpClient): Promise<void> {
          const cards = [...stage.querySelectorAll('.situations button')];
          const surfaces = cards.every((node) => getComputedStyle(node).backgroundColor !== 'rgba(0, 0, 0, 0)');
          const tight = parseFloat(getComputedStyle(stage.querySelector('.situations')).gap) <= 4;
-         return clear && surfaces && tight && cards.every((card) => card.getBoundingClientRect().width < 270) && !stage.querySelector('.carousel-controls, .carousel-count') && stage.querySelectorAll('.progress').length === ${count} && dots.length === ${count} && active.length === 1 && parseFloat(getComputedStyle(active[0], '::after').width) > 4;
+         const indicators = ${count} === 1 ? dots.length === 0 : dots.length === ${count} && active.length === 1 && parseFloat(getComputedStyle(active[0], '::after').width) > 4;
+         return clear && surfaces && tight && cards.every((card) => card.getBoundingClientRect().width < 270) && !stage.querySelector('.carousel-controls, .carousel-count') && stage.querySelectorAll('.progress').length === ${count} && indicators;
       })()`,
       );
       assert(

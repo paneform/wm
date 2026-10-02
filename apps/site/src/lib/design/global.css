@@ -31,9 +31,9 @@
   --color-line-default: color-mix(in srgb, var(--rp-muted) 40%, transparent);
   --color-line-strong: var(--rp-subtle);
   --color-device-shell: color-mix(in srgb, var(--rp-overlay) 75%, var(--rp-subtle));
-  --color-screen-background: var(--rp-overlay);
+  --color-screen-background: var(--rp-surface);
   --color-screen-off: color-mix(in srgb, var(--rp-base) 82%, var(--rp-surface));
-  --color-window-background: var(--rp-surface);
+  --color-window-background: var(--rp-overlay);
   --color-window-titlebar-background: color-mix(in srgb, var(--rp-overlay) 35%, var(--rp-surface));
   --color-window-focus: var(--rp-iris);
   --color-window-unfocused: var(--rp-subtle);
