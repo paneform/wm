@@ -86,6 +86,16 @@ function replaceNode(tree: BspNode, target: BspNode, replacement: BspNode): BspN
   return first === tree.first && second === tree.second ? tree : { ...tree, first, second };
 }
 
+/** Single-pass exchange of two disjoint nodes (neither contains the other). */
+function exchangeNodes(tree: BspNode, a: BspNode, b: BspNode): BspNode {
+  if (tree === a) return b;
+  if (tree === b) return a;
+  if (tree.kind === "leaf") return tree;
+  const first = exchangeNodes(tree.first, a, b);
+  const second = exchangeNodes(tree.second, a, b);
+  return first === tree.first && second === tree.second ? tree : { ...tree, first, second };
+}
+
 function commonAncestor(a: Region, b: Region): Split | undefined {
   let shared: Split | undefined;
   for (let i = 0; i < Math.min(a.path.length, b.path.length); i += 1) {
@@ -308,6 +318,16 @@ function moveDirect(
   const targetParent = target.path.at(-1)!;
   if (targetParent.axis !== axisOf(dimension)) {
     if (origin.path.includes(targetParent)) return input.tree;
+    // A window spanning the target stack's full extent trades places with
+    // the whole stack — splicing a full-height pane into a stack would only
+    // shrink it (bean wm-2h93). Smaller panes keep the splice below.
+    const targetRegion = regions.find(({ node }) => node === targetParent);
+    if (
+      targetRegion !== undefined &&
+      length(origin.frame, orthogonal) + BORDER_TOLERANCE >= length(targetRegion.frame, orthogonal)
+    ) {
+      return exchangeNodes(input.tree, origin.node, targetParent);
+    }
     const rest = targetParent.first === target.node ? targetParent.second : targetParent.first;
     const pair = {
       ...targetParent,

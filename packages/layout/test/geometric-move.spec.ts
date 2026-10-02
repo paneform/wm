@@ -91,15 +91,31 @@ describe("moveGeometrically confirmed transformations", () => {
     });
   });
 
-  test("A right leaves full-height B beside C over A", () => {
-    const expected = vertical(0.5, leaf("B"), horizontal(0.5, leaf("C"), leaf("A")));
+  test("full-height C left swaps with the whole left stack", () => {
+    // Mirror of the fixture: stack A-over-B on the left, full-height C on the
+    // right. The moved window spans the stack's full extent, so it trades
+    // places with the whole stack instead of splicing into it (bean wm-2h93).
+    const mirrored = vertical(0.5, horizontal(0.5, leaf("A"), leaf("B")), leaf("C"));
+    const expected = vertical(0.5, leaf("C"), horizontal(0.5, leaf("A"), leaf("B")));
+    const result = move(mirrored, "C", "left", content);
+
+    expect(result).toEqual(expected);
+    expectFrames(result, content, {
+      C: frame(0, 0, 600, 800),
+      A: frame(600, 0, 600, 400),
+      B: frame(600, 400, 600, 400),
+    });
+  });
+
+  test("A right swaps with the whole right stack", () => {
+    const expected = vertical(0.5, horizontal(0.5, leaf("B"), leaf("C")), leaf("A"));
     const result = move(t, "A", "right", content);
 
     expect(result).toEqual(expected);
     expectFrames(result, content, {
-      B: frame(0, 0, 600, 800),
-      C: frame(600, 0, 600, 400),
-      A: frame(600, 400, 600, 400),
+      B: frame(0, 0, 600, 400),
+      C: frame(0, 400, 600, 400),
+      A: frame(600, 0, 600, 800),
     });
   });
 
