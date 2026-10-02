@@ -1,12 +1,14 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { onMount } from "svelte";
+  import { afterNavigate } from "$app/navigation";
+  import { onMount, tick } from "svelte";
   import { setContext } from "svelte";
   import { commandNavigation, docsBase, guideLinks, searchEntries } from "$lib/docs/navigation.js";
   import CommandNavigation from "$lib/docs/CommandNavigation.svelte";
   import PaneformWordmark from "$lib/hero/PaneformWordmark.svelte";
   import DocsToc from "$lib/docs/DocsToc.svelte";
   import "$lib/docs/docs.css";
+  import { enhanceHeadingAnchors } from "$lib/docs/heading-anchors.js";
 
   let { children, data } = $props();
   setContext("docs-playground", () => data.playgroundEnabled);
@@ -17,6 +19,7 @@
   const results = $derived(searchEntries.filter((entry) => `${entry.title} ${entry.summary} ${entry.keywords ?? ''}`.toLowerCase().includes(search.toLowerCase())).slice(0, 12));
 
   onMount(() => {
+    enhanceHeadingAnchors(document);
     function keydown(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault(); searchOpen = true; searchInput?.focus();
@@ -25,6 +28,10 @@
     }
     window.addEventListener("keydown", keydown);
     return () => { window.removeEventListener("keydown", keydown); };
+  });
+
+  afterNavigate(() => {
+    void tick().then(() => enhanceHeadingAnchors(document));
   });
 </script>
 

@@ -81,7 +81,7 @@ export const configFieldDocs: readonly [
     key: "keybinds",
     summary: "Chord-to-command bindings, applied natively while the daemon runs.",
     example: { "rshift 1": "workspace focus 1", "lshift rshift 2": "window assign 2" },
-    notes: ["Modifiers are unordered within a chord."],
+    notes: ["Modifiers are unordered within a chord.", "Chords may contain both left and right variants of the same key."],
     table: {
       headers: ["Modifier", "Matches"],
       rows: [

@@ -522,3 +522,26 @@
   border-bottom: 1px dotted var(--docs-quiet);
   cursor: help;
 }
+.docs main :is(h1, h2, h3, h4, h5, h6)[id] > a.docs-anchor {
+  color: inherit;
+  text-decoration: none;
+}
+.docs main :is(h2, h3, h4, h5, h6)[id] {
+  position: relative;
+}
+/* Marker hangs in the left gutter, outside the text flow; only on viewports
+   wide enough for the nav sidebar (52rem = 832px). */
+@media (min-width: 52rem) {
+  .docs main :is(h2, h3, h4, h5, h6)[id] > a.docs-anchor::before {
+    content: "#";
+    position: absolute;
+    right: calc(100% + 0.4rem);
+    color: var(--docs-quiet);
+    opacity: 0;
+    transition: opacity var(--motion-feedback, 0.15s) ease;
+  }
+  .docs main :is(h2, h3, h4, h5, h6)[id]:hover > a.docs-anchor::before,
+  .docs main :is(h2, h3, h4, h5, h6)[id] > a.docs-anchor:focus-visible::before {
+    opacity: 1;
+  }
+}
