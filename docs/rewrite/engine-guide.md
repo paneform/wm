@@ -124,6 +124,7 @@ abort probing if restoration fails). Identity must be validated around EVERY wri
 replacement window behind the same handle aborts before mutating the replacement.
 
 **Constraint probe / learning** (from ordinary writes AND dedicated probes):
+
 - Learn only from `constrained` or `stableClamp` outcomes. Never from `progressing`.
 - Direction: observed > requested ⇒ minimum candidate; < ⇒ maximum candidate (per axis).
 - **Work-area flush guard:** observation edge within 2 pt of work-area edge is NOT
@@ -185,7 +186,7 @@ sliver visible (~1 pt horizontal, ~52 pt vertical, probed per display+corner):
 1. Corner priority: bottomLeft, bottomRight, topLeft, topRight. Target math:
    left corners `x = display.x − width + limits.horizontal`; right corners
    `x = display.maxX − limits.horizontal`; top `y = display.y − height +
-   limits.vertical`; bottom `y = display.maxY − limits.vertical`.
+limits.vertical`; bottom `y = display.maxY − limits.vertical`.
 2. Feasibility: target must have ZERO-area intersection (edge-touch allowed, ≥1 pt
    overlap rejected) with every OTHER display frame. Side-by-side displays allow only
    outward corners; a fully surrounded display has none.
@@ -259,7 +260,7 @@ Global keybinds use chord strings as object keys (JSON cannot use arrays as keys
 
 ```jsonc
 "keybinds": {
-  "lshift rshift s": "window move workspace S",
+  "lshift rshift s": "window assign S",
   "rshift s": "workspace focus S"
 }
 ```
@@ -269,8 +270,8 @@ Directional group moves are a tentative, opt-in experiment:
 ```jsonc
 {
   "experiments": {
-    "directionalMoveGroups": true
-  }
+    "directionalMoveGroups": true,
+  },
 }
 ```
 
@@ -298,6 +299,7 @@ queue: serialized FIFO, idempotent-command coalescing, suspicious-repeat escalat
 15 s timeout, pendingLimit 256, historyLimit 512, batches ≤64 stop-on-first-failure.
 CLI, WebSocket server, and renderer ALL call this same layer. Queries return last
 committed state plus pending metadata — queries never wait on platform I/O.
+
 ## Explicit dimension-limit diagnostic
 
 `probeWindowLimits` requires a managed window parked for an invisible workspace,

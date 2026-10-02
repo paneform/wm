@@ -117,7 +117,7 @@ For multiple displays, a placement legal on any display is retained. Otherwise t
 
 ## Steps and events
 
-Every step contains exactly one `command` or one `event`. Commands use the `wm` CLI grammar but are parsed directly as data. They are never passed to a shell. `reload-config` reloads the scenario's in-memory immutable config; it does not read a path. Host-only subscriptions are not supported.
+Every step contains exactly one `command` or one `event`. Commands use the `wm` CLI grammar but are parsed directly as data by the shared TypeScript parser. They are never passed to a shell. `config reload` reloads the scenario's in-memory immutable config; it does not read a path. Host-only subscriptions and internal limit probes are not public scenario commands.
 
 The simulator also handles `service start`, `service stop`, and `service restart`, each with an optional `wm` prefix. These commands only control the simulator lifecycle and never invoke a shell or native IPC. Start and stop are idempotent. Other WM commands fail with code `wm_not_running` while stopped and can assert that result with `expect.error`.
 
@@ -186,7 +186,7 @@ At Start, a paused cursor, or the end of playback, desktop actions are recorded 
 
 Steps remain editable after playback. Appending or editing only future steps keeps the current layout and cursor; changing an executed step resets playback to the start. If a failed step may already have changed runtime state, applying edited steps also resets the session rather than retaining a state that no longer matches replay. Failed or superseded saves retain unsaved edits.
 
-Dragging records `window_dragged` attempted paths, while resizing and inspector edits use physical `window_changed` events. These are not strict `debug-frame` commands. Offscreen gestures therefore do not produce a false geometry-write failure. The running window manager can still retile the resulting scene; paused or stopped scenes retain physical edits without WM repair policy, while an enabled OS profile still applies its release correction.
+Dragging records `window_dragged` attempted paths, while resizing and inspector edits use physical `window_changed` events. These do not call the internal strict frame-setting API. Offscreen gestures therefore do not produce a false geometry-write failure. The running window manager can still retile the resulting scene; paused or stopped scenes retain physical edits without WM repair policy, while an enabled OS profile still applies its release correction.
 
 Choose **Load local config** to import a JSON/JSONC config and its hotkeys. The canonical native location is `~/.config/paneform/wm/config.jsonc`; `WM_CONFIG` and `XDG_CONFIG_HOME` can select other locations. The browser cannot preselect an arbitrary local directory or file. Its picker remembers the previously used folder where supported; on macOS, Command-Shift-G opens the path entry. A standard file input is used when the extended picker is unavailable. Loading config resets playback and rejects invalid or oversized files without replacing the active session.
 
@@ -194,7 +194,7 @@ Click the desktop before using physical hotkeys. Bindings are inactive in text f
 
 Playback does not rewrite the authored starting state. **Return to start** rebuilds it and reruns any preparation; subsequent actions insert before the first playback step. **Use current layout as new start** is the explicit operation that replaces the baseline and clears previous setup history. Export and share always retain the baseline and recorded sequence, including pre-WM setup.
 
-Step headings edit the caption directly. Drag a handle to reorder, or focus it and use Space/Enter to pick up/drop, arrow keys to move, and Escape to cancel. Pointer cancellation also restores the prior order. Trash buttons remove steps. Clicking a command opens the token builder; hovering its segments describes commands and variable roles. Those descriptions come from the portable `commandPaths`/`serviceCommandPaths` metadata in `@paneform/layout`, also used for CLI help (including `wm workspace move-window --help`) and available to documentation generators. The browser exposes `scenarioCommandPaths` and `describeScenarioCommandTokens` for its supported service subset.
+Step headings edit the caption directly. Drag a handle to reorder, or focus it and use Space/Enter to pick up/drop, arrow keys to move, and Escape to cancel. Pointer cancellation also restores the prior order. Trash buttons remove steps. Clicking a command opens the token builder; hovering its segments describes commands and variable roles. Those descriptions come from the portable `commandPaths`/`serviceCommandPaths` metadata in `@paneform/layout`, also used for CLI help (including `wm window assign --help`) and available to documentation generators. The browser exposes `scenarioCommandPaths` and `describeScenarioCommandTokens` for its supported service subset.
 
 The dock sizes itself relative to the screen and its reserved bottom strip. New playground desktop displays reserve space below the work area. Imported displays with no bottom reservation keep their physical geometry and use a compact overlay instead; showing the dock does not silently resize imported layouts.
 

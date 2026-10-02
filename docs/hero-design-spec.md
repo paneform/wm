@@ -80,19 +80,19 @@ layout.
 
 Use the following copy for the first visual prototype:
 
-| Element | Copy |
-| --- | --- |
-| Eyebrow | `paneform / wm` |
-| Heading | `Every window in its place.` |
-| Description | `A reliability-first tiling window manager for macOS. Group windows into workspaces, then move the whole workspace between displays.` |
-| Primary action | `Join the waitlist` |
-| Support line | `Apple silicon. Current macOS.` |
-| Stage instruction | `Click an app or focus the demo and use the keyboard.` |
-| Pause action | `Pause demo` |
-| Resume action | `Resume demo` |
-| Replay action | `Replay demo` |
-| Active-user status | `You're in control.` |
-| Completed status | `Demo complete. Try it.` |
+| Element            | Copy                                                                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Eyebrow            | `paneform / wm`                                                                                                                       |
+| Heading            | `Every window in its place.`                                                                                                          |
+| Description        | `A reliability-first tiling window manager for macOS. Group windows into workspaces, then move the whole workspace between displays.` |
+| Primary action     | `Join the waitlist`                                                                                                                   |
+| Support line       | `Apple silicon. Current macOS.`                                                                                                       |
+| Stage instruction  | `Click an app or focus the demo and use the keyboard.`                                                                                |
+| Pause action       | `Pause demo`                                                                                                                          |
+| Resume action      | `Resume demo`                                                                                                                         |
+| Replay action      | `Replay demo`                                                                                                                         |
+| Active-user status | `You're in control.`                                                                                                                  |
+| Completed status   | `Demo complete. Try it.`                                                                                                              |
 
 The CTA is an anchor to a hosted waitlist URL supplied through the build-time
 `PUBLIC_WAITLIST_URL` variable. It uses same-tab navigation. A nearby `Privacy`
@@ -167,55 +167,55 @@ These are the only opaque color primitives. They come from the official Rose
 Pine palette. Alpha colors and gradients must be derived from these primitives
 with tokenized opacity or `color-mix()`.
 
-| Role | Main | Dawn |
-| --- | --- | --- |
-| Base | `#191724` | `#faf4ed` |
+| Role    | Main      | Dawn      |
+| ------- | --------- | --------- |
+| Base    | `#191724` | `#faf4ed` |
 | Surface | `#1f1d2e` | `#fffaf3` |
 | Overlay | `#26233a` | `#f2e9e1` |
-| Muted | `#6e6a86` | `#9893a5` |
-| Subtle | `#908caa` | `#797593` |
-| Text | `#e0def4` | `#464261` |
-| Love | `#eb6f92` | `#b4637a` |
-| Gold | `#f6c177` | `#ea9d34` |
-| Rose | `#ebbcba` | `#d7827e` |
-| Pine | `#31748f` | `#286983` |
-| Foam | `#9ccfd8` | `#56949f` |
-| Iris | `#c4a7e7` | `#907aa9` |
+| Muted   | `#6e6a86` | `#9893a5` |
+| Subtle  | `#908caa` | `#797593` |
+| Text    | `#e0def4` | `#464261` |
+| Love    | `#eb6f92` | `#b4637a` |
+| Gold    | `#f6c177` | `#ea9d34` |
+| Rose    | `#ebbcba` | `#d7827e` |
+| Pine    | `#31748f` | `#286983` |
+| Foam    | `#9ccfd8` | `#56949f` |
+| Iris    | `#c4a7e7` | `#907aa9` |
 
 ### Semantic color tokens
 
-| Token | Main mapping | Dawn mapping | Use |
-| --- | --- | --- | --- |
-| `color.page.background` | Base | Base | Page and scene background |
-| `color.page.foreground` | Text | Text | Main copy |
-| `color.page.secondary` | Subtle | Text | Description and instructions |
-| `color.page.quiet` | Subtle | Text | Small inactive labels, differentiated by weight |
-| `color.surface.base` | Surface | Surface | Window and control surfaces |
-| `color.surface.raised` | Overlay | Overlay | Dock, keycaps, raised controls |
-| `color.line.default` | Muted at low opacity | Muted at low opacity | Hairlines |
-| `color.line.strong` | Subtle | Subtle | Hardware edges |
-| `color.device.shell` | Overlay mixed with Subtle | Overlay mixed with Muted | Laptop and monitor shell |
-| `color.device.highlight` | Subtle at low opacity | Surface | Lit shell edge |
-| `color.screen.background` | Base | Base | Powered display background |
-| `color.screen.off` | Base mixed with Surface | Overlay mixed with Base | Unpowered display |
-| `color.window.background` | Surface | Surface | Managed window body |
-| `color.window.focus` | Iris | Iris | Focused window frame |
-| `color.window.unfocused` | Subtle | Subtle | Unfocused frame |
-| `color.workspace.text` | Text | Text | Workspace marker text |
-| `color.workspace.accent` | Iris | Iris | Workspace marker edge or shape |
-| `color.state.connected` | Foam | Pine | Cable contact and powered state |
-| `color.state.warning` | Gold | Gold | Recoverable status |
-| `color.state.error` | Love | Love | Failure status |
-| `color.control.close` | Love | Love | Close circle |
-| `color.control.minimize` | Gold | Gold | Minimize circle |
-| `color.control.maximize` | Pine | Pine | Maximize circle |
-| `color.key.label` | Text | Text | Idle keyboard legend |
-| `color.key.active` | Foam | Pine | Pressed key legend |
-| `color.key.edge.active` | Iris | Iris | Pressed key edge |
-| `color.action.background` | Foam | Pine | Waitlist action |
-| `color.action.foreground` | Base | Surface | Waitlist action text |
-| `color.focus.ring` | Foam | Pine | Browser focus ring |
-| `color.cable` | Subtle | Muted | Cable stroke |
+| Token                     | Main mapping              | Dawn mapping             | Use                                             |
+| ------------------------- | ------------------------- | ------------------------ | ----------------------------------------------- |
+| `color.page.background`   | Base                      | Base                     | Page and scene background                       |
+| `color.page.foreground`   | Text                      | Text                     | Main copy                                       |
+| `color.page.secondary`    | Subtle                    | Text                     | Description and instructions                    |
+| `color.page.quiet`        | Subtle                    | Text                     | Small inactive labels, differentiated by weight |
+| `color.surface.base`      | Surface                   | Surface                  | Window and control surfaces                     |
+| `color.surface.raised`    | Overlay                   | Overlay                  | Dock, keycaps, raised controls                  |
+| `color.line.default`      | Muted at low opacity      | Muted at low opacity     | Hairlines                                       |
+| `color.line.strong`       | Subtle                    | Subtle                   | Hardware edges                                  |
+| `color.device.shell`      | Overlay mixed with Subtle | Overlay mixed with Muted | Laptop and monitor shell                        |
+| `color.device.highlight`  | Subtle at low opacity     | Surface                  | Lit shell edge                                  |
+| `color.screen.background` | Base                      | Base                     | Powered display background                      |
+| `color.screen.off`        | Base mixed with Surface   | Overlay mixed with Base  | Unpowered display                               |
+| `color.window.background` | Surface                   | Surface                  | Managed window body                             |
+| `color.window.focus`      | Iris                      | Iris                     | Focused window frame                            |
+| `color.window.unfocused`  | Subtle                    | Subtle                   | Unfocused frame                                 |
+| `color.workspace.text`    | Text                      | Text                     | Workspace marker text                           |
+| `color.workspace.accent`  | Iris                      | Iris                     | Workspace marker edge or shape                  |
+| `color.state.connected`   | Foam                      | Pine                     | Cable contact and powered state                 |
+| `color.state.warning`     | Gold                      | Gold                     | Recoverable status                              |
+| `color.state.error`       | Love                      | Love                     | Failure status                                  |
+| `color.control.close`     | Love                      | Love                     | Close circle                                    |
+| `color.control.minimize`  | Gold                      | Gold                     | Minimize circle                                 |
+| `color.control.maximize`  | Pine                      | Pine                     | Maximize circle                                 |
+| `color.key.label`         | Text                      | Text                     | Idle keyboard legend                            |
+| `color.key.active`        | Foam                      | Pine                     | Pressed key legend                              |
+| `color.key.edge.active`   | Iris                      | Iris                     | Pressed key edge                                |
+| `color.action.background` | Foam                      | Pine                     | Waitlist action                                 |
+| `color.action.foreground` | Base                      | Surface                  | Waitlist action text                            |
+| `color.focus.ring`        | Foam                      | Pine                     | Browser focus ring                              |
+| `color.cable`             | Subtle                    | Muted                    | Cable stroke                                    |
 
 Normal-size text never uses an alpha-reduced foreground. Small text uses only
 the foreground combinations above. Decorative hairlines may use lower opacity,
@@ -247,20 +247,20 @@ workspace labels, key readouts, and window labels. Use the system UI stack for
 generic app glyphs only. Font files ship with the static site; no page-load font
 request goes to a third party.
 
-| Token | Value |
-| --- | --- |
-| `type.family.product` | Commit Mono with a system monospace fallback |
-| `type.family.system` | System UI stack |
-| `type.size.hero` | `clamp(2rem, 1.25rem + 3vw, 4.5rem)` |
-| `type.size.body` | `clamp(0.875rem, 0.82rem + 0.25vw, 1.0625rem)` |
-| `type.size.control` | `0.8125rem` |
-| `type.size.label` | `0.6875rem` |
-| `type.weight.regular` | `400` |
-| `type.weight.medium` | `550` |
-| `type.weight.strong` | `650` |
-| `type.leading.hero` | `1.02` |
-| `type.leading.body` | `1.55` |
-| `type.tracking.label` | `0.12em` |
+| Token                 | Value                                          |
+| --------------------- | ---------------------------------------------- |
+| `type.family.product` | Commit Mono with a system monospace fallback   |
+| `type.family.system`  | System UI stack                                |
+| `type.size.hero`      | `clamp(2rem, 1.25rem + 3vw, 4.5rem)`           |
+| `type.size.body`      | `clamp(0.875rem, 0.82rem + 0.25vw, 1.0625rem)` |
+| `type.size.control`   | `0.8125rem`                                    |
+| `type.size.label`     | `0.6875rem`                                    |
+| `type.weight.regular` | `400`                                          |
+| `type.weight.medium`  | `550`                                          |
+| `type.weight.strong`  | `650`                                          |
+| `type.leading.hero`   | `1.02`                                         |
+| `type.leading.body`   | `1.55`                                         |
+| `type.tracking.label` | `0.12em`                                       |
 
 The heading uses sentence case. Technical labels may use uppercase. Do not use
 all-uppercase prose.
@@ -296,14 +296,14 @@ sufficient enforcement mechanism.
 
 ### Core scales
 
-| Family | Token values |
-| --- | --- |
-| Space | `0.25rem`, `0.5rem`, `0.75rem`, `1rem`, `1.5rem`, `2rem`, `3rem`, `4rem`, `6rem` |
-| Stroke | `1px`, `2px`, `3px` |
-| Radius | `2px`, `4px`, `8px`, `12px`, `18px` |
-| Opacity | `0.08`, `0.14`, `0.22`, `0.4`, `0.64`, `0.88`, `1` |
-| Glow blur | `0.35rem`, `0.65rem`, `1rem` |
-| Layer | background, cable, monitor, laptop, cursor, readout, controls |
+| Family    | Token values                                                                     |
+| --------- | -------------------------------------------------------------------------------- |
+| Space     | `0.25rem`, `0.5rem`, `0.75rem`, `1rem`, `1.5rem`, `2rem`, `3rem`, `4rem`, `6rem` |
+| Stroke    | `1px`, `2px`, `3px`                                                              |
+| Radius    | `2px`, `4px`, `8px`, `12px`, `18px`                                              |
+| Opacity   | `0.08`, `0.14`, `0.22`, `0.4`, `0.64`, `0.88`, `1`                               |
+| Glow blur | `0.35rem`, `0.65rem`, `1rem`                                                     |
+| Layer     | background, cable, monitor, laptop, cursor, readout, controls                    |
 
 The page gutter is `clamp(1rem, 4vw, 4rem)`. The copy measure is `34rem`. The
 hero minimum block size is `100svh`. These values are tokens, not literals in a
@@ -311,32 +311,32 @@ route or component.
 
 ### Required geometry and effect tokens
 
-| Token | Value |
-| --- | --- |
-| `scene.perspective` | `1800` scene units |
-| `scene.perspectiveOrigin` | `50% 45%` |
-| `scene.safeArea` | `64` scene units |
-| `scene.laptop.basePitch` | `62deg` |
-| `scene.laptop.lidClosed` | `0deg` relative to base |
-| `scene.laptop.lidOpen` | `104deg` relative to base |
-| `scene.laptop.screenDepth` | `2` scene units |
-| `scene.cable.stroke` | `3` scene units |
-| `scene.cable.wideControlA` | `(0, 176)` from start |
-| `scene.cable.wideControlB` | `(-138, 112)` from end |
-| `scene.cable.stackControlA` | `(0, 160)` from start |
-| `scene.cable.stackControlB` | `(-80, -100)` from end |
-| `control.target.minimum` | `44px` projected size |
-| `effect.glow.screenOpacity` | `0.22` |
-| `effect.glow.keyOpacity` | `0.14` |
-| `effect.glow.keyActiveOpacity` | `0.4` |
-| `keyboard.unit` | `1` model unit |
-| `keyboard.gap` | `0.08` keyboard units |
-| `keyboard.bedWidth` | `16.04` keyboard units |
-| `keyboard.radius` | `0.10` keyboard units |
-| `keyboard.travel` | `0.06` keyboard units |
-| `runtime.enhancementWatchdog` | `4000ms` |
-| `runtime.bootstrapTimeout` | `8000ms` |
-| `runtime.lazyIdleTimeout` | `1000ms` |
+| Token                          | Value                     |
+| ------------------------------ | ------------------------- |
+| `scene.perspective`            | `1800` scene units        |
+| `scene.perspectiveOrigin`      | `50% 45%`                 |
+| `scene.safeArea`               | `64` scene units          |
+| `scene.laptop.basePitch`       | `62deg`                   |
+| `scene.laptop.lidClosed`       | `0deg` relative to base   |
+| `scene.laptop.lidOpen`         | `104deg` relative to base |
+| `scene.laptop.screenDepth`     | `2` scene units           |
+| `scene.cable.stroke`           | `3` scene units           |
+| `scene.cable.wideControlA`     | `(0, 176)` from start     |
+| `scene.cable.wideControlB`     | `(-138, 112)` from end    |
+| `scene.cable.stackControlA`    | `(0, 160)` from start     |
+| `scene.cable.stackControlB`    | `(-80, -100)` from end    |
+| `control.target.minimum`       | `44px` projected size     |
+| `effect.glow.screenOpacity`    | `0.22`                    |
+| `effect.glow.keyOpacity`       | `0.14`                    |
+| `effect.glow.keyActiveOpacity` | `0.4`                     |
+| `keyboard.unit`                | `1` model unit            |
+| `keyboard.gap`                 | `0.08` keyboard units     |
+| `keyboard.bedWidth`            | `16.04` keyboard units    |
+| `keyboard.radius`              | `0.10` keyboard units     |
+| `keyboard.travel`              | `0.06` keyboard units     |
+| `runtime.enhancementWatchdog`  | `4000ms`                  |
+| `runtime.bootstrapTimeout`     | `8000ms`                  |
+| `runtime.lazyIdleTimeout`      | `1000ms`                  |
 
 The canonical keyboard data source defines every row, key ID, code, legend,
 unit width, and row offset. It is part of the generated token contract rather
@@ -371,12 +371,12 @@ Use one unitless hardware model in which the Studio Display enclosure is 1000
 units wide. Responsive layouts change placement and camera framing, never the
 device dimensions.
 
-| Token | Wide composition | Stacked composition |
-| --- | --- | --- |
-| Scene model | `1760 x 1100` | `1100 x 1550` |
-| Studio origin | `(80, 240)` | `(50, 40)` |
-| MacBook origin | `(1178, 520)` | `(299, 880)` |
-| Layout switch | Container width at least `72rem` | Container width below `72rem` |
+| Token          | Wide composition                 | Stacked composition           |
+| -------------- | -------------------------------- | ----------------------------- |
+| Scene model    | `1760 x 1100`                    | `1100 x 1550`                 |
+| Studio origin  | `(80, 240)`                      | `(50, 40)`                    |
+| MacBook origin | `(1178, 520)`                    | `(299, 880)`                  |
+| Layout switch  | Container width at least `72rem` | Container width below `72rem` |
 
 The intro camera centers and fits the MacBook bounds. The connected camera fits
 the union of both device bounds. Expand camera frame `F` by the scene-space safe
@@ -404,18 +404,18 @@ directly from viewport CSS pixels.
 The model is based on Apple's published dimensions for a 14-inch M-series
 MacBook Pro and 27-inch Studio Display.
 
-| Hardware token | Value | Basis |
-| --- | --- | --- |
-| Studio enclosure width | `1000` scene units | Master unit |
-| Studio enclosure height | `584` scene units | 24.5 by 14.3 inch enclosure |
-| Studio active display | `959 x 539` scene units | 5120 by 2880 at 218 ppi |
-| Studio total stand height | `767` scene units | 18.8 inch total height |
-| MacBook chassis width | `502` scene units | 12.31 versus 24.5 inch width |
-| MacBook base depth | `355` scene units | 8.71 versus 24.5 inch width |
-| MacBook closed thickness | `25` scene units | 0.61 versus 24.5 inch width |
-| MacBook lid height | `338` scene units | Active panel plus stylized bezel |
-| MacBook active display | `485 x 315` scene units | 3024 by 1964 at 254 ppi |
-| MacBook camera housing | `55 x 12` scene units | Approximate, centered exclusion |
+| Hardware token            | Value                   | Basis                            |
+| ------------------------- | ----------------------- | -------------------------------- |
+| Studio enclosure width    | `1000` scene units      | Master unit                      |
+| Studio enclosure height   | `584` scene units       | 24.5 by 14.3 inch enclosure      |
+| Studio active display     | `959 x 539` scene units | 5120 by 2880 at 218 ppi          |
+| Studio total stand height | `767` scene units       | 18.8 inch total height           |
+| MacBook chassis width     | `502` scene units       | 12.31 versus 24.5 inch width     |
+| MacBook base depth        | `355` scene units       | 8.71 versus 24.5 inch width      |
+| MacBook closed thickness  | `25` scene units        | 0.61 versus 24.5 inch width      |
+| MacBook lid height        | `338` scene units       | Active panel plus stylized bezel |
+| MacBook active display    | `485 x 315` scene units | 3024 by 1964 at 254 ppi          |
+| MacBook camera housing    | `55 x 12` scene units   | Approximate, centered exclusion  |
 
 The Studio Display is about 1.99 times the laptop enclosure width. Both final
 responsive compositions must preserve that ratio. The laptop may appear larger
@@ -426,10 +426,10 @@ only while it is the sole device and the camera is fitted to it.
 The layout engine works in fixed macOS logical points, independent of browser
 size and the scene camera.
 
-| Display | Frame | Work area | Scale |
-| --- | --- | --- | --- |
-| MacBook primary | `(0, 0, 1512, 982)` | `(0, 44, 1512, 830)` | `2` |
-| Studio external | `(-2560, 0, 2560, 1440)` | `(-2560, 44, 2560, 1396)` | `2` |
+| Display         | Frame                    | Work area                 | Scale |
+| --------------- | ------------------------ | ------------------------- | ----- |
+| MacBook primary | `(0, 0, 1512, 982)`      | `(0, 44, 1512, 830)`      | `2`   |
+| Studio external | `(-2560, 0, 2560, 1440)` | `(-2560, 44, 2560, 1396)` | `2`   |
 
 The MacBook work area reserves a top safe band for the camera housing and a
 bottom band for the visible fake dock. The Studio Display reserves only the top
@@ -551,14 +551,14 @@ engine state, not from the scripted timeline.
 
 The MacBook display has six apps in this order:
 
-| App | Glyph direction | Demo use |
-| --- | --- | --- |
-| Clock | Hands in a circle | Initial generic window |
-| Browser | Abstract compass or globe | Moved to workspace B |
-| Terminal | Prompt and cursor | Moved to workspace T |
-| Music | Note and waveform | Available to the user |
-| Contacts | Two abstract silhouettes | Available to the user |
-| Messages | Two speech rectangles | Moved to workspace M |
+| App      | Glyph direction           | Demo use               |
+| -------- | ------------------------- | ---------------------- |
+| Clock    | Hands in a circle         | Initial generic window |
+| Browser  | Abstract compass or globe | Moved to workspace B   |
+| Terminal | Prompt and cursor         | Moved to workspace T   |
+| Music    | Note and waveform         | Available to the user  |
+| Contacts | Two abstract silhouettes  | Available to the user  |
+| Messages | Two speech rectangles     | Moved to workspace M   |
 
 Use custom single-color SVG glyphs. Do not use Safari, Terminal, Music,
 Contacts, Messages, or other app trademarks.
@@ -833,15 +833,15 @@ Controller requirements:
 
 The initial chord registry is:
 
-| Chord | Command |
-| --- | --- |
-| `lshift + rshift + M` | Move focused window to workspace M and follow it |
-| `lshift + rshift + B` | Move focused window to workspace B and follow it |
-| `lshift + rshift + T` | Move focused window to workspace T and follow it |
-| `lshift + rshift + Tab` | Move focused workspace to the next display |
-| `rshift + B` | Focus workspace B |
+| Chord                   | Command                                          |
+| ----------------------- | ------------------------------------------------ |
+| `lshift + rshift + M`   | Move focused window to workspace M and follow it |
+| `lshift + rshift + B`   | Move focused window to workspace B and follow it |
+| `lshift + rshift + T`   | Move focused window to workspace T and follow it |
+| `lshift + rshift + Tab` | Move focused workspace to the next display       |
+| `rshift + B`            | Focus workspace B                                |
 
-The three move-window bindings execute `moveFocusedWindowToWorkspace`. The
+The three assignment bindings execute `moveWindowToWorkspace`. The
 display binding executes `moveFocusedWorkspaceToNextDisplay`. The focus binding
 executes `focusWorkspace`.
 
@@ -879,28 +879,28 @@ gate. Motion review may lengthen a step that is hard to understand or shorten a
 hold that feels idle. Time spent waiting for initialization, document
 visibility, or stage visibility is not part of the measured playback time.
 
-| Time | Action |
-| --- | --- |
-| `0.00-0.35` | Hold the closed, centered laptop and visible product copy after the active clock starts. |
-| `0.35-2.55` | Open the laptop with the mechanical lid animation. Screen remains blank. |
-| `2.55-3.00` | Hold the blank powered screen. |
-| `3.00-3.75` | Run the `paneform wm` signal-lock animation. |
-| `3.75-4.25` | Resolve to the desktop, dock, workspace 1 marker, and initial Clock window. |
-| `4.25-5.10` | Let the first tiled window register visually. |
-| `5.10-6.20` | Move the simulated cursor to Messages, click it, add its window, and tile it beside Clock. |
-| `6.20-8.10` | Press left Shift, right Shift, then M. Move Messages to workspace M. Keep the full chord held for 1.5 seconds after M goes down. |
-| `8.10-9.30` | Move to Browser, click, add its window to M, and tile it. |
-| `9.30-11.20` | Press left Shift, right Shift, then B. Move Browser to workspace B. Keep the full chord held for 1.5 seconds. |
-| `11.20-12.40` | Move to Terminal, click, add its window to B, and tile it. |
-| `12.40-14.30` | Press left Shift, right Shift, then T. Move Terminal to workspace T. Keep the full chord held for 1.5 seconds. |
-| `14.30-15.50` | Widen the camera and bring in the unpowered Studio Display. |
-| `15.50-18.20` | Draw the cable through 18.00, then connect and reconcile while the completed cable holds through 18.20. |
-| `18.20-20.50` | Run the Studio Display power-on animation. |
-| `20.50-22.60` | Press left Shift, right Shift, then Tab. Move workspace T to the Studio Display. Keep the full chord held for 1.5 seconds. |
-| `22.60-23.80` | Hold the two-display result. Terminal is visible on the Studio Display. |
-| `23.80-25.80` | Press right Shift, then B. Focus workspace B on the MacBook. Keep the full chord held for 1.55 seconds. |
-| `25.80-27.20` | Hold Browser on the MacBook and Terminal on the Studio Display. |
-| `27.20-30.00` | Fade the simulated cursor, show `Demo complete. Try it.`, and expose replay. |
+| Time          | Action                                                                                                                           |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `0.00-0.35`   | Hold the closed, centered laptop and visible product copy after the active clock starts.                                         |
+| `0.35-2.55`   | Open the laptop with the mechanical lid animation. Screen remains blank.                                                         |
+| `2.55-3.00`   | Hold the blank powered screen.                                                                                                   |
+| `3.00-3.75`   | Run the `paneform wm` signal-lock animation.                                                                                     |
+| `3.75-4.25`   | Resolve to the desktop, dock, workspace 1 marker, and initial Clock window.                                                      |
+| `4.25-5.10`   | Let the first tiled window register visually.                                                                                    |
+| `5.10-6.20`   | Move the simulated cursor to Messages, click it, add its window, and tile it beside Clock.                                       |
+| `6.20-8.10`   | Press left Shift, right Shift, then M. Move Messages to workspace M. Keep the full chord held for 1.5 seconds after M goes down. |
+| `8.10-9.30`   | Move to Browser, click, add its window to M, and tile it.                                                                        |
+| `9.30-11.20`  | Press left Shift, right Shift, then B. Move Browser to workspace B. Keep the full chord held for 1.5 seconds.                    |
+| `11.20-12.40` | Move to Terminal, click, add its window to B, and tile it.                                                                       |
+| `12.40-14.30` | Press left Shift, right Shift, then T. Move Terminal to workspace T. Keep the full chord held for 1.5 seconds.                   |
+| `14.30-15.50` | Widen the camera and bring in the unpowered Studio Display.                                                                      |
+| `15.50-18.20` | Draw the cable through 18.00, then connect and reconcile while the completed cable holds through 18.20.                          |
+| `18.20-20.50` | Run the Studio Display power-on animation.                                                                                       |
+| `20.50-22.60` | Press left Shift, right Shift, then Tab. Move workspace T to the Studio Display. Keep the full chord held for 1.5 seconds.       |
+| `22.60-23.80` | Hold the two-display result. Terminal is visible on the Studio Display.                                                          |
+| `23.80-25.80` | Press right Shift, then B. Focus workspace B on the MacBook. Keep the full chord held for 1.55 seconds.                          |
+| `25.80-27.20` | Hold Browser on the MacBook and Terminal on the Studio Display.                                                                  |
+| `27.20-30.00` | Fade the simulated cursor, show `Demo complete. Try it.`, and expose replay.                                                     |
 
 The timeline uses one monotonic active clock. The times below are the first
 prototype's configurable cue values, with explicit committed-state
@@ -923,14 +923,14 @@ to overlap.
 
 Three-key chord slots use these offsets from their cue start:
 
-| Offset | Event |
-| --- | --- |
-| `0ms` | First modifier down |
-| `140ms` | Second modifier down |
-| `350ms` | Trigger down and command submitted |
+| Offset   | Event                                     |
+| -------- | ----------------------------------------- |
+| `0ms`    | First modifier down                       |
+| `140ms`  | Second modifier down                      |
+| `350ms`  | Trigger down and command submitted        |
 | `1850ms` | Trigger up after a 1500ms full-chord hold |
-| `1875ms` | Second modifier up |
-| `1900ms` | First modifier up and slot complete |
+| `1875ms` | Second modifier up                        |
+| `1900ms` | First modifier up and slot complete       |
 
 The two-key `rshift + B` slot uses right Shift at `0ms`, B and command submission
 at `250ms`, B up at `1800ms`, Shift up at `1825ms`, and leaves the remainder of
@@ -1043,32 +1043,32 @@ pixels in both appearances.
 
 ## Motion Tokens
 
-| Token | Value | Use |
-| --- | --- | --- |
-| `motion.duration.press` | `90ms` | Key and button travel |
-| `motion.duration.feedback` | `160ms` | Focus and indicator response |
-| `motion.duration.window` | `320ms` | Window frame interpolation |
-| `motion.duration.cursor` | `650ms` | Typical cursor travel |
-| `motion.duration.cursorShort` | `500ms` | Scripted dock travel |
-| `motion.duration.logo` | `750ms` | Logo signal |
-| `motion.duration.monitorEnter` | `1200ms` | External hardware entrance |
-| `motion.duration.sceneReframe` | `1200ms` | Solo-to-connected camera |
-| `motion.duration.lid` | `2200ms` | Laptop opening |
-| `motion.duration.wire` | `2500ms` | Cable drawing before reconcile hold |
-| `motion.duration.power` | `2300ms` | Studio Display startup |
-| `motion.duration.chordStagger` | `140ms` | Modifier sequencing |
-| `motion.duration.chordPrelude` | `210ms` | Delay from second modifier to trigger |
-| `motion.duration.chordHold` | `1500ms` | Full three-key hold |
-| `motion.duration.twoKeyPrelude` | `250ms` | Right Shift to B trigger |
-| `motion.duration.twoKeyHold` | `1550ms` | Full two-key hold |
-| `motion.duration.keyReleaseStagger` | `25ms` | Scripted key release order |
-| `motion.duration.commandBudget` | `150ms` | Deterministic local command budget |
-| `motion.duration.acknowledge` | `500ms` | Readout after key release |
-| `motion.duration.reducedFade` | `120ms` | Reduced-motion state acknowledgement |
-| `motion.easing.standard` | `cubic-bezier(0.2, 0.8, 0.2, 1)` | General transition |
-| `motion.easing.mechanical` | `cubic-bezier(0.16, 1, 0.3, 1)` | Lid and hardware |
-| `motion.easing.layout` | `cubic-bezier(0.22, 1, 0.36, 1)` | Committed frame change |
-| `motion.easing.linear` | `linear` | Cable stroke only |
+| Token                               | Value                            | Use                                   |
+| ----------------------------------- | -------------------------------- | ------------------------------------- |
+| `motion.duration.press`             | `90ms`                           | Key and button travel                 |
+| `motion.duration.feedback`          | `160ms`                          | Focus and indicator response          |
+| `motion.duration.window`            | `320ms`                          | Window frame interpolation            |
+| `motion.duration.cursor`            | `650ms`                          | Typical cursor travel                 |
+| `motion.duration.cursorShort`       | `500ms`                          | Scripted dock travel                  |
+| `motion.duration.logo`              | `750ms`                          | Logo signal                           |
+| `motion.duration.monitorEnter`      | `1200ms`                         | External hardware entrance            |
+| `motion.duration.sceneReframe`      | `1200ms`                         | Solo-to-connected camera              |
+| `motion.duration.lid`               | `2200ms`                         | Laptop opening                        |
+| `motion.duration.wire`              | `2500ms`                         | Cable drawing before reconcile hold   |
+| `motion.duration.power`             | `2300ms`                         | Studio Display startup                |
+| `motion.duration.chordStagger`      | `140ms`                          | Modifier sequencing                   |
+| `motion.duration.chordPrelude`      | `210ms`                          | Delay from second modifier to trigger |
+| `motion.duration.chordHold`         | `1500ms`                         | Full three-key hold                   |
+| `motion.duration.twoKeyPrelude`     | `250ms`                          | Right Shift to B trigger              |
+| `motion.duration.twoKeyHold`        | `1550ms`                         | Full two-key hold                     |
+| `motion.duration.keyReleaseStagger` | `25ms`                           | Scripted key release order            |
+| `motion.duration.commandBudget`     | `150ms`                          | Deterministic local command budget    |
+| `motion.duration.acknowledge`       | `500ms`                          | Readout after key release             |
+| `motion.duration.reducedFade`       | `120ms`                          | Reduced-motion state acknowledgement  |
+| `motion.easing.standard`            | `cubic-bezier(0.2, 0.8, 0.2, 1)` | General transition                    |
+| `motion.easing.mechanical`          | `cubic-bezier(0.16, 1, 0.3, 1)`  | Lid and hardware                      |
+| `motion.easing.layout`              | `cubic-bezier(0.22, 1, 0.36, 1)` | Committed frame change                |
+| `motion.easing.linear`              | `linear`                         | Cable stroke only                     |
 
 Timeline cue values also live in the token source. Components never repeat the
 durations in local styles or scripts.
@@ -1107,7 +1107,7 @@ When `prefers-reduced-motion: reduce` matches:
   `Open Browser` and `Focus Browser window`.
 - Focus order follows DOM order, not visual 3D position.
 - The static summary is `Workstation simulation. Browser workspace B is on the
-  MacBook. Terminal workspace T is on the external display.` The separate live
+MacBook. Terminal workspace T is on the external display.` The separate live
   status updates politely only after user-driven committed actions.
 - Scripted playback does not announce every cursor, key, or frame event.
 - Visual focus, pressed keys, and connection state use shape or stroke in
@@ -1142,21 +1142,21 @@ one generated asset through production-equivalent CDN routing.
 
 Suggested implementation boundaries are:
 
-| Boundary | Responsibility |
-| --- | --- |
-| `WmHero.svelte` | Copy, CTA, stage lifecycle, fallback state |
-| `Workstation.svelte` | Camera, hardware composition, cable, cursor |
-| `DisplaySurface.svelte` | Reusable logical display projection and window layer |
-| `Keyboard.svelte` | Tokenized key geometry and pressed-state rendering |
-| `Dock.svelte` | App controls and singleton app actions |
-| `createHeroSimulation.ts` | Simulator, engine, config, commands, reset |
-| `action-arbiter.ts` | Serialized script and user command ownership |
-| `keyboard-controller.ts` | Physical and scripted keyboard state |
-| `demo-runner.ts` | Cancellable typed timeline |
-| `demo-timeline.ts` | Declarative baseline cue and action data |
-| `simulation-client.ts` | Tree-shaken lazy import facade |
-| `generate-hero-snapshot.ts` | Build-time final Paneform fallback state |
-| `tokens.ts` | Canonical design, geometry, and timing tokens |
+| Boundary                    | Responsibility                                       |
+| --------------------------- | ---------------------------------------------------- |
+| `WmHero.svelte`             | Copy, CTA, stage lifecycle, fallback state           |
+| `Workstation.svelte`        | Camera, hardware composition, cable, cursor          |
+| `DisplaySurface.svelte`     | Reusable logical display projection and window layer |
+| `Keyboard.svelte`           | Tokenized key geometry and pressed-state rendering   |
+| `Dock.svelte`               | App controls and singleton app actions               |
+| `createHeroSimulation.ts`   | Simulator, engine, config, commands, reset           |
+| `action-arbiter.ts`         | Serialized script and user command ownership         |
+| `keyboard-controller.ts`    | Physical and scripted keyboard state                 |
+| `demo-runner.ts`            | Cancellable typed timeline                           |
+| `demo-timeline.ts`          | Declarative baseline cue and action data             |
+| `simulation-client.ts`      | Tree-shaken lazy import facade                       |
+| `generate-hero-snapshot.ts` | Build-time final Paneform fallback state             |
+| `tokens.ts`                 | Canonical design, geometry, and timing tokens        |
 
 This is a separation by transform or state ownership, not a requirement to
 split every visual fragment into a component.
@@ -1283,14 +1283,14 @@ bounded idle token, unless pointer or focus intent starts it earlier.
 
 Keep these state domains separate:
 
-| Domain | Examples |
-| --- | --- |
-| Lifecycle | static, loading, autoplay, interactive, resetting, failed |
-| Hardware | lid angle, camera frame, monitor present, cable connected, power state |
-| Paneform | committed displays, workspaces, windows, frames, focus |
-| Input | pressed keys by source, matched chord, stage focus |
-| Actions | runtime generation, serialized owner, submitted command, queue state |
-| Presentation | cursor target, command acknowledgement, registered animations |
+| Domain       | Examples                                                               |
+| ------------ | ---------------------------------------------------------------------- |
+| Lifecycle    | static, loading, autoplay, interactive, resetting, failed              |
+| Hardware     | lid angle, camera frame, monitor present, cable connected, power state |
+| Paneform     | committed displays, workspaces, windows, frames, focus                 |
+| Input        | pressed keys by source, matched chord, stage focus                     |
+| Actions      | runtime generation, serialized owner, submitted command, queue state   |
+| Presentation | cursor target, command acknowledgement, registered animations          |
 
 Paneform state is authoritative for windows and workspaces. Hardware state is
 authoritative for whether a display can be connected. The timeline requests

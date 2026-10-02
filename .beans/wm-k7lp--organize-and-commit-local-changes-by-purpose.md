@@ -5,7 +5,7 @@ status: in-progress
 type: task
 priority: normal
 created_at: 2026-10-02T18:04:20Z
-updated_at: 2026-10-02T19:01:39Z
+updated_at: 2026-10-02T19:15:45Z
 ---
 
 Review the complete working tree and commit the requested local source changes in logical, validated groups. Preserve all existing user work; exclude generated artifacts and external local configuration.
@@ -20,7 +20,7 @@ Review the complete working tree and commit the requested local source changes i
 - [x] Commit the shared command grammar, JSON contracts and caller/example migrations.
 - [x] Commit compact CLI output, app metadata and verbose diagnostics.
 - [x] Commit command-hierarchy docs navigation.
-- [ ] Commit the newly added schema-validated configuration examples.
+- [x] Commit the newly added schema-validated configuration examples.
 - [ ] Commit updated design references and remaining formatting-only changes.
 - [ ] Validate commit groups, run final checks and verify the working tree is clean.
 
@@ -79,3 +79,11 @@ The exact staged navigation tree passes all 284 site tests, site lint, typecheck
 New config-examples.ts/docs-config.spec.ts edits appeared during organization. Found retired wm displays/workspace move-window strings in those examples; copying the latter would fail command parsing. Updated to the canonical vocabulary and made keybind examples validate through the single parser, not just the permissive string schema.
 
 The interactive mockup invoked window assign 2 but still put destination windows in writing (docs/mockups/docs-experience.html, SCENES/buildScenario). This made the populated-destination preview behave as an empty destination. Aligned its workspace state and captions to 1/2 before committing the design reference.
+
+## Commit 8
+
+9256518 — docs(site): provide schema-validated configuration examples. Includes the newly authored examples/page, canonical command corrections and a parser-level regression check. All seven configuration-example tests, site lint and typecheck pass.
+
+## Design-reference validation
+
+Formatted the remaining design/reference documents and the formatting-only playground import. Parsed the mockup inline JavaScript successfully and ran both numbered workspace-assignment scene definitions through the actual portable engine: the empty destination contains one window and the populated destination contains both windows after assignment. Source state/captions now agree with window assign 2.

@@ -46,14 +46,15 @@ All docs live under `/wm/docs/` on the existing SvelteKit site.
 /wm/docs/getting-started/          Markdown: install, permissions, service, first config
 /wm/docs/concepts/                 Markdown: workspaces, layout modes, pause, state model
 /wm/docs/commands/                 Generated index, grouped by domain
-  /wm/docs/commands/windows/…      focus-directional, move-directional, move-to-workspace,
-                                   move-to-point, resize, float, tile, manage, unmanage,
-                                   probe-limits
+  /wm/docs/commands/windows/…      focus-directional, move-directional, assign,
+                                   move-position, resize, float, tile, manage,
+                                   unmanage, observe, list
   /wm/docs/commands/workspaces/…   focus, move-to-next-display, move-to-display, mode, retile
-  /wm/docs/commands/system/…       pause, resume, reconcile, reload-config, validate-config,
-                                   state/windows/displays/workspaces queries
+  /wm/docs/commands/displays/…     list
+  /wm/docs/commands/config/…       reload, validate
+  /wm/docs/commands/system/…       pause, resume, reconcile, state
   /wm/docs/commands/service/…      install, start, stop, restart, status, uninstall
-  /wm/docs/commands/diagnostics/…  doctor, permissions-request
+  /wm/docs/commands/diagnostics/…  permissions
 /wm/docs/configuration/            Generated from config schema + authored keybinds guide
 /wm/docs/reference/                Argument types, scenario format, WebSocket protocol, CLI listing
 ```
@@ -159,14 +160,12 @@ clear demo is the fastest path from zero to understanding:
    | WebSocket     | `{"type":"moveDirection","direction":"<direction>"}`    |
    | Scenario step | `"window move <direction>"`                             |
 
-   Rows are omitted when a method does not apply (for example `doctor` has
+   Rows are omitted when a method does not apply (for example `permissions` has
    no WebSocket row because it runs locally and never contacts the daemon).
-   The move-to-workspace page shows both focused-window spellings
-   (`window move workspace <workspace>` and `workspace move-window <workspace>`)
-   and the distinct explicit-ID form
-   (`workspace move-window <window-id> <workspace>`), with a concrete example
-   using an ID from `wm windows`. The focused form follows the window; the
-   explicit-ID form does not switch the view. Chords render as key caps where
+   The assignment page shows `window assign <workspace>` with independent
+   `--window <window-id>` and `--no-follow` options, with a concrete example
+   using an ID from `wm window list`. Assignment follows the window by default;
+   `--no-follow` keeps the source view regardless of target selection. Chords render as key caps where
    space allows. Beneath the syntax, each applicable method
    has a short note with a link. Keybind, WebSocket, and Scenario notes come
    from one shared method-help definition, not from each command's registry
@@ -209,7 +208,7 @@ intro sentence.
   `layout-browser` desktop simulator. Covers every command that changes
   window-manager state.
 - **Terminal demo** — a scripted, animated terminal replay for local
-  commands whose output is text (for example `wm doctor`). The scenario
+  commands whose output is text (for example `wm permissions`). The scenario
   format does not apply; the script is a small JSON of typed lines with
   timing. Output renders pretty-printed (stable indentation, one property
   per line) on the page background rather than a dark console theme.
@@ -314,12 +313,14 @@ Demos share one horizontally scrollable stage, keeping a consistent footprint
 for one through five examples:
 
 - Each demo represents one **situation**, with a miniature layout preview,
-  short name and semantic starting/result caption. Cards stay 240px high
-  and use a fixed width derived from the caption width plus padding (about
+  short name and semantic starting/result caption. Card height follows its
+  preview and two-line caption, with no fixed button height. Cards use a
+  fixed width derived from the caption width plus padding (about
   254px). A single example uses the same width instead of stretching.
   Subtle sunken/raised card surfaces and each item's player progress bar
   follow the reference. The outer carousel stays unframed, with tightly
   spaced cards and a row of pips; the active example has a wider pip.
+  Single-example carousels omit the pips.
   No footer toolbar is shown.
 - Starting and result captions use a fixed **32ch, two-line monospace** area.
   A shared docs-only rule caps text at **64 characters** and checks that its
@@ -372,7 +373,7 @@ direction" rather than repeating twelve scenarios.
   that workspace names are open-ended; neither is an interactive control.
 - **One example command per stage.** Plain text above the directional stage
   says `Example command: wm window move left`; the workspace stage shows
-  `wm window move workspace writing`. Every situation on a stage runs that
+  `wm window assign 2`. Every situation on a stage runs that
   same real command against a different starting state. The command is
   visible before playback without becoming a second tab strip or player
   control. Demos illustrate behavior; readers can explore other values in
@@ -410,10 +411,10 @@ export const commandDocs = {
       "Does nothing when the focused window is alone at the edge.",
     ],
     errors: [
-      { code: "window_not_found", meaning: "No live window matches the target.", action: "List live windows with wm windows and retry." },
+      { code: "window_not_found", meaning: "No live window matches the target.", action: "List live windows with wm window list and retry." },
       { code: "paused", meaning: "The manager is paused and holds mutations.", action: "Resume with wm resume, then retry." },
     ],
-    related: ["focusDirection", "moveFocusedWindowToWorkspace"],
+    related: ["focusDirection", "moveWindowToWorkspace"],
     demos: [
       { slug: "interior-swap", tab: "Neighbor swap", claim: "The two windows swap positions." },
       { slug: "edge-expand", tab: "Edge expand", claim: "The moved window rotates around the tree and claims the full edge." },
@@ -440,23 +441,22 @@ real parser can never disagree about what a slot accepts.
 - The full CLI listing, the commands index, and `wm --help`-style output
   all render from the same two files.
 
-The move-to-workspace page groups two related engine command types:
-`moveFocusedWindowToWorkspace` (the two focused CLI spellings) and
-`moveWindowToWorkspace` (the explicit-ID form). They share a user-facing page,
-but must keep their distinct syntax and follow-focus behavior in the registry
-and drift checks; a CLI alias is not the same as an optional argument.
+The assignment page uses one engine command type, `moveWindowToWorkspace`.
+Optional `windowId` selects the target and `follow` independently controls
+navigation. The focused and explicit-ID text forms share the same command
+schema, with following enabled by default.
 
 ### Argument type reference
 
 Add a compact `/wm/docs/reference/argument-types/` page, with stable anchors
 for recurring semantic types rather than one page per argument occurrence:
 
-| Type                              | Shared definition should explain                                                                                                                                                               |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Window ID                         | Obtain a current ID from `wm windows`; live commands target that ID, not a window title. Scenario files can also use their own window names/IDs. An unknown live ID yields `window_not_found`. |
-| Workspace name                    | A name supplied as one argument (quote names containing spaces); whether a missing workspace is created or rejected depends on the command.                                                    |
-| Direction                         | Closed set `left`, `right`, `up`, `down`.                                                                                                                                                      |
-| Display ID, coordinate, dimension | ID source, coordinate space and units, and numeric constraints, respectively.                                                                                                                  |
+| Type                              | Shared definition should explain                                                                                                                                                                   |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Window ID                         | Obtain a current ID from `wm window list`; live commands target that ID, not a window title. Scenario files can also use their own window names/IDs. An unknown live ID yields `window_not_found`. |
+| Workspace name                    | A name supplied as one argument (quote names containing spaces); whether a missing workspace is created or rejected depends on the command.                                                        |
+| Direction                         | Closed set `left`, `right`, `up`, `down`.                                                                                                                                                          |
+| Display ID, coordinate, dimension | ID source, coordinate space and units, and numeric constraints, respectively.                                                                                                                      |
 
 Keep **type-level** definitions and examples in this reference; show
 **command-level** rules on each command page (required in this form, defaults
@@ -481,7 +481,7 @@ scenario JSON Schema is already generated from Effect Schema annotations by
 - Add a small generator that emits JSON Schema with those descriptions for
   a docs renderer; the keybinds chord grammar gets a hand-written syntax
   page (the Swift parser is the authority for key names).
-- Result: `wm validate-config` messages, editor schema validation, and the
+- Result: `wm config validate` messages, editor schema validation, and the
   configuration docs page all read one description per option. Feasible
   with the existing tooling; no new dependencies.
 
@@ -505,14 +505,14 @@ test (`buildCommand` round-trip) to prevent invalid examples.
 
 Three pages nail the design before broad coverage:
 
-1. **`windows/move-directional`** — three desktop demos (swap, edge
-   expand, edge no-op), full invocation table, argument table for
+1. **`windows/move-directional`** — four desktop demos (two bordering
+   windows, shared edge, exclusive edge, taller neighbor), full invocation table, argument table for
    `direction`.
-2. **`windows/move-to-workspace`** — two desktop demos: move the focused
+2. **`windows/assign`** — three desktop demos: assign the focused
    window to an empty workspace (view follows), and move into a populated
-   workspace (target retiles around the insertion). Table shows the two
-   focused spellings and the explicit-window variant with an ID example.
-3. **`diagnostics/doctor`** — terminal demo kind, CLI-only invocation
+   workspace (target retiles around the insertion), and assign a nonfocused
+   window with --no-follow. Table shows the optional target and follow flag.
+3. **`diagnostics/permissions`** — terminal demo kind, CLI-only invocation
    table, exit-code table, links to the permissions guide.
 
 ## Open questions

@@ -64,8 +64,9 @@ modular enough to split binaries if measurements justify it.
 
 Accessibility permission is required for daemon readiness. Screen Recording is
 optional; without it, window titles and off-process application names degrade.
-`wm doctor` checks both permissions, can open the appropriate System Settings
-panes, and reports concrete remediation. Native operations report permission
+`wm permissions` checks both permissions and reports concrete remediation.
+`wm permissions request --open-settings` can open the appropriate System Settings
+panes. Native operations report permission
 errors if access is revoked at runtime. Pointer-centering capability may degrade
 independently without making the window manager unavailable.
 

@@ -1,5 +1,9 @@
 import type { LayoutScenario } from "@paneform/layout-browser";
-import { desktopDisplayPreset, laptopDisplayPreset, type DisplayPreset } from "../desktop/display-presets.js";
+import {
+  desktopDisplayPreset,
+  laptopDisplayPreset,
+  type DisplayPreset,
+} from "../desktop/display-presets.js";
 
 /** Model points reserved at the bottom of every playground display so tiles stop above the dock. */
 const dockReservation = 144;
