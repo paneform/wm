@@ -5,7 +5,7 @@ status: in-progress
 type: task
 priority: normal
 created_at: 2026-10-02T18:04:20Z
-updated_at: 2026-10-02T18:44:01Z
+updated_at: 2026-10-02T18:49:20Z
 ---
 
 Review the complete working tree and commit the requested local source changes in logical, validated groups. Preserve all existing user work; exclude generated artifacts and external local configuration.
@@ -18,7 +18,7 @@ Review the complete working tree and commit the requested local source changes i
 - [x] Commit focused-window styling and compact demo-card presentation.
 - [x] Commit per-display workspace indicators and animation/browser checks.
 - [x] Commit the shared command grammar, JSON contracts and caller/example migrations.
-- [ ] Commit compact CLI output, app metadata and verbose diagnostics.
+- [x] Commit compact CLI output, app metadata and verbose diagnostics.
 - [ ] Commit command-hierarchy docs navigation.
 - [ ] Commit updated design references and remaining formatting-only changes.
 - [ ] Validate commit groups, run final checks and verify the working tree is clean.
@@ -60,3 +60,11 @@ ee4cbb3 — refactor(wm): unify public command grammar and JSON contracts. Inclu
 ## Compact-output staging validation
 
 The exact staged compact-output tree passes all 1,014 TypeScript/Swift tests, root lint, typechecks and production/native builds in the isolated index workspace. The contracts commit and this output commit are therefore independently buildable; pending navigation code was not used for either validation.
+
+## Commit 6
+
+a3d9db7 — feat(wm): provide compact command output and verbose diagnostics. Includes authoritative listing/app metadata, native name propagation, concise formatting, global verbose flag, client integration tests and output documentation. Its exact staged tree passes all checks in isolation.
+
+## Navigation staging validation
+
+The exact staged navigation tree passes all 284 site tests, site lint, typecheck and production build in the isolated index workspace. It includes the grammar-derived sidebar/index, concise breadcrumbs/search labels and host-command destinations.

@@ -3,7 +3,7 @@
   import { playbackSteps } from "@paneform/layout-browser";
   import DemoStage from "$lib/docs/DemoStage.svelte";
   import { demoDefinitions, demosForCommand } from "$lib/docs/demo-data.js";
-  import { commandHref } from "$lib/docs/navigation.js";
+  import { commandHref, commandBreadcrumbs } from "$lib/docs/navigation.js";
   import { invocationRows } from "$lib/docs/invocations.js";
   let { data } = $props();
   const doc = $derived(data.doc);
@@ -17,7 +17,7 @@
   const invocations = $derived(invocationRows(doc));
 </script>
 <svelte:head><title>{doc.title} · Paneform WM docs</title><meta name="description" content={doc.summary} /></svelte:head>
-<p class="docs-breadcrumb">Docs / Commands / {doc.domain} / {doc.title}</p>
+<p class="docs-breadcrumb">Docs / Commands / {commandBreadcrumbs(doc).join(' / ')}</p>
 <h1>{doc.title}</h1><p class="lede">{doc.summary}</p>
 {#if demos}
   <p class="demo-examples">Example {examples.length === 1 ? 'command' : 'commands'}: {#each examples as command, index}{#if index > 0} · {/if}<code>wm {command}</code>{/each}</p>

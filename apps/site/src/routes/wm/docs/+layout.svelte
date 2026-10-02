@@ -1,9 +1,9 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { commandDocs } from "@paneform/layout";
   import { onMount } from "svelte";
   import { setContext } from "svelte";
-  import { commandGroups, commandHref, docsBase, guideLinks, searchEntries } from "$lib/docs/navigation.js";
+  import { commandNavigation, docsBase, guideLinks, searchEntries } from "$lib/docs/navigation.js";
+  import CommandNavigation from "$lib/docs/CommandNavigation.svelte";
   import PaneformWordmark from "$lib/hero/PaneformWordmark.svelte";
   import DocsToc from "$lib/docs/DocsToc.svelte";
   import "$lib/docs/docs.css";
@@ -14,7 +14,7 @@
   let searchOpen = $state(false);
   let navigationOpen = $state(false);
   let searchInput = $state<HTMLInputElement>();
-  const results = $derived(searchEntries.filter((entry) => `${entry.title} ${entry.summary}`.toLowerCase().includes(search.toLowerCase())).slice(0, 12));
+  const results = $derived(searchEntries.filter((entry) => `${entry.title} ${entry.summary} ${entry.keywords ?? ''}`.toLowerCase().includes(search.toLowerCase())).slice(0, 12));
 
   onMount(() => {
     function keydown(event: KeyboardEvent) {
@@ -52,12 +52,7 @@
       <div class="docs-nav-group"><p>Getting started</p><a class:active={page.url.pathname === guideLinks[0].href} href={guideLinks[0].href} onclick={() => (navigationOpen = false)}>Installation</a></div>
       <div class="docs-nav-group"><p>Concepts</p><a class:active={page.url.pathname === guideLinks[1].href} href={guideLinks[1].href} onclick={() => (navigationOpen = false)}>Workspaces and layout</a></div>
       <div class="docs-nav-group docs-command-links"><p><a href={docsBase + "/commands/"}>Commands</a></p>
-        {#each commandGroups as group}
-          <h3>{group}</h3>
-          {#each commandDocs.filter((doc) => doc.domain === group) as doc}
-            <a class:active={page.url.pathname === commandHref(doc.slug)} href={commandHref(doc.slug)} onclick={() => (navigationOpen = false)}>{doc.title}</a>
-          {/each}
-        {/each}
+        <CommandNavigation nodes={commandNavigation} currentHref={page.url.pathname + page.url.hash} onnavigate={() => (navigationOpen = false)} />
       </div>
       <div class="docs-nav-group"><p>Configuration</p><a class:active={page.url.pathname === guideLinks[2].href} href={guideLinks[2].href} onclick={() => (navigationOpen = false)}>Options</a></div>
       <div class="docs-nav-group"><p>Reference</p><a class:active={page.url.pathname === guideLinks[3].href} href={guideLinks[3].href} onclick={() => (navigationOpen = false)}>CLI listing</a></div>
