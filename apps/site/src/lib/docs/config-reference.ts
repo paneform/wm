@@ -194,6 +194,8 @@ export interface FlatConfigField {
   readonly required: boolean;
   readonly description: string;
   readonly typeText: string;
+  /** Dimension unit, rendered as hover text by the docs page. */
+  readonly unit?: string | undefined;
   readonly depth: number;
 }
 
@@ -208,7 +210,7 @@ export function flattenReference(field: ConfigFieldRef): readonly FlatConfigFiel
           kind.minimum !== undefined || kind.maximum !== undefined
             ? ` ${kind.minimum ?? "-∞"}–${kind.maximum ?? "∞"}`
             : "";
-        typeText = `number${bounds}${kind.unit !== undefined ? ` ${kind.unit}` : ""}`;
+        typeText = `number${bounds}`;
         break;
       }
       case "string":
@@ -236,6 +238,7 @@ export function flattenReference(field: ConfigFieldRef): readonly FlatConfigFiel
       required: node.required,
       description: node.description,
       typeText,
+      unit: kind.kind === "number" ? kind.unit : undefined,
       depth,
     });
     if (kind.kind === "object")

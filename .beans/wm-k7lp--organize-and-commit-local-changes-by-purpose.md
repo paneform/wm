@@ -5,7 +5,7 @@ status: in-progress
 type: task
 priority: normal
 created_at: 2026-10-02T18:04:20Z
-updated_at: 2026-10-02T19:30:47Z
+updated_at: 2026-10-02T19:43:45Z
 ---
 
 Review the complete working tree and commit the requested local source changes in logical, validated groups. Preserve all existing user work; exclude generated artifacts and external local configuration.
@@ -22,7 +22,7 @@ Review the complete working tree and commit the requested local source changes i
 - [x] Commit command-hierarchy docs navigation.
 - [x] Commit the newly added schema-validated configuration examples.
 - [x] Commit updated design references and remaining formatting-only changes.
-- [ ] Commit the newly added nested configuration-field reference.
+- [x] Commit the newly added nested configuration-field reference.
 - [ ] Validate commit groups, run final checks and verify the working tree is clean.
 
 Each commit includes this tracking bean (and relevant existing beans when useful), matches the conventional commit style, and is inspected before committing. No push requested.
@@ -96,3 +96,15 @@ a95f9fa — docs: synchronize command references and interactive design previews
 ## Latest configuration-reference edits
 
 A further local config-reference.ts/page/style/test change arrived during organization. It adds a nested field reference with required/type/bounds metadata. Preserved this work, corrected its retired display-list spelling, retained the keybinding parser regression, tightened nested schema-path coverage, and fixed an undefined badge color token. All nine config tests, site lint and typecheck pass.
+
+## Commit 10
+
+eec0e31 — docs(site): document nested configuration fields and constraints. Includes the latest field-reference tree/page/style/test edits, canonical display-list wording, preserved parser validation and exact nested schema coverage. All nine config-reference/example tests, site lint and typecheck pass.
+
+All requested source changes are committed; git status was clean before this final tracking update. Running repository-wide final checks next.
+
+## Final repository verification
+
+Repository-wide pnpm test passed all 1,028 TypeScript/Swift tests (486 layout, 150 layout-browser, 17 macOS TypeScript, 65 wm, 293 site, 17 Swift). Root lint, typecheck and production/native builds passed; formatter, shell syntax and diff checks passed.
+
+A last two-string configuration-reference edit arrived after the source-clean check, clarifying point units for standard/Retina displays. Preserving it as a small follow-up documentation commit; its schema/example tests pass.
