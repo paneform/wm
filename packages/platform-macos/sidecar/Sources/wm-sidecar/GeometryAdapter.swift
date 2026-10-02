@@ -39,6 +39,7 @@ enum AdapterError: Error, Equatable {
 struct WindowMeta {
     var id: String
     var pid: Int32
+    var appName: String
     var role: String
     var subrole: String?
     var title: String?
@@ -51,6 +52,7 @@ struct WindowMeta {
     init(id: String, raw: RawAXWindow, cgTitle: String?, cgWindowID: UInt32?, hidden: Bool) {
         self.id = id
         self.pid = raw.pid
+        self.appName = raw.appName
         self.role = raw.role ?? ""
         self.subrole = raw.subrole
         self.title = raw.title ?? cgTitle
@@ -146,6 +148,7 @@ final class GeometryAdapter {
         return WindowValue(
             id: meta.id,
             pid: Int(meta.pid),
+            appName: meta.appName,
             bundleId: meta.bundleID,
             executablePath: meta.executablePath,
             title: title ?? meta.title,

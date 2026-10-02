@@ -171,6 +171,7 @@ enum Normalizer {
         WindowValue(
             id: id,
             pid: Int(ax.pid),
+            appName: ax.appName,
             bundleId: ax.bundleID,
             executablePath: ax.executablePath,
             title: ax.title ?? cgTitle,

@@ -29,3 +29,6 @@ pnpm build
 ```
 
 See [`docs/releases.md`](docs/releases.md) for the npm release process.
+
+See [`docs/command-interface.md`](docs/command-interface.md) for the shared CLI,
+keybinding, scenario and JSON command interface.

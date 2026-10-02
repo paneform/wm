@@ -11,6 +11,7 @@ import Testing
             hiddenPids: [])
 
         #expect(joined.map(\.value.id) == ["window:cg:47"])
+        #expect(joined.map(\.value.appName) == ["Activity Monitor"])
     }
 
     @Test func rejectsAmbiguousSamePidExactFrameCandidates() {

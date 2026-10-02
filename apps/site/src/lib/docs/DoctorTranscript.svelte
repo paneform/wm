@@ -2,8 +2,11 @@
   const lines = [
     "$ wm permissions",
     "{",
-    '  "accessibility": "granted",',
-    '  "screenRecording": "granted"',
+    '  "ok": true,',
+    '  "permissions": {',
+    '    "accessibility": true,',
+    '    "screenRecording": true',
+    '  }',
     "}",
   ];
   let visible = $state(0);

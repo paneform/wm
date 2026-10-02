@@ -120,8 +120,13 @@ case "${1:-}" in
     load
     ;;
   status)
-    launchctl print "$DOMAIN/$LABEL"
-    "$SIDECAR" state --port 17832
+    if [[ "${2:-}" == "--verbose" ]]; then
+      launchctl print "$DOMAIN/$LABEL"
+      "$SIDECAR" state --port 17832 --verbose
+    else
+      launchctl print "$DOMAIN/$LABEL" >/dev/null
+      "$SIDECAR" state --port 17832
+    fi
     ;;
   uninstall)
     unload

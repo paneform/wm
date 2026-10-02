@@ -140,12 +140,18 @@ export const Constraints = Schema.Struct({
 });
 export interface Constraints extends Schema.Schema.Type<typeof Constraints> {}
 
-export const WindowObservation = Schema.Struct({
+export const WindowIdentity = Schema.Struct({
   id: Schema.String,
+  title: Schema.optional(Schema.String),
+  appName: Schema.optional(Schema.String),
+});
+export interface WindowIdentity extends Schema.Schema.Type<typeof WindowIdentity> {}
+
+export const WindowObservation = Schema.Struct({
+  ...WindowIdentity.fields,
   pid: Schema.Number,
   bundleId: Schema.optional(Schema.String),
   executablePath: Schema.optional(Schema.String),
-  title: Schema.optional(Schema.String),
   role: Schema.String,
   subrole: Schema.optional(Schema.String),
   frame: Frame,

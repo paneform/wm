@@ -334,8 +334,9 @@ const optionKinds = new Map<string, "value" | "boolean">([
   ["port", "value"],
   ["url", "value"],
   ["sidecar", "value"],
+  ["verbose", "boolean"],
 ]);
-const transportOptions = ["port", "url", "sidecar"];
+const transportOptions = ["port", "url", "sidecar", "verbose"];
 export interface CommandInvocation {
   readonly command: ParsedCommand;
   readonly options: Options;

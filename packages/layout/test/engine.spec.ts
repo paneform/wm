@@ -744,6 +744,59 @@ describe("engine pipeline (fake platform)", () => {
     expect(await h.run({ type: "getWindow", windowId: "missing" })).toEqual({
       type: "window",
       window: null,
+      currentWorkspace: (await h.snapshot()).focusedWorkspace,
+    });
+  });
+
+  test("listing queries include authoritative names, membership and current workspace", async () => {
+    const h = await bootstrap();
+    const editor = h.fake.addWindow(makeWindow({ title: "Project", appName: "Editor" }));
+    const browser = h.fake.addWindow(makeWindow({ title: "Reference", appName: "Browser" }));
+    await h.run({ type: "reconcile" });
+    await h.run({
+      type: "moveWindowToWorkspace",
+      windowId: browser,
+      workspace: "2",
+      follow: false,
+    });
+    const state = await h.snapshot();
+    expect(await h.run({ type: "getWindows" })).toMatchObject({
+      type: "windows",
+      currentWorkspace: state.focusedWorkspace,
+      windows: expect.arrayContaining([
+        expect.objectContaining({
+          id: editor,
+          title: "Project",
+          appName: "Editor",
+          workspace: "1",
+        }),
+        expect.objectContaining({
+          id: browser,
+          title: "Reference",
+          appName: "Browser",
+          workspace: "2",
+        }),
+      ]),
+    });
+    expect(await h.run({ type: "getWorkspaces" })).toMatchObject({
+      workspaces: expect.arrayContaining([
+        expect.objectContaining({
+          name: "2",
+          windows: [{ id: browser, title: "Reference", appName: "Browser" }],
+        }),
+      ]),
+    });
+    expect(state.windows.find((window) => window.id === editor)?.appName).toBe("Editor");
+    await h.run({ type: "floatWindow", windowId: browser });
+    expect(await h.run({ type: "getWorkspaces" })).toMatchObject({
+      workspaces: expect.arrayContaining([
+        expect.objectContaining({
+          name: "2",
+          members: [],
+          floating: [browser],
+          windows: [{ id: browser, title: "Reference", appName: "Browser" }],
+        }),
+      ]),
     });
   });
 

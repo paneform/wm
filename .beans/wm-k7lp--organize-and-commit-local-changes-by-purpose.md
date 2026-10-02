@@ -5,7 +5,7 @@ status: in-progress
 type: task
 priority: normal
 created_at: 2026-10-02T18:04:20Z
-updated_at: 2026-10-02T18:34:49Z
+updated_at: 2026-10-02T18:44:01Z
 ---
 
 Review the complete working tree and commit the requested local source changes in logical, validated groups. Preserve all existing user work; exclude generated artifacts and external local configuration.
@@ -17,7 +17,7 @@ Review the complete working tree and commit the requested local source changes i
 - [x] Commit full-extent directional stack exchange with its regression scenario.
 - [x] Commit focused-window styling and compact demo-card presentation.
 - [x] Commit per-display workspace indicators and animation/browser checks.
-- [ ] Commit the shared command grammar, JSON contracts and caller/example migrations.
+- [x] Commit the shared command grammar, JSON contracts and caller/example migrations.
 - [ ] Commit compact CLI output, app metadata and verbose diagnostics.
 - [ ] Commit command-hierarchy docs navigation.
 - [ ] Commit updated design references and remaining formatting-only changes.
@@ -52,3 +52,11 @@ A newer local service-start demo edit appeared during organization (three overla
 ## Contracts staging validation
 
 Exported the staged index to an isolated temporary workspace and installed only cached locked dependencies. The exact staged command/contracts tree passes all 1,003 TypeScript/Swift tests, root lint, typechecks and production/native builds. This verifies the split without relying on unstaged compact-output or navigation code. The newer service-start and explicit-ID focus demo edits also pass scenario expectations in that staged tree.
+
+## Commit 5
+
+ee4cbb3 — refactor(wm): unify public command grammar and JSON contracts. Includes canonical namespace/Result parsing, independent assignment targets/follow behavior, internal-only APIs, adapters and scenario/caller migrations. Its exact staged tree passes tests, lint, typecheck and build in isolation.
+
+## Compact-output staging validation
+
+The exact staged compact-output tree passes all 1,014 TypeScript/Swift tests, root lint, typechecks and production/native builds in the isolated index workspace. The contracts commit and this output commit are therefore independently buildable; pending navigation code was not used for either validation.

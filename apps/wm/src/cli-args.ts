@@ -79,6 +79,7 @@ ${formatCommandHelp(serviceCommandPaths)}
 Daemon:
   wm serve [--port N] [--observe-only] [--sidecar PATH]
 Flags:
+  --verbose       Show the full command response and diagnostic details
   --port N        Daemon WebSocket port (default from config or 17832)
   --sidecar PATH  Explicit wm-sidecar executable for local commands
   --observe-only  Start paused: observe/query state without platform mutations

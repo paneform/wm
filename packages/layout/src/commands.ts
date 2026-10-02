@@ -1,7 +1,13 @@
 import { Effect, Schema } from "effect";
 import type { Clock } from "./platform.js";
 import { Direction } from "./direction.js";
-import { Capabilities, DisplayObservation, Frame, WindowObservation } from "./schema.js";
+import {
+  Capabilities,
+  DisplayObservation,
+  Frame,
+  WindowIdentity,
+  WindowObservation,
+} from "./schema.js";
 import { EMPTY_TREE_LEAF } from "./constants.js";
 import type { BspNode } from "./world.js";
 import { tiledMembers } from "./layout/bsp.js";
@@ -152,11 +158,10 @@ export function isAllowedWhenPaused(command: Command): boolean {
 // ---------------------------------------------------------------------------
 
 export const ManagedWindowSnapshot = Schema.Struct({
-  id: Schema.String,
+  ...WindowIdentity.fields,
   pid: Schema.Number,
   bundleId: Schema.optional(Schema.String),
   executablePath: Schema.optional(Schema.String),
-  title: Schema.optional(Schema.String),
   classification: Schema.String,
   managed: Schema.Boolean,
   workspace: Schema.NullOr(Schema.String),
@@ -173,6 +178,7 @@ interface ManagedWindowSnapshotBuilder {
   bundleId?: string;
   executablePath?: string;
   title?: string;
+  appName?: string;
   classification: string;
   managed: boolean;
   workspace: string | null;
@@ -224,6 +230,7 @@ export const WorkspaceSnapshot = Schema.Struct({
   pinnedDisplayOverride: Schema.NullOr(Schema.String),
   /** Most recently focused member; omitted when unknown (null). */
   lastFocusedMember: Schema.optional(Schema.NullOr(Schema.String)),
+  windows: Schema.optional(Schema.Array(WindowIdentity)),
 });
 export interface WorkspaceSnapshot extends Schema.Schema.Type<typeof WorkspaceSnapshot> {}
 
@@ -237,6 +244,7 @@ interface WorkspaceSnapshotBuilder {
   preferredDisplay: string | null;
   pinnedDisplayOverride: string | null;
   lastFocusedMember?: string | null;
+  windows?: readonly WindowIdentity[];
 }
 
 export const PendingTransactionSnapshot = Schema.Struct({
@@ -265,12 +273,23 @@ export const StateSnapshot = Schema.Struct({
 });
 export interface StateSnapshot extends Schema.Schema.Type<typeof StateSnapshot> {}
 
+export const WindowListing = Schema.Struct({
+  ...WindowObservation.fields,
+  workspace: Schema.optional(Schema.NullOr(Schema.String)),
+});
+export interface WindowListing extends Schema.Schema.Type<typeof WindowListing> {}
+
 export const CommandResult = Schema.Union(
   Schema.Struct({ type: Schema.Literal("state"), snapshot: StateSnapshot }),
-  Schema.Struct({ type: Schema.Literal("windows"), windows: Schema.Array(WindowObservation) }),
+  Schema.Struct({
+    type: Schema.Literal("windows"),
+    windows: Schema.Array(WindowListing),
+    currentWorkspace: Schema.optional(Schema.NullOr(Schema.String)),
+  }),
   Schema.Struct({
     type: Schema.Literal("window"),
-    window: Schema.NullOr(WindowObservation),
+    window: Schema.NullOr(WindowListing),
+    currentWorkspace: Schema.optional(Schema.NullOr(Schema.String)),
   }),
   Schema.Struct({ type: Schema.Literal("displays"), displays: Schema.Array(DisplayObservation) }),
   Schema.Struct({
@@ -372,6 +391,46 @@ export const CommandResult = Schema.Union(
 );
 export type CommandResult = typeof CommandResult.Type;
 
+type MutableWindowIdentity = { -readonly [Field in keyof WindowIdentity]: WindowIdentity[Field] };
+
+function windowIdentity(window: WindowIdentity): WindowIdentity {
+  const result: MutableWindowIdentity = { id: window.id };
+  if (window.title !== undefined) result.title = window.title;
+  if (window.appName !== undefined) result.appName = window.appName;
+  return result;
+}
+
+function workspaceWindows(
+  world: World,
+  workspace: import("./world.js").WorkspaceState,
+): WindowIdentity[] {
+  const ids = new Set([
+    ...tiledMembers(workspace.tree).filter((id) => id !== EMPTY_TREE_LEAF),
+    ...workspace.floating,
+  ]);
+  return [...ids].map((id) => windowIdentity(world.windows.get(id) ?? { id }));
+}
+
+function windowMemberships(world: World) {
+  const memberships = new Map<string, { workspace: string; floating: boolean }>();
+  for (const workspace of world.workspaces.values()) {
+    for (const id of tiledMembers(workspace.tree)) {
+      if (id !== EMPTY_TREE_LEAF)
+        memberships.set(id, { workspace: workspace.name, floating: false });
+    }
+    for (const id of workspace.floating)
+      memberships.set(id, { workspace: workspace.name, floating: true });
+  }
+  return memberships;
+}
+
+function windowListing(
+  memberships: ReturnType<typeof windowMemberships>,
+  window: WindowObservation,
+): WindowListing {
+  return { ...window, workspace: memberships.get(window.id)?.workspace ?? null };
+}
+
 /**
  * Committed-state projection: user-facing view of topology, managed windows,
  * workspaces, focus, health and pending transaction metadata.
@@ -381,16 +440,7 @@ export function projectSnapshot(
   health: HealthState,
   pending: readonly PendingTransactionSnapshot[],
 ): StateSnapshot {
-  const memberToWorkspace = new Map<string, { workspace: string; floating: boolean }>();
-  for (const ws of world.workspaces.values()) {
-    for (const id of tiledMembers(ws.tree)) {
-      if (id !== EMPTY_TREE_LEAF)
-        memberToWorkspace.set(id, { workspace: ws.name, floating: false });
-    }
-    for (const id of ws.floating) {
-      memberToWorkspace.set(id, { workspace: ws.name, floating: true });
-    }
-  }
+  const memberToWorkspace = windowMemberships(world);
 
   const windows: ManagedWindowSnapshot[] = [...world.windows.values()].map((obs) => {
     const membership = memberToWorkspace.get(obs.id);
@@ -409,6 +459,7 @@ export function projectSnapshot(
     if (obs.bundleId !== undefined) snapshot.bundleId = obs.bundleId;
     if (obs.executablePath !== undefined) snapshot.executablePath = obs.executablePath;
     if (obs.title !== undefined) snapshot.title = obs.title;
+    if (obs.appName !== undefined) snapshot.appName = obs.appName;
     return snapshot;
   });
 
@@ -422,6 +473,7 @@ export function projectSnapshot(
       visibleOnDisplay: ws.visibleOnDisplay,
       preferredDisplay: ws.preferredDisplay,
       pinnedDisplayOverride: ws.pinnedDisplayOverride,
+      windows: workspaceWindows(world, ws),
     };
     if (ws.lastFocusedMember !== null) snapshot.lastFocusedMember = ws.lastFocusedMember;
     return snapshot;
@@ -484,16 +536,26 @@ export function createCommandBus(deps: CommandBusDeps): CommandBus {
             type: "state",
             snapshot: projectSnapshot(world, deps.health(), []),
           };
-        case "getWindows":
-          return { type: "windows", windows: [...world.windows.values()].map((w) => ({ ...w })) };
+        case "getWindows": {
+          const memberships = windowMemberships(world);
+          return {
+            type: "windows",
+            currentWorkspace: world.focusedWorkspace,
+            windows: [...world.windows.values()].map((window) =>
+              windowListing(memberships, window),
+            ),
+          };
+        }
         case "getWindow": {
           const id =
             command.windowId ??
             world.focusIntent?.id ??
             [...world.windows.values()].find((window) => window.focused)?.id;
+          const window = id === undefined ? undefined : world.windows.get(id);
           return {
             type: "window",
-            window: id === undefined ? null : (world.windows.get(id) ?? null),
+            currentWorkspace: world.focusedWorkspace,
+            window: window === undefined ? null : windowListing(windowMemberships(world), window),
           };
         }
         case "getDisplays":

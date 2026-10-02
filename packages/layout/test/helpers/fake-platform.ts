@@ -275,6 +275,7 @@ export interface FakeWindowSpec {
   bundleId?: string | undefined;
   executablePath?: string | undefined;
   title?: string | undefined;
+  appName?: string | undefined;
   role?: string | undefined;
   subrole?: string | undefined;
   displayId?: DisplayId | undefined;
@@ -433,6 +434,7 @@ interface SimWindow {
   bundleId?: string | undefined;
   executablePath?: string | undefined;
   title: string;
+  appName?: string;
   role: string;
   subrole?: string | null | undefined;
   personality: FakePersonality;
@@ -454,6 +456,7 @@ interface MutableWindowObservation {
   bundleId?: string;
   executablePath?: string;
   title?: string;
+  appName?: string;
   role: string;
   subrole?: string;
   frame: Frame;
@@ -601,6 +604,7 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
       capabilities: capabilitiesOf(w),
     };
     if (w.bundleId !== undefined) observation.bundleId = w.bundleId;
+    if (w.appName !== undefined) observation.appName = w.appName;
     if (w.executablePath !== undefined) observation.executablePath = w.executablePath;
     if (w.subrole !== undefined && w.subrole !== null) observation.subrole = w.subrole;
     if (w.constraints !== undefined) observation.constraints = w.constraints;
@@ -1069,6 +1073,7 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
       initialFrame: { ...frame },
     };
     if (bundleId !== undefined) window.bundleId = bundleId;
+    if (spec.appName !== undefined) window.appName = spec.appName;
     if (spec.subrole !== undefined) window.subrole = spec.subrole;
     if (spec.constraints !== undefined) window.constraints = spec.constraints;
     nextPid += 1;

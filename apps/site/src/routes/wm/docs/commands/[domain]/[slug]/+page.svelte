@@ -29,6 +29,7 @@
 <table><tbody><tr><th>Method</th><th>Invocation</th></tr>
   {#each invocations as row}<tr><td data-label="Method"><span class="method" class:ws={row.method === 'WebSocket'} class:key={row.method === 'Keybind'} class:scenario={row.method === 'Scenario'}>{row.method}</span></td><td data-label="Invocation">{#if row.method === 'WebSocket'}<pre class="websocket-payload"><code>{row.syntax}</code></pre>{:else}<code>{row.syntax}</code>{/if}{#if row.note}<small>{row.note}</small>{/if}</td></tr>{/each}
 </tbody></table>
+<p class="note">CLI output shows useful summary fields by default. Add <code>--verbose</code> for the full response and diagnostic details. WebSocket results retain their full structured data.</p>
 <h2 id="arguments">Arguments</h2>
 {#if doc.forms.some((form) => form.syntax.includes('<')) || doc.slug.endsWith('-directional')}
   <table><tbody><tr><th>Name</th><th>Usage</th></tr>

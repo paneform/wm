@@ -28,6 +28,7 @@ struct CapabilitiesValue: Codable, Equatable, Sendable {
 struct WindowValue: Codable, Equatable, Sendable {
   var id: String
   var pid: Int
+  var appName: String? = nil
   var bundleId: String?
   var executablePath: String?
   var title: String?

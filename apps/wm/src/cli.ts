@@ -16,6 +16,7 @@ import { createFileConfigSource, resolveConfigPath } from "./config-file.ts";
 import { createFileObservationStore, resolveObservationPath } from "./observation-file.ts";
 import { createDiagnosticsLog, resolveDiagnosticsPath } from "./diagnostics-log.ts";
 import { helpFor, parseArgs, USAGE } from "./cli-args.ts";
+import { permissionOutput } from "./command-output.ts";
 import {
   errorReport,
   exitCodeFor,
@@ -58,10 +59,10 @@ async function runPermissionsCommand(
     const report = await runPermissionFlow(command, adapterToPermissionClient(adapter), {
       openSettingsAfterRequest: flags["open-settings"] === true,
     });
-    printReport(report);
+    printReport(permissionOutput(report, flags["verbose"] === true));
     return exitCodeFor(report);
   } catch (cause) {
-    printReport(errorReport(command, cause));
+    printReport(permissionOutput(errorReport(command, cause), flags["verbose"] === true));
     return 1;
   }
 }
@@ -115,12 +116,20 @@ async function main(): Promise<number> {
       process.env["WM_SERVICE_SCRIPT"] ??
       fileURLToPath(new URL("../../../scripts/wm-service.sh", import.meta.url));
     return new Promise<number>((resolve, reject) => {
-      const child = spawn("/bin/bash", [script, parsed.service!], {
-        stdio: "inherit",
-        env: { ...process.env, PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
-      });
+      const verbose = parsed.flags["verbose"] === true;
+      const child = spawn(
+        "/bin/bash",
+        [script, parsed.service!, ...(verbose ? ["--verbose"] : [])],
+        {
+          stdio: "inherit",
+          env: { ...process.env, PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+        },
+      );
       child.once("error", reject);
-      child.once("exit", (code) => resolve(code ?? 1));
+      child.once("exit", (code) => {
+        if (!verbose && code === 0 && parsed.service !== "status") printReport({ ok: true });
+        resolve(code ?? 1);
+      });
     });
   }
   if (parsed.help || (parsed.command === null && !parsed.serve && parsed.localCommand === null)) {
@@ -135,41 +144,16 @@ async function main(): Promise<number> {
 
   if (!parsed.serve) {
     // Client mode: one request over the daemon's WebSocket, print JSON.
-    const { WebSocket } = await import("ws");
+    if (parsed.command === null) throw new Error("A command is required");
+    const { executeClientCommand } = await import("./command-client.ts");
     const url = String(parsed.flags["url"] ?? `ws://127.0.0.1:${port}`);
-    const socket = new WebSocket(url);
-    const result = await new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        socket.terminate();
-        reject(new Error("daemon connection timed out"));
-      }, 5_000);
-      socket.on("open", () => {
-        socket.send(
-          JSON.stringify({
-            v: 1,
-            type: "request",
-            id: crypto.randomUUID(),
-            command: parsed.command,
-          }),
-        );
-      });
-      socket.on("message", (raw) => {
-        clearTimeout(timer);
-        resolve(String(raw));
-      });
-      socket.on("error", (e) => {
-        clearTimeout(timer);
-        reject(e);
-      });
-      socket.on("close", () => {
-        clearTimeout(timer);
-        reject(new Error("daemon connection closed before a response"));
-      });
-    });
-    socket.close();
-    const message = JSON.parse(result) as { ok: boolean };
-    console.log(JSON.stringify(message, null, 2));
-    return message.ok ? 0 : 1;
+    const result = await executeClientCommand(
+      url,
+      parsed.command,
+      parsed.flags["verbose"] === true,
+    );
+    printReport(result.output);
+    return result.ok ? 0 : 1;
   }
 
   // Daemon mode: engine + macOS adapter + config watcher + WebSocket server.
