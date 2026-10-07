@@ -70,6 +70,11 @@ function hostEntries(): CommandNavEntry[] {
     return { path: words, href, syntax, summary: path.description ?? "Host command" };
   });
 }
+function sortCommandNavigation(nodes: CommandNavNode[]): CommandNavNode[] {
+  nodes.sort((left, right) => left.label.localeCompare(right.label, "en"));
+  for (const node of nodes) sortCommandNavigation(node.children);
+  return nodes;
+}
 function buildCommandNavigation(): CommandNavNode[] {
   const nodes: CommandNavNode[] = [];
   for (const doc of commandDocs)
@@ -81,12 +86,7 @@ function buildCommandNavigation(): CommandNavNode[] {
       keywords: [doc.title, ...doc.forms.map((form) => form.syntax)].join(" "),
     });
   for (const entry of hostEntries()) insertCommand(nodes, entry);
-  const groups = ["window", "workspace", "display", "config", "service"];
-  const rank = (node: CommandNavNode) => {
-    const index = groups.indexOf(node.token);
-    return index === -1 ? groups.length : index;
-  };
-  return nodes.sort((left, right) => rank(left) - rank(right));
+  return sortCommandNavigation(nodes);
 }
 export const commandNavigation = buildCommandNavigation();
 export function isCommandNavActive(node: CommandNavNode, currentHref: string): boolean {

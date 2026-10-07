@@ -25,6 +25,15 @@ const flatten = (nodes: readonly CommandNavNode[]): CommandNavNode[] =>
   nodes.flatMap((node) => [node, ...flatten(node.children)]);
 
 describe("command documentation navigation", () => {
+  it("alphabetizes every level of the command navigation", () => {
+    for (const siblings of [
+      commandNavigation,
+      ...flatten(commandNavigation).map((node) => node.children),
+    ]) {
+      const labels = siblings.map((node) => node.label);
+      expect(labels).toEqual([...labels].sort((left, right) => left.localeCompare(right, "en")));
+    }
+  });
   it("uses singular CLI namespaces and concise action labels", () => {
     expect(findNode(["window"]).label).toBe("Window");
     expect(findNode(["window", "list"])).toMatchObject({

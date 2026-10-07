@@ -19,8 +19,8 @@
 	} from "$lib/design/tokens.js";
 	import { parseHeroScenario } from "$lib/play/hero-scenario.js";
 	import Workstation, { type ScenePhase } from "./Workstation.svelte";
-	import PaneformWordmark from "./PaneformWordmark.svelte";
-	import WaitlistForm from "./WaitlistForm.svelte";
+	import SiteHeader from "./SiteHeader.svelte";
+	import SiteFooter from "./SiteFooter.svelte";
 	import type { Frame } from "../desktop/desktop-model.js";
 	import { keyboardCommand, browserKeyboardScheduler, createKeyboardController } from "./keyboard-controller.js";
 	import { MACBOOK_DISPLAY_ID, HERO_APPS, type HeroAppTitle, type HeroWorkspace } from "./hero-model.js";
@@ -693,13 +693,11 @@
   if (lifecycle === "autoplay" || lifecycle === "paused") pauseDemo(false);
 }} />
 
-<main class="wm-landing">
+<div class="wm-landing">
+	<SiteHeader />
+	<main>
 	<section class="hero" aria-labelledby="wm-heading">
-		<header class="hero-header">
-			<div class="wordmark"><PaneformWordmark clipId="paneform-hero-clip" /></div>
-			<a class="docs-link" href="/wm/docs/">Docs ↗</a>
 			<h1 id="wm-heading" class="visually-hidden">paneform wm interactive demo</h1>
-		</header>
 
 		<div class="stage-shell">
 			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -770,15 +768,11 @@
 			{liveStatus}
 		</p>
 	</section>
-  <footer id="waitlist-signup" class="stage-controls" onfocusin={() => { if (lifecycle === "autoplay" || lifecycle === "paused") pauseDemo(false); }}>
-    <div class="footer-info">
-      <p>Your desktop, organized. Coming first to Mac.</p>
-      <p class="creator-credit">Crafted with care by <a href="https://allandeutsch.com">Allan Deutsch</a> <a class="bluesky-link" href="https://bsky.app/profile/allandeutsch.com" aria-label="Allan Deutsch on Bluesky">🦋</a></p>
-      {#if lifecycle === "failed"}<p role="status">{status}</p>{/if}
-    </div>
-    <div class="footer-form"><WaitlistForm compact /></div>
-  </footer>
-</main>
+  </main>
+  <SiteFooter onfocusin={() => { if (lifecycle === "autoplay" || lifecycle === "paused") pauseDemo(false); }}>
+    {#snippet failureStatus()}{#if lifecycle === "failed"}<p role="status">{status}</p>{/if}{/snippet}
+  </SiteFooter>
+</div>
 
 <svelte:head>
 	<meta
@@ -795,20 +789,21 @@
 
 <style>
 	:global(html:has(.wm-landing)), :global(body:has(.wm-landing)) { min-width: 0; height: 100%; overflow: hidden; }
-	main {
+	.wm-landing {
 		display: grid;
-		grid-template-rows: minmax(0, 1fr) auto;
+		grid-template-rows: auto minmax(0, 1fr) auto;
 		height: 100svh;
 		width: 100%;
 		max-width: 100vw;
 		min-height: 0;
 	}
+	main { display: grid; min-height: 0; }
 
 	.hero {
 		position: relative;
 		display: grid;
 		grid-template-columns: minmax(0, 1fr);
-		grid-template-rows: auto minmax(0, 1fr);
+		grid-template-rows: minmax(0, 1fr);
 		width: 100%;
 		max-width: 100vw;
 		min-height: 0;
@@ -816,13 +811,6 @@
 		container: hero / inline-size;
 	}
 
-  .hero-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: var(--space-5) var(--page-gutter); }
-  .docs-link { color: var(--color-page-secondary); font: 600 var(--type-size-control) var(--type-family-system); text-decoration: none; }
-  .docs-link:hover { color: var(--color-page-foreground); }
-  .docs-link:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 3px; }
-  .wordmark { width: min(11rem, 42vw); }
-  .wordmark :global(svg) { width: 100%; }
-  .footer-form { width: 100%; max-width: 26rem; min-width: 0; justify-self: end; }
   .stage { --laptop-intro-wide-width: 68%; --laptop-intro-wide-left: 16%; --laptop-intro-wide-top: 44%; }
   .stage :global(.scene) { width: min(100%, 130cqh); aspect-ratio: 1.3; margin: auto; --laptop-solo-width: 68%; --laptop-solo-top: 44%; }
 
@@ -898,29 +886,6 @@
 		outline-offset: calc(-1 * var(--stroke-strong));
 	}
 
-	.stage-controls {
-		z-index: var(--layer-controls);
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
-		align-items: center;
-		justify-content: space-between;
-		gap: var(--space-3) var(--space-6);
-		padding: var(--space-3) var(--page-gutter);
-		border-block-start: var(--stroke-hairline) solid
-			var(--color-line-default);
-		color: var(--color-page-quiet);
-		font-size: var(--type-size-label);
-	}
-
-	.stage-controls p {
-		margin: 0;
-	}
-	.footer-info { min-width: 0; line-height: 1.5; }
-	.creator-credit { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35em; }
-	.creator-credit a { color: inherit; text-underline-offset: 0.2em; }
-	.creator-credit a:hover { color: var(--color-page-foreground); }
-	.creator-credit a:focus-visible { outline: var(--stroke-strong) solid var(--color-focus-ring); outline-offset: var(--space-1); }
-	.bluesky-link { display: inline-flex; align-items: center; justify-content: center; min-width: 1.5rem; min-height: 1.5rem; text-decoration: none; }
 	.visually-hidden {
 		position: absolute;
 		width: 1px;
@@ -958,13 +923,4 @@
     }
   }
 
-	@media (max-width: 42rem) {
-		.footer-form { grid-row: 1; justify-self: center; }
-		.stage-controls {
-			justify-items: center;
-			text-align: center;
-			grid-template-columns: minmax(0, 1fr);
-		}
-		.creator-credit { justify-content: center; }
-	}
 </style>

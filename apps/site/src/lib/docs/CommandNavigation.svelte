@@ -14,9 +14,9 @@
       <li>
         {#if node.href}
           <a href={node.href} class:active={isCommandNavActive(node, currentHref)} aria-current={isCommandNavActive(node, currentHref) ? node.href.includes('#') ? 'location' : 'page' : undefined} onclick={onnavigate}>
-            {node.label}{#if showSyntax && node.syntax}<small>{node.syntax}</small>{/if}
+             {node.token}{#if showSyntax && node.syntax}<small>{node.syntax}</small>{/if}
           </a>
-        {:else}<span class="branch">{node.label}</span>{/if}
+         {:else}<span class="branch">{node.token}</span>{/if}
         {#if node.children.length}{@render tree(node.children)}{/if}
       </li>
     {/each}

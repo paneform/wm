@@ -5,7 +5,8 @@
   import { setContext } from "svelte";
   import { commandNavigation, docsBase, guideLinks, searchEntries } from "$lib/docs/navigation.js";
   import CommandNavigation from "$lib/docs/CommandNavigation.svelte";
-  import PaneformWordmark from "$lib/hero/PaneformWordmark.svelte";
+  import SiteHeader from "$lib/hero/SiteHeader.svelte";
+  import SiteFooter from "$lib/hero/SiteFooter.svelte";
   import DocsToc from "$lib/docs/DocsToc.svelte";
   import "$lib/docs/docs.css";
   import { enhanceHeadingAnchors } from "$lib/docs/heading-anchors.js";
@@ -37,9 +38,8 @@
 
 <svelte:head><title>Docs · Paneform WM</title><meta name="description" content="Guides and code-generated command reference for Paneform WM." /></svelte:head>
 <div class="docs">
-  <header class="docs-topbar">
-    <div class="docs-wordmark"><a href="/wm"><PaneformWordmark clipId="docs-logo" /></a><span aria-hidden="true">/</span><a href={docsBase + "/"}>docs</a></div>
-    <div class="docs-spacer"></div>
+  <SiteHeader playgroundEnabled={data.playgroundEnabled}>
+    {#snippet docsSearch()}
     <div class="docs-search-wrap" onfocusout={(event) => { if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) searchOpen = false; }}>
       <input bind:this={searchInput} bind:value={search} aria-label="Search docs" placeholder="Search docs…" onfocus={() => (searchOpen = true)} />
       <kbd>⌘K</kbd>
@@ -51,12 +51,12 @@
         </div>
       {/if}
     </div>
-    {#if data.playgroundEnabled}<a class="docs-play-link" href="/wm/play">Playground ↗</a>{/if}
-  </header>
+    {/snippet}
+  </SiteHeader>
   <div class="docs-shell">
     <button type="button" class="docs-mobile-nav" aria-expanded={navigationOpen} onclick={() => (navigationOpen = !navigationOpen)}>{navigationOpen ? "Close navigation" : "Browse documentation"}</button>
     <nav class:open={navigationOpen} class="docs-sidebar" aria-label="Documentation">
-      <div class="docs-nav-group"><p>Getting started</p><a class:active={page.url.pathname === guideLinks[0].href} href={guideLinks[0].href} onclick={() => (navigationOpen = false)}>Installation</a></div>
+      <div class="docs-nav-group"><p>Getting started</p><a class:active={page.url.pathname === docsBase + "/"} href={docsBase + "/"} onclick={() => (navigationOpen = false)}>Overview</a><a class:active={page.url.pathname === guideLinks[0].href} href={guideLinks[0].href} onclick={() => (navigationOpen = false)}>Installation</a></div>
       <div class="docs-nav-group"><p>Concepts</p><a class:active={page.url.pathname === guideLinks[1].href} href={guideLinks[1].href} onclick={() => (navigationOpen = false)}>Workspaces and layout</a></div>
       <div class="docs-nav-group docs-command-links"><p><a href={docsBase + "/commands/"}>Commands</a></p>
         <CommandNavigation nodes={commandNavigation} currentHref={page.url.pathname + page.url.hash} onnavigate={() => (navigationOpen = false)} />
@@ -64,7 +64,8 @@
       <div class="docs-nav-group"><p>Configuration</p><a class:active={page.url.pathname === guideLinks[2].href} href={guideLinks[2].href} onclick={() => (navigationOpen = false)}>Options</a></div>
       <div class="docs-nav-group"><p>Reference</p><a class:active={page.url.pathname === guideLinks[3].href} href={guideLinks[3].href} onclick={() => (navigationOpen = false)}>CLI listing</a></div>
     </nav>
-    <main id="docs-main">{@render children()}</main>
+    <main id="docs-main" class="docs-main">{@render children()}</main>
     <DocsToc />
   </div>
+  <SiteFooter />
 </div>
