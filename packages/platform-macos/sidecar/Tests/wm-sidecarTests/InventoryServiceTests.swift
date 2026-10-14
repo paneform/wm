@@ -1,8 +1,41 @@
+import ApplicationServices
 import Testing
 
 @testable import wm_sidecar
 
 @Suite struct InventoryServiceTests {
+    @Test func cachedReferencesResolveFocusWithoutAnAllApplicationInventory() {
+        let zen = AXUIElementCreateApplication(42)
+        let bambu = AXUIElementCreateApplication(43)
+        let references = ["zen": zen, "bambu": bambu]
+        #expect(
+            InventoryService.focusedWindowID(
+                in: references,
+                focus: WindowFocus.Snapshot(pid: 42, window: zen)) == "zen")
+        #expect(
+            InventoryService.focusedWindowID(
+                in: references,
+                focus: WindowFocus.Snapshot(pid: 43, window: bambu)) == "bambu")
+    }
+
+    @Test func fastFocusRejectsUnknownOrWrongApplicationReferences() {
+        let zen = AXUIElementCreateApplication(42)
+        let unknown = AXUIElementCreateApplication(43)
+        let references = ["zen": zen]
+        #expect(
+            InventoryService.focusedWindowID(
+                in: references,
+                focus: WindowFocus.Snapshot(pid: 43, window: unknown)) == nil)
+        #expect(
+            InventoryService.focusedWindowID(
+                in: references,
+                focus: WindowFocus.Snapshot(pid: 43, window: zen)) == nil)
+        #expect(
+            InventoryService.focusedWindowID(
+                in: references,
+                focus: WindowFocus.Snapshot(pid: 42, window: nil)) == nil)
+    }
+
     @Test func focusedWindowBelongsToFrontmostApplication() {
         let windows = [
             "activity": window(id: "activity", pid: 650, focused: true),

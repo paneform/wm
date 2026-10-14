@@ -150,6 +150,8 @@ export interface WindowIdentity extends Schema.Schema.Type<typeof WindowIdentity
 export const WindowObservation = Schema.Struct({
   ...WindowIdentity.fields,
   pid: Schema.Number,
+  /** Opaque lifetime token; changes when a native handle or process is reused. */
+  instanceId: Schema.optional(Schema.String),
   bundleId: Schema.optional(Schema.String),
   executablePath: Schema.optional(Schema.String),
   role: Schema.String,
@@ -163,6 +165,21 @@ export const WindowObservation = Schema.Struct({
   constraints: Schema.optional(Constraints),
 });
 export interface WindowObservation extends Schema.Schema.Type<typeof WindowObservation> {}
+
+export const WindowInventory = Schema.Struct({
+  windows: Schema.Array(WindowObservation),
+  unavailableWindowIds: Schema.Array(Schema.String),
+  closedWindowIds: Schema.Array(Schema.String),
+});
+export interface WindowInventory extends Schema.Schema.Type<typeof WindowInventory> {}
+
+/** Titles, geometry and state-dependent subroles are not lifetime identifiers. */
+export const sameWindowInstance = (a: WindowObservation, b: WindowObservation): boolean =>
+  a.id === b.id &&
+  a.pid === b.pid &&
+  (a.instanceId !== undefined || b.instanceId !== undefined
+    ? a.instanceId === b.instanceId
+    : a.role === b.role && a.bundleId === b.bundleId && a.executablePath === b.executablePath);
 
 export const WindowClass = Schema.Literal("normal", "transient", "system", "uncertain");
 export type WindowClass = typeof WindowClass.Type;
@@ -190,7 +207,8 @@ export type WriteErrorKind = typeof WriteErrorKind.Type;
  * A single REQUIRED fingerprint deliberately avoids the absent-vs-null JSON
  * ambiguity of optional metadata fields: it is
  * `JSON.stringify([pid, role ?? null, subrole ?? null])`, so a replacement
- * sharing pid+role but carrying ANY subrole (including null vs non-null)
+ * with an optional fourth instanceId element when the platform supplies one.
+ * A replacement sharing pid+role but carrying ANY subrole (including null vs non-null)
  * produces a different fingerprint and is rejected as stale.
  */
 export const ExpectedWindowIdentity = Schema.Struct({
@@ -203,8 +221,14 @@ export const windowIdentityFingerprint = (observation: {
   pid: number;
   role?: string | null | undefined;
   subrole?: string | null | undefined;
+  instanceId?: string | undefined;
 }): string =>
-  JSON.stringify([observation.pid, observation.role ?? null, observation.subrole ?? null]);
+  JSON.stringify([
+    observation.pid,
+    observation.role ?? null,
+    observation.subrole ?? null,
+    ...(observation.instanceId === undefined ? [] : [observation.instanceId]),
+  ]);
 
 export const WriteObservation = Schema.Struct({
   requested: Frame,
@@ -244,7 +268,12 @@ export class PlatformError extends Schema.TaggedError<PlatformError>()("Platform
 export const PlatformEvent = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("topology_changed") }),
   Schema.Struct({ kind: Schema.Literal("window_added"), window: WindowObservation }),
-  Schema.Struct({ kind: Schema.Literal("window_removed"), windowId: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal("window_removed"),
+    windowId: Schema.String,
+    /** Positive destruction evidence, not an inventory-diff absence. */
+    closed: Schema.optional(Schema.Boolean),
+  }),
   Schema.Struct({ kind: Schema.Literal("window_changed"), window: WindowObservation }),
   Schema.Struct({ kind: Schema.Literal("focus_changed"), windowId: Schema.NullOr(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal("space_changed") }),

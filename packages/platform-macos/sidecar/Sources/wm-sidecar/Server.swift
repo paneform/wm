@@ -34,7 +34,7 @@ final class SidecarServer {
   private let input: FileHandle
   private let writer: LineWriter
   private lazy var inventory = InventoryService { [weak self] event in
-    Task { @MainActor in self?.forward(event) }
+    self?.forward(event)
   }
   private var subscribed = false
   private var inFlight = 0
@@ -189,13 +189,20 @@ final class SidecarServer {
       }
 
     case "getWindows":
-      send(ResultMessage(reqId: requestId(request), result: .windows(inventory.currentWindows())))
+      guard let observation = inventory.currentInventory() else {
+        return sendError(request, code: "unavailable", detail: "window observation is unavailable")
+      }
+      send(ResultMessage(reqId: requestId(request), result: .inventory(observation)))
 
     case "getWindow":
       guard let id = request.id else {
         return sendError(request, code: "invalid_request", detail: "getWindow requires \"id\"")
       }
       guard let meta = inventory.metadata(for: id) else {
+        if inventory.observationUnavailable(for: id) {
+          return sendError(
+            request, code: "unavailable", detail: "window observation is unavailable")
+        }
         return send(ResultMessage(reqId: requestId(request), result: .window(nil)))
       }
       send(
@@ -244,7 +251,12 @@ final class SidecarServer {
     guard let meta = inventory.metadata(for: id) else {
       return sendError(request, code: "not_found", detail: "unknown window \(id)")
     }
-    var target = Rect(frameValue)
+    let components: [GeometryAdapter.Component] =
+      mode == "position"
+      ? [.position]
+      : mode == "size" ? [.size] : [.size, .position, .size]
+    var target = GeometryAdapter.componentTarget(
+      Rect(frameValue), baseline: meta.frame, components: components)
     // Wall-clock duration for failure reports: a long failed write is stall
     // evidence; an instant one is a refusal.
     let durationClock = ContinuousClock()
@@ -262,23 +274,6 @@ final class SidecarServer {
       return value
     }
     do {
-      let components: [GeometryAdapter.Component]
-      switch mode {
-      case "position":
-        target = try inventory.mergedTarget(meta: meta) {
-          $0.x = frameValue.x
-          $0.y = frameValue.y
-        }
-        components = [.position]
-      case "size":
-        target = try inventory.mergedTarget(meta: meta) {
-          $0.width = frameValue.width
-          $0.height = frameValue.height
-        }
-        components = [.size]
-      default:
-        components = [.size, .position, .size]
-      }
       let write = try await inventory.write(
         meta: meta,
         requested: target,
@@ -288,56 +283,64 @@ final class SidecarServer {
     } catch let error as AdapterError {
       if error != .stale {
         do {
+          target = try inventory.mergedTarget(meta: meta) { baseline in
+            baseline = GeometryAdapter.componentTarget(
+              Rect(frameValue), baseline: baseline, components: components)
+          }
           let settlement = try await inventory.settleAfterRejectedWrite(
             meta: meta, requested: target, expectedIdentity: request.expectedIdentity)
           return send(
             ResultMessage(
               reqId: requestId(request),
-              result: .write(annotated(
-                WriteValue(
-                  requested: target.frameValue,
-                  observed: settlement.frame.frameValue,
-                  stable: settlement.stable,
-                  stableReads: settlement.stableReads,
-                  errorKind: error.wireCode,
-                  durationMs: elapsedMs())))))
+              result: .write(
+                annotated(
+                  WriteValue(
+                    requested: target.frameValue,
+                    observed: settlement.frame.frameValue,
+                    stable: settlement.stable,
+                    stableReads: settlement.stableReads,
+                    errorKind: error.wireCode,
+                    durationMs: elapsedMs())))))
         } catch let settlementError as AdapterError {
           let observed = inventory.currentObservedFrame(for: meta) ?? target
           return send(
             ResultMessage(
               reqId: requestId(request),
-              result: .write(annotated(
-                WriteValue(
-                  requested: target.frameValue,
-                  observed: observed.frameValue,
-                  stable: false,
-                  errorKind: settlementError.wireCode,
-                  durationMs: elapsedMs())))))
+              result: .write(
+                annotated(
+                  WriteValue(
+                    requested: target.frameValue,
+                    observed: observed.frameValue,
+                    stable: false,
+                    errorKind: settlementError.wireCode,
+                    durationMs: elapsedMs())))))
         } catch {}
       }
       let observed = inventory.currentObservedFrame(for: meta) ?? target
       send(
         ResultMessage(
           reqId: requestId(request),
-          result: .write(annotated(
-            WriteValue(
-              requested: target.frameValue,
-              observed: observed.frameValue,
-              stable: false,
-              errorKind: error.wireCode,
-              durationMs: elapsedMs())))))
+          result: .write(
+            annotated(
+              WriteValue(
+                requested: target.frameValue,
+                observed: observed.frameValue,
+                stable: false,
+                errorKind: error.wireCode,
+                durationMs: elapsedMs())))))
     } catch {
       let observed = inventory.currentObservedFrame(for: meta) ?? target
       send(
         ResultMessage(
           reqId: requestId(request),
-          result: .write(annotated(
-            WriteValue(
-              requested: target.frameValue,
-              observed: observed.frameValue,
-              stable: false,
-              errorKind: AdapterError.rejected.wireCode,
-              durationMs: elapsedMs())))))
+          result: .write(
+            annotated(
+              WriteValue(
+                requested: target.frameValue,
+                observed: observed.frameValue,
+                stable: false,
+                errorKind: AdapterError.rejected.wireCode,
+                durationMs: elapsedMs())))))
     }
   }
 
@@ -435,7 +438,9 @@ final class SidecarServer {
             stableReads: settlement.stableReads,
             error: BatchErrorValue(
               code: error.wireCode,
-              detail: "setFrame failed (\(error.wireCode)); observed=\(settlement.frame.frameValue); stable=\(settlement.stable); stableReads=\(settlement.stableReads)"))
+              detail:
+                "setFrame failed (\(error.wireCode)); observed=\(settlement.frame.frameValue); stable=\(settlement.stable); stableReads=\(settlement.stableReads)"
+            ))
         } catch let settlementError as AdapterError {
           return batchFailure(
             operation, code: settlementError.wireCode,

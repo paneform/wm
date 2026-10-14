@@ -40,6 +40,13 @@ struct WindowValue: Codable, Equatable, Sendable {
   var fullscreen: Bool
   var focused: Bool
   var capabilities: CapabilitiesValue
+  var instanceId: String? = nil
+}
+
+struct WindowInventoryValue: Encodable, Sendable {
+  var windows: [WindowValue]
+  var unavailableWindowIds: [String]
+  var closedWindowIds: [String]
 }
 
 /// Mirrors the engine's DisplayObservation schema exactly.
@@ -129,6 +136,7 @@ enum ResultPayload: Encodable {
   case subscribed
   case topology(TopologyValue)
   case windows([WindowValue])
+  case inventory(WindowInventoryValue)
   case window(WindowValue?)
   case write(WriteValue)
   case batch(BatchResultValue)
@@ -149,6 +157,8 @@ enum ResultPayload: Encodable {
       try container.encode(TopologyPayload(topology: topology))
     case .windows(let windows):
       try container.encode(WindowsPayload(windows: windows))
+    case .inventory(let inventory):
+      try container.encode(inventory)
     case .window(let window):
       try container.encode(WindowPayload(window: window))
     case .write(let write):
@@ -237,7 +247,7 @@ struct ErrorMessage: Encodable {
 enum EventMessage: Encodable {
   case topologyChanged
   case windowAdded(WindowValue)
-  case windowRemoved(windowId: String)
+  case windowRemoved(windowId: String, closed: Bool = false)
   case windowChanged(WindowValue)
   case focusChanged(windowId: String?)
   case spaceChanged
@@ -273,8 +283,9 @@ enum EventMessage: Encodable {
       try container.encode(action, forKey: .action)
     case .windowAdded(let window), .windowChanged(let window):
       try container.encode(window, forKey: .window)
-    case .windowRemoved(let windowId):
+    case .windowRemoved(let windowId, let closed):
       try container.encode(windowId, forKey: .windowId)
+      if closed { try container.encode(true, forKey: .closed) }
     case .focusChanged(let windowId):
       try container.encode(windowId, forKey: .windowId)
     case .axStall(let pid, let app):
@@ -286,7 +297,7 @@ enum EventMessage: Encodable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case ev, window, windowId, action, pid, app
+    case ev, window, windowId, action, pid, app, closed
   }
 }
 
@@ -297,14 +308,16 @@ enum EventMessage: Encodable {
 /// mismatch aborts the write with `stale` and leaves the window untouched.
 ///
 /// Single REQUIRED fingerprint token (`JSON.stringify([pid, role ?? null,
-/// subrole ?? null])`) — deliberately avoids the absent-vs-null JSON
+/// subrole ?? null, ...optionalInstanceId])`) — deliberately avoids the absent-vs-null JSON
 /// ambiguity for optional metadata fields.
 struct ExpectedIdentityValue: Decodable, Sendable {
   var fingerprint: String
 
   /// MUST mirror the engine's canonical format exactly. AX roles/subroles
   /// are constrained identifiers; quotes are escaped defensively anyway.
-  static func fingerprint(pid: Int, role: String?, subrole: String?) -> String {
+  static func fingerprint(pid: Int, role: String?, subrole: String?, instanceId: String? = nil)
+    -> String
+  {
     func enc(_ v: String?) -> String {
       guard let v else { return "null" }
       return "\""
@@ -312,7 +325,8 @@ struct ExpectedIdentityValue: Decodable, Sendable {
         .replacingOccurrences(of: "\"", with: "\\\"")
         + "\""
     }
-    return "[\(pid),\(enc(role)),\(enc(subrole))]"
+    let suffix = instanceId.map { ",\(enc($0))" } ?? ""
+    return "[\(pid),\(enc(role)),\(enc(subrole))\(suffix)]"
   }
 }
 

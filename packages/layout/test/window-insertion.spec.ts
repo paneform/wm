@@ -33,7 +33,12 @@ async function harness(initialWindows: readonly Parameters<typeof makeWindow>[0]
   });
   const fake = createFakePlatform({ clock: CLOCK, displays: [display] });
   for (const window of initialWindows) fake.addWindow(makeWindow(window));
-  const adapter: PlatformAdapter = { ...fake.adapter, events: Stream.empty };
+  const adapter: PlatformAdapter = {
+    ...fake.adapter,
+    // Keep layout admission deterministic while delivering authoritative user
+    // focus. Cached inventory flags no longer supersede focus commands.
+    events: fake.adapter.events.pipe(Stream.filter((event) => event.kind === "focus_changed")),
+  };
   const engine = await Effect.runPromise(
     createEngine({ adapter, configSource: CONFIG_SOURCE, clock: CLOCK }),
   );
@@ -107,7 +112,9 @@ describe("focused window insertion (fake engine)", () => {
   test("direct focus controls insertion and failed direct focus leaves the prior target", async () => {
     const h = await nestedHarness();
     await h.run({ type: "focusWindow", windowId: "B" });
-    h.fake.swapBackingElement("C");
+    // Model a failed operation without evidence of a different process instance.
+    // A changed PID now correctly retires the old window's tree placement.
+    h.fake.swapBackingElement("C", { samePid: true });
     await expect(h.run({ type: "focusWindow", windowId: "C" })).rejects.toBeDefined();
 
     h.fake.addWindow(makeWindow({ id: "E" }));

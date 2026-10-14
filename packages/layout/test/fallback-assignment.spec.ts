@@ -46,9 +46,9 @@ describe("unmatched normal-window fallback assignment", () => {
     expect(workspaceOf(await Effect.runPromise(engine.state()), windowId)).toBe("2");
 
     await execute(engine, { type: "focusWorkspace", name: "1" });
-    fake.removeWindow(windowId);
+    fake.setWindowObservationAvailable(windowId, false);
     await Effect.runPromise(engine.reconcile());
-    fake.addWindow(makeWindow({ id: windowId, pid: 4242 }));
+    fake.setWindowObservationAvailable(windowId, true);
     await Effect.runPromise(engine.reconcile());
 
     expect(workspaceOf(await Effect.runPromise(engine.state()), windowId)).toBe("2");
@@ -67,16 +67,16 @@ describe("unmatched normal-window fallback assignment", () => {
     await execute(engine, { type: "pause" });
     const writesBeforeLoss = fake.writes().length;
 
-    fake.removeWindow(one);
-    fake.removeWindow(two);
+    fake.setWindowObservationAvailable(one, false);
+    fake.setWindowObservationAvailable(two, false);
     await Effect.runPromise(engine.reconcile());
     const duringLoss = await Effect.runPromise(engine.state());
     expect(workspaceOf(duringLoss, one)).toBe("1");
     expect(workspaceOf(duringLoss, two)).toBe("1");
     expect(fake.writes()).toHaveLength(writesBeforeLoss);
 
-    fake.addWindow(makeWindow({ id: one, pid: 7101 }));
-    fake.addWindow(makeWindow({ id: two, pid: 7102 }));
+    fake.setWindowObservationAvailable(one, true);
+    fake.setWindowObservationAvailable(two, true);
     await Effect.runPromise(engine.reconcile());
     const restored = await Effect.runPromise(engine.state());
     expect(workspaceOf(restored, one)).toBe("1");
@@ -103,9 +103,9 @@ describe("unmatched normal-window fallback assignment", () => {
     await execute(engine, { type: "focusWorkspace", name: "B" });
     await execute(engine, { type: "pause" });
     const writesBeforeLoss = fake.writes().length;
-    fake.removeWindow(two);
+    fake.setWindowObservationAvailable(two, false);
     await Effect.runPromise(engine.reconcile());
-    fake.addWindow(makeWindow({ id: two, pid: 7202 }));
+    fake.setWindowObservationAvailable(two, true);
     await Effect.runPromise(engine.reconcile());
 
     const restored = await Effect.runPromise(engine.state());

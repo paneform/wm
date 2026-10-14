@@ -32,7 +32,10 @@ const makeSpawn = (): { spawn: SpawnSidecar; fake: FakeSidecar } => {
     for (const raw of String(chunk).split("\n")) {
       const trimmed = raw.trim();
       if (trimmed.length === 0) continue;
-      const message = JSON.parse(trimmed) as { op: string; reqId?: string } & Record<string, unknown>;
+      const message = JSON.parse(trimmed) as { op: string; reqId?: string } & Record<
+        string,
+        unknown
+      >;
       requests.push(message);
       const reqId = message.reqId ?? "";
       if (overrides.has(message.op)) {
@@ -117,26 +120,79 @@ const READY = {
 };
 
 describe("MacOsSidecarAdapter permission ops", () => {
+  test("inventory distinguishes unavailable and closed windows and preserves instance tokens", async () => {
+    const { spawn, fake } = makeSpawn();
+    const adapter = Effect.runSync(createMacOsSidecarAdapter({ spawn, sidecarPath: "/x" }));
+    fake.emit(READY);
+    fake.overrides.set("getWindows", (reqId) => ({
+      reqId,
+      result: {
+        windows: [],
+        unavailableWindowIds: ["sleeping"],
+        closedWindowIds: ["closed"],
+      },
+    }));
+    expect(await Effect.runPromise(adapter.getWindowInventory!())).toEqual({
+      windows: [],
+      unavailableWindowIds: ["sleeping"],
+      closedWindowIds: ["closed"],
+    });
+    expect(
+      Either.getOrThrow(
+        decodePlatformEvent({ ev: "window_removed", windowId: "closed", closed: true }),
+      ),
+    ).toEqual({ kind: "window_removed", windowId: "closed", closed: true });
+    const window = {
+      id: "window:1",
+      pid: 42,
+      instanceId: "native-session:1",
+      role: "AXWindow",
+      frame: { x: 0, y: 0, width: 800, height: 600 },
+      minimized: false,
+      hidden: false,
+      fullscreen: false,
+      focused: false,
+      capabilities: {
+        movable: "supported",
+        resizable: "supported",
+        movableEvidence: "platform_report",
+        resizableEvidence: "platform_report",
+      },
+    };
+    fake.overrides.set("getWindows", (reqId) => ({ reqId, result: { windows: [window] } }));
+    expect((await Effect.runPromise(adapter.getWindowInventory!())).windows[0]?.instanceId).toBe(
+      "native-session:1",
+    );
+    fake.overrides.set("getWindows", (reqId) => ({ reqId, error: { code: "unavailable" } }));
+    const failed = await Effect.runPromise(Effect.either(adapter.getWindowInventory!()));
+    expect(Either.isLeft(failed) && failed.left.code).toBe("unavailable");
+    adapter.stop();
+  });
+
   test("idle event consumers can be interrupted during shutdown", async () => {
     const { spawn, fake } = makeSpawn();
     const adapter = Effect.runSync(createMacOsSidecarAdapter({ spawn, sidecarPath: "/x" }));
     fake.emit(READY);
     const fiber = Effect.runFork(Stream.runDrain(adapter.events));
 
-    await expect(Promise.race([
-      Effect.runPromise(Fiber.interrupt(fiber)),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("interrupt timed out")), 250)),
-    ])).resolves.toBeDefined();
+    await expect(
+      Promise.race([
+        Effect.runPromise(Fiber.interrupt(fiber)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("interrupt timed out")), 250)),
+      ]),
+    ).resolves.toBeDefined();
     adapter.stop();
   });
 
   test("native-parent transport uses inherited protocol streams without spawning", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
-    const adapter = Effect.runSync(createMacOsSidecarAdapter({
-      spawn: inheritedStdioSpawn(input, output),
-      sidecarPath: "native-host",
-    }));
+    const adapter = Effect.runSync(
+      createMacOsSidecarAdapter({
+        spawn: inheritedStdioSpawn(input, output),
+        sidecarPath: "native-host",
+      }),
+    );
     input.write(`${JSON.stringify(READY)}\n`);
     expect((await adapter.whenReady).version).toBe("wm-sidecar test");
 
@@ -150,10 +206,12 @@ describe("MacOsSidecarAdapter permission ops", () => {
     });
     const status = Effect.runPromise(adapter.permissionsStatus());
     const { reqId } = await request;
-    input.write(`${JSON.stringify({
-      reqId,
-      result: { permissions: { accessibility: true, screenRecording: true } },
-    })}\n`);
+    input.write(
+      `${JSON.stringify({
+        reqId,
+        result: { permissions: { accessibility: true, screenRecording: true } },
+      })}\n`,
+    );
     await expect(status).resolves.toEqual({ accessibility: true, screenRecording: true });
     adapter.stop();
   });
@@ -166,9 +224,11 @@ describe("MacOsSidecarAdapter permission ops", () => {
       keybinds: { "rshift s": "workspace focus S" },
     });
     const actions: string[] = [];
-    Effect.runFork(Stream.runForEach(Stream.take(adapter.keybindActions, 1), (action) =>
-      Effect.sync(() => actions.push(action)),
-    ));
+    Effect.runFork(
+      Stream.runForEach(Stream.take(adapter.keybindActions, 1), (action) =>
+        Effect.sync(() => actions.push(action)),
+      ),
+    );
     fake.emit({ ev: "keybind", action: "workspace focus S" });
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(actions).toEqual(["workspace focus S"]);
@@ -200,14 +260,37 @@ describe("MacOsSidecarAdapter permission ops", () => {
     const adapter = Effect.runSync(createMacOsSidecarAdapter({ spawn, sidecarPath: "/x" }));
     fake.emit(READY);
     const frame = { x: 1, y: 2, width: 300, height: 200 };
-    const result = await Effect.runPromise(adapter.executeBatch!({ operations: [
-      { operationId: "reveal", kind: "setFrame", windowId: "w1", frame, expectedIdentity: { fingerprint: "id1" } },
-      { operationId: "focus", kind: "focus", windowId: "w1", expectedIdentity: { fingerprint: "id1" }, dependsOn: ["reveal"] },
-    ] }));
+    const result = await Effect.runPromise(
+      adapter.executeBatch!({
+        operations: [
+          {
+            operationId: "reveal",
+            kind: "setFrame",
+            windowId: "w1",
+            frame,
+            expectedIdentity: { fingerprint: "id1" },
+          },
+          {
+            operationId: "focus",
+            kind: "focus",
+            windowId: "w1",
+            expectedIdentity: { fingerprint: "id1" },
+            dependsOn: ["reveal"],
+          },
+        ],
+      }),
+    );
 
     expect(fake.requests.filter((request) => request.op === "executeBatch")).toHaveLength(1);
-    expect(fake.requests.filter((request) => request.op === "setWindowFrame" || request.op === "focusWindow")).toHaveLength(0);
-    expect(result.operations.map((operation) => operation.operationId)).toEqual(["reveal", "focus"]);
+    expect(
+      fake.requests.filter(
+        (request) => request.op === "setWindowFrame" || request.op === "focusWindow",
+      ),
+    ).toHaveLength(0);
+    expect(result.operations.map((operation) => operation.operationId)).toEqual([
+      "reveal",
+      "focus",
+    ]);
     adapter.stop();
   });
   test("batch results preserve native errors and observations for engine policy", async () => {
@@ -239,22 +322,26 @@ describe("MacOsSidecarAdapter permission ops", () => {
       },
     }));
 
-    const result = await Effect.runPromise(adapter.executeBatch!({ operations: [
-      {
-        operationId: "resize",
-        kind: "setFrame",
-        windowId: "w1",
-        frame: { x: 0, y: 32, width: 1512, height: 950 },
-        expectedIdentity: { fingerprint: "id1" },
-      },
-      {
-        operationId: "focus",
-        kind: "focus",
-        windowId: "w1",
-        expectedIdentity: { fingerprint: "id1" },
-        dependsOn: ["resize"],
-      },
-    ] }));
+    const result = await Effect.runPromise(
+      adapter.executeBatch!({
+        operations: [
+          {
+            operationId: "resize",
+            kind: "setFrame",
+            windowId: "w1",
+            frame: { x: 0, y: 32, width: 1512, height: 950 },
+            expectedIdentity: { fingerprint: "id1" },
+          },
+          {
+            operationId: "focus",
+            kind: "focus",
+            windowId: "w1",
+            expectedIdentity: { fingerprint: "id1" },
+            dependsOn: ["resize"],
+          },
+        ],
+      }),
+    );
 
     expect(result.operations[0]).toMatchObject({
       observed: { x: 0, width: 723 },
@@ -270,7 +357,9 @@ describe("MacOsSidecarAdapter permission ops", () => {
   });
   test("handshake resolves whenReady and triggers subscribe", async () => {
     const { spawn, fake } = makeSpawn();
-    const adapter = Effect.runSync(createMacOsSidecarAdapter({ spawn, sidecarPath: "/fake/wm-sidecar" }));
+    const adapter = Effect.runSync(
+      createMacOsSidecarAdapter({ spawn, sidecarPath: "/fake/wm-sidecar" }),
+    );
     fake.emit(READY);
 
     expect(await adapter.whenReady).toEqual({
@@ -434,19 +523,19 @@ describe("MacOsSidecarAdapter geometry wire shape", () => {
     await Effect.runPromise(
       adapter.setWindowFrame("window:cg:9", { x: 5, y: 6, width: 7, height: 8 }, expected),
     );
-    await Effect.runPromise(
-      adapter.setWindowPosition("window:cg:9", { x: 9, y: 10 }, expected),
-    );
+    await Effect.runPromise(adapter.setWindowPosition("window:cg:9", { x: 9, y: 10 }, expected));
     await Effect.runPromise(
       adapter.setWindowSize("window:cg:9", { width: 11, height: 12 }, expected),
     );
 
     const guardedWrites = fake.requests.filter((r) => r.op === "setWindowFrame");
-    expect(guardedWrites.map(({ mode, expectedIdentity }) => ({ mode, expectedIdentity }))).toEqual([
-      { mode: "frame", expectedIdentity: { fingerprint: '[4242,"AXWindow",null]' } },
-      { mode: "position", expectedIdentity: { fingerprint: '[4242,"AXWindow",null]' } },
-      { mode: "size", expectedIdentity: { fingerprint: '[4242,"AXWindow",null]' } },
-    ]);
+    expect(guardedWrites.map(({ mode, expectedIdentity }) => ({ mode, expectedIdentity }))).toEqual(
+      [
+        { mode: "frame", expectedIdentity: { fingerprint: '[4242,"AXWindow",null]' } },
+        { mode: "position", expectedIdentity: { fingerprint: '[4242,"AXWindow",null]' } },
+        { mode: "size", expectedIdentity: { fingerprint: '[4242,"AXWindow",null]' } },
+      ],
+    );
 
     // Omitted precondition stays absent on the wire.
     await Effect.runPromise(adapter.setWindowSize("window:cg:9", { width: 9, height: 10 }));

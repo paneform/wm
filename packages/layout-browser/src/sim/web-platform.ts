@@ -740,7 +740,7 @@ export function createWebPlatformSim(options: WebPlatformSimOptions = {}): WebPl
     if (!windows.has(id)) return;
     windows.delete(id);
     if (focusedId === id) focusedId = [...windows.keys()][0] ?? null;
-    dispatch({ kind: "window_removed", windowId: id });
+    dispatch({ kind: "window_removed", windowId: id, closed: true });
   };
 
   const focusWindowExternal = (id: WindowId | null): void => {

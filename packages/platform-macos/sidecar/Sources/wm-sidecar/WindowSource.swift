@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import Darwin
 import Foundation
 
 /// Per-call AX messaging timeouts. Every AX call is bounded so one hung app
@@ -19,6 +20,14 @@ struct RawCGWindow: Sendable {
     var title: String?
     var onScreen: Bool?
     var frame: Rect?
+    var ownerName: String? = nil
+    var layer: Int? = nil
+}
+
+/// AX references are retained read-only across enumeration tasks and consumed
+/// on the main actor for fast focus identity matching.
+struct AXWindowReference: @unchecked Sendable {
+    let element: AXUIElement
 }
 
 struct RawAXWindow: Sendable {
@@ -40,6 +49,7 @@ struct RawAXWindow: Sendable {
     var resizable: Bool?
     var cgWindowID: UInt32?
     var readErrors: [String]
+    var reference: AXWindowReference? = nil
 }
 
 struct CollectedInventory: Sendable {
@@ -57,9 +67,16 @@ enum WindowSource {
     /// CG windows are the existence oracle. Screen Recording degradation only
     /// reduces metadata richness; the source stays alive.
     static func collectCGWindows() -> [RawCGWindow] {
+        readCGWindows() ?? []
+    }
+
+    /// Nil means observation failed; an empty array is a successful read.
+    static func readCGWindows() -> [RawCGWindow]? {
         let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
-        guard let dictionaries = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[CFString: Any]] else {
-            return []
+        guard
+            let dictionaries = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[CFString: Any]]
+        else {
+            return nil
         }
         return dictionaries.map { dictionary in
             RawCGWindow(
@@ -67,7 +84,9 @@ enum WindowSource {
                 pid: number(dictionary[kCGWindowOwnerPID])?.int32Value,
                 title: dictionary[kCGWindowName] as? String,
                 onScreen: number(dictionary[kCGWindowIsOnscreen])?.boolValue,
-                frame: (dictionary[kCGWindowBounds] as? [String: Any]).flatMap(Rect.init))
+                frame: (dictionary[kCGWindowBounds] as? [String: Any]).flatMap(Rect.init),
+                ownerName: dictionary[kCGWindowOwnerName] as? String,
+                layer: number(dictionary[kCGWindowLayer])?.intValue)
         }
     }
 
@@ -83,17 +102,60 @@ enum WindowSource {
     }
 
     @MainActor
-    static func knownApplications() -> [KnownApplication] {
-        NSWorkspace.shared.runningApplications.compactMap { app in
+    static func knownApplications(cgWindows: [RawCGWindow]) -> [KnownApplication] {
+        let registered = NSWorkspace.shared.runningApplications.compactMap { app -> KnownApplication? in
             guard !app.isTerminated,
-                  app.processIdentifier > 0,
-                  app.activationPolicy != .prohibited else { return nil }
+                app.processIdentifier > 0,
+                app.activationPolicy != .prohibited
+            else { return nil }
             return KnownApplication(
                 pid: app.processIdentifier,
                 name: app.localizedName ?? app.bundleIdentifier ?? "pid \(app.processIdentifier)",
                 bundleID: app.bundleIdentifier,
                 executablePath: app.executableURL?.path)
         }
+        return discoverApplications(registered: registered, cgWindows: cgWindows, resolve: applicationFromPID)
+    }
+
+    /// Launch Services can omit a live app. Normal CG window ownership supplies
+    /// its PID; AX and the normalizer still decide whether its windows are manageable.
+    static func discoverApplications(
+        registered: [KnownApplication], cgWindows: [RawCGWindow],
+        resolve: (Int32, String?) -> KnownApplication
+    ) -> [KnownApplication] {
+        var seen = Set(registered.map(\.pid))
+        let missing = cgWindows.compactMap { window -> KnownApplication? in
+            guard let pid = window.pid, pid > 0, window.layer == 0,
+                window.frame?.isUsable == true, seen.insert(pid).inserted
+            else { return nil }
+            return resolve(pid, window.ownerName)
+        }
+        return registered + missing
+    }
+
+    private static func applicationFromPID(_ pid: Int32, ownerName: String?) -> KnownApplication {
+        let executable = processExecutable(pid)
+        let bundle = executable.flatMap(containingBundle)
+        return KnownApplication(
+            pid: pid,
+            name: ownerName ?? bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "pid \(pid)",
+            bundleID: bundle?.bundleIdentifier, executablePath: executable)
+    }
+
+    private static func processExecutable(_ pid: Int32) -> String? {
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        let capacity = UInt32(buffer.count)
+        guard proc_pidpath(pid, &buffer, capacity) > 0 else { return nil }
+        return String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+    }
+
+    private static func containingBundle(_ executable: String) -> Bundle? {
+        var directory = URL(fileURLWithPath: executable).deletingLastPathComponent()
+        while directory.path != "/" {
+            if directory.pathExtension == "app" { return Bundle(url: directory) }
+            directory.deleteLastPathComponent()
+        }
+        return nil
     }
 
     /// Enumerates every application's AX windows concurrently. A hung app is
@@ -102,27 +164,40 @@ enum WindowSource {
     static func collectAXWindows(
         applications: [KnownApplication],
         previouslyStalled: Set<Int32>,
-        allowStalledRetryAfter: Bool = true
+        frontmostPID: Int32?,
+        allowStalledRetryAfter: Bool = true,
+        retryOffset: Int = 0,
+        enumerate: (@Sendable (KnownApplication, Int32?) -> [RawAXWindow]?)? = nil
     ) async -> ([RawAXWindow], Set<Int32>) {
-        let eligible = applications.filter { !previouslyStalled.contains($0.pid) }
-        let retryable = allowStalledRetryAfter
-            ? applications.filter { previouslyStalled.contains($0.pid) }
+        let readApp: @Sendable (KnownApplication, Int32?) -> [RawAXWindow]? =
+            enumerate ?? {
+                enumerateAppWindows($0, frontmostPID: $1)
+            }
+        let eligible = applications.filter { !previouslyStalled.contains($0.pid) || $0.pid == frontmostPID }
+        let retryable =
+            allowStalledRetryAfter
+            ? applications.filter { previouslyStalled.contains($0.pid) && $0.pid != frontmostPID }
             : []
+        let offset = max(0, retryOffset) % max(1, retryable.count)
+        let retries = (Array(retryable.dropFirst(offset)) + retryable.prefix(offset)).prefix(2)
 
         var results: [(Int32, [RawAXWindow])] = []
-        var stalled: Set<Int32> = []
+        // Skipped probes are not recoveries. Retain their stall state until a
+        // successful probe or process exit, and rotate retries fairly.
+        var stalled = previouslyStalled.intersection(Set(applications.map(\.pid)))
         await withTaskGroup(of: (Int32, [RawAXWindow]?).self) { group in
             for app in eligible {
-                group.addTask { (app.pid, enumerateAppWindows(app)) }
+                group.addTask { (app.pid, readApp(app, frontmostPID)) }
             }
             // Stalled apps get a single opportunistic probe pass so a
             // transiently-hung app recovers without stalling the cadence.
-            for app in retryable.prefix(2) {
-                group.addTask { (app.pid, enumerateAppWindows(app)) }
+            for app in retries {
+                group.addTask { (app.pid, readApp(app, frontmostPID)) }
             }
             for await (pid, windows) in group {
                 if let windows {
                     results.append((pid, windows))
+                    stalled.remove(pid)
                 } else {
                     stalled.insert(pid)
                 }
@@ -132,7 +207,9 @@ enum WindowSource {
     }
 
     /// Returns nil when the app failed its bounded AX budget this pass.
-    nonisolated private static func enumerateAppWindows(_ app: KnownApplication) -> [RawAXWindow]? {
+    nonisolated private static func enumerateAppWindows(_ app: KnownApplication, frontmostPID: Int32?)
+        -> [RawAXWindow]?
+    {
         let appElement = AXUIElementCreateApplication(app.pid)
         setMessagingTimeout(appElement, axReadTimeout)
         var value: CFTypeRef?
@@ -141,10 +218,18 @@ enum WindowSource {
             return result == .noValue || result == .attributeUnsupported ? [] : nil
         }
         guard let elements = value as? [AXUIElement] else { return [] }
-        return elements.map { readWindow($0, application: app) }
+        let focusedWindow = app.pid == frontmostPID ? WindowFocus.focusedWindow(in: appElement) : nil
+        return elements.map {
+            readWindow($0, application: app, frontmostPID: frontmostPID, focusedWindow: focusedWindow)
+        }
     }
 
-    private static func readWindow(_ element: AXUIElement, application: KnownApplication) -> RawAXWindow {
+    private static func readWindow(
+        _ element: AXUIElement,
+        application: KnownApplication,
+        frontmostPID: Int32?,
+        focusedWindow: AXUIElement?
+    ) -> RawAXWindow {
         setMessagingTimeout(element, axReadTimeout)
         var errors: [String] = []
         let title: String? = read(element, kAXTitleAttribute, errors: &errors)
@@ -152,14 +237,17 @@ enum WindowSource {
         let subrole: String? = read(element, kAXSubroleAttribute, errors: &errors)
         let minimized: Bool? = read(element, kAXMinimizedAttribute, errors: &errors)
         let fullscreen: Bool? = read(element, "AXFullScreen", errors: &errors)
-        let focused: Bool? = read(element, kAXFocusedAttribute, errors: &errors)
+        let focused = WindowFocus.matches(
+            element, pid: application.pid, frontmostPID: frontmostPID, focusedWindow: focusedWindow)
         let main: Bool? = read(element, kAXMainAttribute, errors: &errors)
         let modal: Bool? = readOptional(element, kAXModalAttribute)
         let parent: AXUIElement? = readOptional(element, kAXParentAttribute)
         let parentRole: String? = parent.flatMap { readOptional($0, kAXRoleAttribute) }
-        let movable: Bool? = readOptional(element, "AXMovable")
+        let movable: Bool? =
+            readOptional(element, "AXMovable")
             ?? attributeSettable(element, kAXPositionAttribute)
-        let resizable: Bool? = readOptional(element, "AXResizable")
+        let resizable: Bool? =
+            readOptional(element, "AXResizable")
             ?? attributeSettable(element, kAXSizeAttribute)
         let cgWindowID: UInt32? = read(element, "AXWindowNumber", errors: &errors)
             .flatMap { (numberValue: NSNumber) in numberValue.uint32Value }
@@ -181,7 +269,8 @@ enum WindowSource {
             movable: movable,
             resizable: resizable,
             cgWindowID: cgWindowID,
-            readErrors: errors)
+            readErrors: errors,
+            reference: AXWindowReference(element: element))
     }
 
     private static func readOptional<T>(_ element: AXUIElement, _ attribute: String) -> T? {
@@ -194,13 +283,16 @@ enum WindowSource {
 
     private static func attributeSettable(_ element: AXUIElement, _ attribute: String) -> Bool? {
         var settable = DarwinBoolean(false)
-        guard AXUIElementIsAttributeSettable(element, attribute as CFString, &settable) == .success else {
+        guard AXUIElementIsAttributeSettable(element, attribute as CFString, &settable) == .success
+        else {
             return nil
         }
         return settable.boolValue
     }
 
-    private static func read<T>(_ element: AXUIElement, _ attribute: String, errors: inout [String]) -> T? {
+    private static func read<T>(_ element: AXUIElement, _ attribute: String, errors: inout [String])
+        -> T?
+    {
         var value: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
         guard result == .success else {
@@ -214,11 +306,13 @@ enum WindowSource {
 
     private static func readFrame(_ element: AXUIElement, errors: inout [String]) -> Rect? {
         guard let positionValue: AXValue = read(element, kAXPositionAttribute, errors: &errors),
-              let sizeValue: AXValue = read(element, kAXSizeAttribute, errors: &errors) else { return nil }
+            let sizeValue: AXValue = read(element, kAXSizeAttribute, errors: &errors)
+        else { return nil }
         var position = CGPoint.zero
         var size = CGSize.zero
         guard AXValueGetValue(positionValue, .cgPoint, &position),
-              AXValueGetValue(sizeValue, .cgSize, &size) else {
+            AXValueGetValue(sizeValue, .cgSize, &size)
+        else {
             errors.append("position-or-size-unexpected-type")
             return nil
         }

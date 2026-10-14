@@ -98,17 +98,41 @@ export type ResultSchemaFor = {
 
 const BatchOperationResult = Schema.Struct({
   operationId: Schema.String,
-  requested: Schema.optional(Schema.Struct({ x: Schema.Number, y: Schema.Number, width: Schema.Number, height: Schema.Number })),
-  observed: Schema.optional(Schema.Struct({ x: Schema.Number, y: Schema.Number, width: Schema.Number, height: Schema.Number })),
+  requested: Schema.optional(
+    Schema.Struct({
+      x: Schema.Number,
+      y: Schema.Number,
+      width: Schema.Number,
+      height: Schema.Number,
+    }),
+  ),
+  observed: Schema.optional(
+    Schema.Struct({
+      x: Schema.Number,
+      y: Schema.Number,
+      width: Schema.Number,
+      height: Schema.Number,
+    }),
+  ),
   stable: Schema.optional(Schema.Boolean),
   stableReads: Schema.optional(Schema.Number),
   frontmostPid: Schema.optional(Schema.Number),
   focused: Schema.optional(Schema.Boolean),
   main: Schema.optional(Schema.Boolean),
-  error: Schema.optional(Schema.Struct({
-    code: Schema.Literal("not_found", "not_controllable", "stale", "ambiguous", "rejected", "permission", "unavailable"),
-    detail: Schema.optional(Schema.String),
-  })),
+  error: Schema.optional(
+    Schema.Struct({
+      code: Schema.Literal(
+        "not_found",
+        "not_controllable",
+        "stale",
+        "ambiguous",
+        "rejected",
+        "permission",
+        "unavailable",
+      ),
+      detail: Schema.optional(Schema.String),
+    }),
+  ),
 });
 export const BatchResult = Schema.Struct({
   operations: Schema.Array(BatchOperationResult),
@@ -126,6 +150,8 @@ export const SubscribeResult = Schema.Struct({
 export const TopologyResult = Schema.Struct({ topology: TopologyObservation });
 export const WindowsResult = Schema.Struct({
   windows: Schema.Array(WindowObservation),
+  unavailableWindowIds: Schema.optional(Schema.Array(Schema.String)),
+  closedWindowIds: Schema.optional(Schema.Array(Schema.String)),
 });
 /** Absent window decodes to null per the contract. */
 export const WindowResult = Schema.Struct({
@@ -135,10 +161,20 @@ export const FocusResult = Schema.Struct({
   frontmostPid: Schema.optional(Schema.Number),
   focused: Schema.optional(Schema.Boolean),
   main: Schema.optional(Schema.Boolean),
-  error: Schema.optional(Schema.Struct({
-    code: Schema.Literal("not_found", "not_controllable", "stale", "ambiguous", "rejected", "permission", "unavailable"),
-    detail: Schema.optional(Schema.String),
-  })),
+  error: Schema.optional(
+    Schema.Struct({
+      code: Schema.Literal(
+        "not_found",
+        "not_controllable",
+        "stale",
+        "ambiguous",
+        "rejected",
+        "permission",
+        "unavailable",
+      ),
+      detail: Schema.optional(Schema.String),
+    }),
+  ),
 });
 
 // ---------------------------------------------------------------------------
@@ -201,6 +237,7 @@ const eventByKind: Record<string, Schema.Struct.Type<never>> = {
   window_removed: Schema.Struct({
     kind: Schema.Literal("window_removed"),
     windowId: Schema.String,
+    closed: Schema.optional(Schema.Boolean),
   }),
   window_changed: Schema.Struct({
     kind: Schema.Literal("window_changed"),
@@ -223,9 +260,7 @@ const eventByKind: Record<string, Schema.Struct.Type<never>> = {
 
 export type ProtocolIssue = { readonly reason: string };
 
-export function decodePlatformEvent(
-  raw: unknown,
-): Either.Either<PlatformEvent, ProtocolIssue> {
+export function decodePlatformEvent(raw: unknown): Either.Either<PlatformEvent, ProtocolIssue> {
   const envelope = Schema.decodeUnknownEither(EventEnvelope)(raw);
   if (Either.isLeft(envelope)) {
     return Either.left({ reason: "not an event envelope" });

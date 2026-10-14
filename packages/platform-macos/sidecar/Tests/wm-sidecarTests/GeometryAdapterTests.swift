@@ -1,6 +1,24 @@
 import ApplicationServices
 import Testing
+
 @testable import wm_sidecar
+
+@Test func componentRequestsPreserveUntouchedLiveGeometry() {
+    let baseline = Rect(x: 100, y: 200, width: 640, height: 480)
+    #expect(
+        GeometryAdapter.componentTarget(
+            Rect(x: 10, y: 20, width: 0, height: 0), baseline: baseline, components: [.position])
+            == Rect(x: 10, y: 20, width: 640, height: 480))
+    #expect(
+        GeometryAdapter.componentTarget(
+            Rect(x: 0, y: 0, width: 800, height: 600), baseline: baseline, components: [.size])
+            == Rect(x: 100, y: 200, width: 800, height: 600))
+    let full = Rect(x: 10, y: 20, width: 800, height: 600)
+    #expect(
+        GeometryAdapter.componentTarget(
+            full, baseline: baseline,
+            components: [.size, .position, .size]) == full)
+}
 
 @Test func nativeWriteErrorsAreClassified() {
     #expect(AdapterError.writeFailure(.success) == nil)

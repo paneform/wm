@@ -63,6 +63,7 @@ const bootstrap = async (
   wrap?: (inner: PlatformAdapter, refs: EngineRefs) => PlatformAdapter,
   observationStore?: ObservationStore,
   retainWrappedBatch = false,
+  configSource: ConfigSource = CONFIG_SOURCE,
 ): Promise<Harness> => {
   const fake = createFakePlatform({
     clock: CLOCK,
@@ -90,8 +91,8 @@ const bootstrap = async (
   })();
   const engine = await Effect.runPromise(
     observationStore === undefined
-      ? createEngine({ adapter, configSource: CONFIG_SOURCE, clock: CLOCK })
-      : createEngine({ adapter, configSource: CONFIG_SOURCE, clock: CLOCK, observationStore }),
+      ? createEngine({ adapter, configSource, clock: CLOCK })
+      : createEngine({ adapter, configSource, clock: CLOCK, observationStore }),
   );
   refs.engine = engine;
   await Effect.runPromise(engine.start());
@@ -1931,6 +1932,351 @@ describe("named retile of unknown workspace (round 3 issue 7)", () => {
     const error = await h.failure({ type: "retile", workspace: "nope" });
     expect(error.code).toBe("workspace_not_found");
     expect((await h.snapshot()).epoch).toBe(epochBefore);
+  });
+});
+
+describe("focused-window-first external reveal", () => {
+  const parkedWorkspace = async (
+    wrap?: (inner: PlatformAdapter, refs: EngineRefs) => PlatformAdapter,
+  ) => {
+    const h = await bootstrap(undefined, wrap);
+    const old = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const peer = h.fake.addWindow(makeWindow({ x: 500, y: 100 }));
+    const selected = h.fake.addWindow(makeWindow({ x: 900, y: 100 }));
+    await seedWorkspace(h, [old, peer, selected]);
+    await h.run({ type: "moveWindowToWorkspace", windowId: peer, workspace: "B", follow: false });
+    await h.run({
+      type: "moveWindowToWorkspace",
+      windowId: selected,
+      workspace: "B",
+      follow: false,
+    });
+    await h.run({ type: "focusWorkspace", name: "B" });
+    const target = h.fake.frameOf(selected);
+    await h.run({ type: "focusWorkspace", name: "1" });
+    return { h, old, peer, selected, target };
+  };
+
+  test("selected window reaches its tile before blocked old-workspace parking or peer reveal", async () => {
+    const gate = makeGate();
+    DEADLINE.deadlineMs = 4000;
+    try {
+      const { h, old, peer, selected, target } = await parkedWorkspace(gate.wrapper);
+      const peerParked = h.fake.frameOf(peer);
+      const writesBefore = h.fake.writes().length;
+      gate.arm((id, op) => id === old && op === "frame");
+      h.fake.focusWindowExternal(selected);
+      const pending = h.run({ type: "reconcile" });
+      await waitFor(() => gate.isSuspended());
+      expect(h.fake.frameOf(selected)).toEqual(target);
+      expect(h.fake.frameOf(peer)).toEqual(peerParked);
+      expect(h.fake.writes().slice(writesBefore)[0]).toMatchObject({
+        windowId: selected,
+        op: "position",
+      });
+      gate.resume();
+      await pending;
+      expect((await h.snapshot()).focusedWorkspace).toBe("B");
+      expect(h.fake.frameOf(peer)).not.toEqual(peerParked);
+    } finally {
+      gate.resume();
+      DEADLINE.deadlineMs = 3;
+    }
+  });
+
+  test("known focused window is revealed before a blocked full inventory refresh", async () => {
+    let blockInventory = false;
+    const resumers: Array<() => void> = [];
+    DEADLINE.deadlineMs = 4000;
+    try {
+      const { h, selected, target } = await parkedWorkspace((inner) => ({
+        ...inner,
+        getWindows: () =>
+          blockInventory
+            ? Effect.async<
+                ReadonlyArray<import("../src/schema.ts").WindowObservation>,
+                PlatformError
+              >((resume) => {
+                resumers.push(() => resume(inner.getWindows()));
+              })
+            : inner.getWindows(),
+      }));
+      blockInventory = true;
+      h.fake.focusWindowExternal(selected);
+      const pending = h.run({ type: "reconcile" });
+      await waitFor(() => resumers.length > 0);
+      expect(h.fake.frameOf(selected)).toEqual(target);
+      blockInventory = false;
+      for (const resume of resumers.splice(0)) resume();
+      await pending;
+      expect((await h.snapshot()).focusedWorkspace).toBe("B");
+    } finally {
+      blockInventory = false;
+      for (const resume of resumers.splice(0)) resume();
+      DEADLINE.deadlineMs = 3;
+    }
+  });
+
+  test("a newer user focus supersedes the preview before old-workspace parking", async () => {
+    const gate = makeGate();
+    DEADLINE.deadlineMs = 4000;
+    try {
+      const { h, old, selected } = await parkedWorkspace(gate.wrapper);
+      const writesBefore = h.fake.writes().length;
+      gate.arm((id, op) => id === selected && op === "position");
+      h.fake.focusWindowExternal(selected);
+      const pending = h.run({ type: "reconcile" });
+      await waitFor(() => gate.isSuspended());
+      h.fake.focusWindowExternal(old);
+      await waitFor(() => h.engine.gateState().rerunQueued === true);
+      gate.resume();
+      await pending;
+      await h.run({ type: "reconcile" });
+      const snapshot = await h.snapshot();
+      expect(snapshot.focusedWindow).toBe(old);
+      expect(snapshot.focusedWorkspace).toBe("1");
+      expect(
+        h.fake
+          .writes()
+          .slice(writesBefore)
+          .filter((write) => write.windowId === old),
+      ).toEqual([]);
+    } finally {
+      gate.resume();
+      DEADLINE.deadlineMs = 3;
+    }
+  });
+
+  test("focused preview leaves the other display and its windows untouched", async () => {
+    DEADLINE.deadlineMs = 4000;
+    try {
+      const { h, selected } = await parkedWorkspace();
+      const unrelated = h.fake.addWindow(makeWindow({ x: 400, y: 400 }));
+      await h.run({ type: "reconcile" });
+      await h.run({
+        type: "moveWindowToWorkspace",
+        windowId: unrelated,
+        workspace: "S",
+        follow: false,
+      });
+      await h.run({
+        type: "moveWorkspaceToDisplay",
+        workspace: "S",
+        displayId: "display:sim-left",
+      });
+      const frameBefore = h.fake.frameOf(unrelated);
+      const writesBefore = h.fake.writes().length;
+      h.fake.focusWindowExternal(selected);
+      await h.run({ type: "reconcile" });
+      expect(h.fake.frameOf(unrelated)).toEqual(frameBefore);
+      expect(workspaceOf(await h.snapshot(), "S")?.visibleOnDisplay).toBe("display:sim-left");
+      expect(
+        h.fake
+          .writes()
+          .slice(writesBefore)
+          .filter((write) => write.windowId === unrelated),
+      ).toEqual([]);
+    } finally {
+      DEADLINE.deadlineMs = 3;
+    }
+  });
+
+  test("stale focused-window identity aborts before parking old windows or retrying writes", async () => {
+    let rejectId: WindowId | null = null;
+    DEADLINE.deadlineMs = 4000;
+    try {
+      const { h, old, selected } = await parkedWorkspace((inner) => ({
+        ...inner,
+        setWindowPosition: (id, point, expected) =>
+          id === rejectId
+            ? Effect.fail(new PlatformError({ code: "stale", detail: "focused window replaced" }))
+            : inner.setWindowPosition(id, point, expected),
+      }));
+      const oldFrame = h.fake.frameOf(old);
+      const parked = h.fake.frameOf(selected);
+      const writesBefore = h.fake.writes().length;
+      rejectId = selected;
+      h.fake.focusWindowExternal(selected);
+      const error = await h.failure({ type: "reconcile" });
+      expect(error.code).toBe("inventory_stale");
+      expect(h.fake.frameOf(old)).toEqual(oldFrame);
+      expect(h.fake.frameOf(selected)).toEqual(parked);
+      expect(h.fake.writes().slice(writesBefore)).toEqual([]);
+    } finally {
+      DEADLINE.deadlineMs = 3;
+    }
+  });
+});
+
+describe("globally authoritative window focus", () => {
+  test("an idempotent focus command cannot swallow a later manual return to that window", async () => {
+    const h = await bootstrap();
+    const first = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const second = h.fake.addWindow(makeWindow({ x: 900, y: 100 }));
+    await seedWorkspace(h, [first, second]);
+    await h.run({ type: "moveWindowToWorkspace", windowId: second, workspace: "B", follow: false });
+    await h.run({ type: "focusWindow", windowId: first });
+    await h.run({ type: "focusWindow", windowId: second });
+    h.fake.focusWindowExternal(first);
+    await h.run({ type: "reconcile" });
+    const snapshot = await h.snapshot();
+    expect(snapshot.focusedWindow).toBe(first);
+    expect(snapshot.focusedWorkspace).toBe("1");
+    expect(workspaceOf(snapshot, "1")?.visibleOnDisplay).toBe("display:sim-primary");
+  });
+
+  test("external focus arriving before admission selects the window's configured workspace", async () => {
+    const h = await bootstrap(undefined, undefined, undefined, false, {
+      load: () =>
+        Effect.succeed({
+          workspaces: [{ name: "B", assign: [{ bundleId: "app.zen-browser.zen" }] }],
+        }),
+      changes: () => Stream.empty,
+    });
+    const first = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    await seedWorkspace(h, [first]);
+    const zen = h.fake.addWindow(makeWindow({ bundleId: "app.zen-browser.zen", x: 900, y: 100 }));
+    h.fake.focusWindowExternal(zen);
+    await h.run({ type: "reconcile" });
+    const snapshot = await h.snapshot();
+    expect(snapshot.focusedWindow).toBe(zen);
+    expect(snapshot.focusedWorkspace).toBe("B");
+    expect(workspaceOf(snapshot, "B")?.members).toEqual([zen]);
+    expect(workspaceOf(snapshot, "B")?.visibleOnDisplay).toBe("display:sim-primary");
+  });
+
+  test.each([
+    { focused: false, active: true },
+    { focused: true, active: false },
+  ])(
+    "app-local focus/main flags are insufficient ($focused, $active)",
+    async ({ focused, active }) => {
+      const h = await bootstrap(undefined, (inner) => ({
+        ...inner,
+        focusWindow: (id) =>
+          Effect.map(inner.getWindow(id), (window) => ({
+            frontmostPid: active ? window!.pid : -1,
+            focused,
+            main: true,
+          })),
+      }));
+      const first = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+      const second = h.fake.addWindow(makeWindow({ x: 900, y: 100 }));
+      await seedWorkspace(h, [first, second]);
+      const error = await h.failure({ type: "focusDirection", direction: "right" });
+      expect(error.code).toBe("window_not_controllable");
+      expect((await h.snapshot()).focusedWindow).toBe(first);
+      expect(h.fake.focusedWindowId()).toBe(first);
+    },
+  );
+
+  test.each(["workspace", "window"] as const)(
+    "inactive app flags cannot redirect %s focus then assignment",
+    async (focus) => {
+      let inactiveId: WindowId | null = null;
+      const h = await bootstrap(
+        undefined,
+        (inner) => ({
+          ...inner,
+          getWindows: () =>
+            Effect.map(inner.getWindows(), (windows) =>
+              inactiveId === null
+                ? windows
+                : windows.map((window) => ({
+                    ...window,
+                    focused: window.id === inactiveId,
+                  })),
+            ),
+        }),
+        undefined,
+        true,
+      );
+      const zen = h.fake.addWindow(makeWindow({ appName: "Zen", x: 100, y: 100 }));
+      const bambu = h.fake.addWindow(makeWindow({ appName: "Bambu Studio", x: 900, y: 100 }));
+      const terminal = h.fake.addWindow(makeWindow({ appName: "Ghostty", x: 400, y: 400 }));
+      await seedWorkspace(h, [zen, bambu, terminal]);
+      await h.run({ type: "moveWindowToWorkspace", windowId: zen, workspace: "B", follow: false });
+      await h.run({
+        type: "moveWindowToWorkspace",
+        windowId: bambu,
+        workspace: "3",
+        follow: false,
+      });
+      // The polluted report must CHANGE from the last observed ID; otherwise
+      // the old change-detection guard could accidentally make this test pass.
+      h.fake.focusWindowExternal(terminal);
+      await h.run({ type: "reconcile" });
+      expect((await h.snapshot()).focusedWindow).toBe(terminal);
+      h.fake.setDeferFocus(true);
+      await h.run(
+        focus === "workspace"
+          ? { type: "focusWorkspace", name: "B" }
+          : { type: "focusWindow", windowId: zen },
+      );
+      inactiveId = bambu;
+      await h.run({ type: "reconcile" });
+      expect((await h.snapshot()).focusedWindow).toBe(zen);
+      await h.run({ type: "moveWindowToWorkspace", workspace: "T" });
+      const snapshot = await h.snapshot();
+      expect(workspaceOf(snapshot, "T")?.members).toContain(zen);
+      expect(workspaceOf(snapshot, "3")?.members).toEqual([bambu]);
+      expect(h.fake.focusedWindowId()).toBe(zen);
+    },
+  );
+
+  test("explicit focus reveals a parked workspace and selects the requested member", async () => {
+    const h = await bootstrap();
+    const first = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const selected = h.fake.addWindow(makeWindow({ x: 900, y: 100 }));
+    await seedWorkspace(h, [first, selected]);
+    await h.run({ type: "focusWorkspace", name: "away" });
+    expect(workspaceOf(await h.snapshot(), "1")?.visibleOnDisplay).toBeNull();
+    await h.run({ type: "focusWindow", windowId: selected });
+    const snapshot = await h.snapshot();
+    expect(snapshot.focusedWorkspace).toBe("1");
+    expect(snapshot.focusedWindow).toBe(selected);
+    expect(workspaceOf(snapshot, "1")?.visibleOnDisplay).toBe("display:sim-primary");
+    expect(workspaceOf(snapshot, "1")?.lastFocusedMember).toBe(selected);
+    expect(h.fake.focusedWindowId()).toBe(selected);
+    expect(h.fake.frameOf(selected)?.x).toBeGreaterThanOrEqual(0);
+  });
+
+  test("external focus reveals the containing workspace and navigation uses its members", async () => {
+    const h = await bootstrap();
+    const left = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const right = h.fake.addWindow(makeWindow({ x: 900, y: 100 }));
+    await seedWorkspace(h, [left, right]);
+    await h.run({ type: "focusWorkspace", name: "away" });
+    h.fake.focusWindowExternal(left);
+    await h.run({ type: "reconcile" });
+    const snapshot = await h.snapshot();
+    expect(snapshot.focusedWorkspace).toBe("1");
+    expect(snapshot.focusedWindow).toBe(left);
+    expect(workspaceOf(snapshot, "1")?.visibleOnDisplay).toBe("display:sim-primary");
+    await h.run({ type: "focusDirection", direction: "right" });
+    expect(h.fake.focusedWindowId()).toBe(right);
+  });
+
+  test("external focus on another visible display selects its workspace without relocating it", async () => {
+    const h = await bootstrap();
+    const primary = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const secondary = h.fake.addWindow(makeWindow({ x: 900, y: 100 }));
+    await seedWorkspace(h, [primary, secondary]);
+    await h.run({
+      type: "moveWindowToWorkspace",
+      windowId: secondary,
+      workspace: "B",
+      follow: false,
+    });
+    await h.run({ type: "moveWorkspaceToDisplay", workspace: "B", displayId: "display:sim-left" });
+    await h.run({ type: "focusWindow", windowId: primary });
+    h.fake.focusWindowExternal(secondary);
+    await h.run({ type: "reconcile" });
+    const snapshot = await h.snapshot();
+    expect(snapshot.focusedWorkspace).toBe("B");
+    expect(snapshot.focusedWindow).toBe(secondary);
+    expect(workspaceOf(snapshot, "B")?.visibleOnDisplay).toBe("display:sim-left");
+    expect(workspaceOf(snapshot, "1")?.visibleOnDisplay).toBe("display:sim-primary");
   });
 });
 

@@ -135,13 +135,9 @@ export interface MacOsSidecarAdapter extends PlatformAdapter {
     keybinds: Readonly<Record<string, string>>,
     alwaysSwallow?: readonly string[],
   ) => Effect.Effect<void, PlatformError>;
-  readonly setHotkeySwallowing: (
-    swallow: boolean,
-  ) => Effect.Effect<void, PlatformError>;
+  readonly setHotkeySwallowing: (swallow: boolean) => Effect.Effect<void, PlatformError>;
   /** Deep link into a System Settings privacy pane via the sidecar. */
-  readonly openPermissionsSettings: (
-    target: SettingsTarget,
-  ) => Effect.Effect<void, PlatformError>;
+  readonly openPermissionsSettings: (target: SettingsTarget) => Effect.Effect<void, PlatformError>;
   /** Terminates the sidecar process and completes all streams. */
   stop(): void;
 }
@@ -397,9 +393,7 @@ export const createMacOsSidecarAdapter = (
 
     // -- adapter ---------------------------------------------------------------
 
-    const guarded = <A>(
-      effect: Effect.Effect<A, PlatformError>,
-    ): Effect.Effect<A, PlatformError> =>
+    const guarded = <A>(effect: Effect.Effect<A, PlatformError>): Effect.Effect<A, PlatformError> =>
       Effect.suspend(() =>
         alive ? effect : Effect.fail(makeError("unavailable", "sidecar is not running")),
       );
@@ -409,44 +403,54 @@ export const createMacOsSidecarAdapter = (
       protocolErrors: Stream.fromAsyncIterable(issues.values(), (error) => error as never),
       keybindActions: Stream.fromAsyncIterable(keybindActions.values(), (error) => error as never),
       getTopology: () =>
-        Effect.map(
-          guarded(request("getTopology", TopologyResult)),
-          ({ topology }) => topology,
-        ),
+        Effect.map(guarded(request("getTopology", TopologyResult)), ({ topology }) => topology),
       getWindows: () =>
-        Effect.map(
-          guarded(request("getWindows", WindowsResult)),
-          ({ windows }) => windows,
-        ),
+        Effect.map(guarded(request("getWindows", WindowsResult)), ({ windows }) => windows),
+      getWindowInventory: () =>
+        Effect.map(guarded(request("getWindows", WindowsResult)), (result) => ({
+          windows: result.windows,
+          unavailableWindowIds: result.unavailableWindowIds ?? [],
+          closedWindowIds: result.closedWindowIds ?? [],
+        })),
       getWindow: (id: WindowId) =>
         Effect.map(guarded(request("getWindow", WindowResult, { id })), ({ window }) => window),
       setWindowFrame: (id: WindowId, frame: Frame, expectedIdentity?: ExpectedWindowIdentity) =>
-        guarded(request("setWindowFrame", WriteObservationSchema, {
-          id,
-          frame,
-          mode: "frame",
-          ...(expectedIdentity ? { expectedIdentity } : {}),
-        })),
+        guarded(
+          request("setWindowFrame", WriteObservationSchema, {
+            id,
+            frame,
+            mode: "frame",
+            ...(expectedIdentity ? { expectedIdentity } : {}),
+          }),
+        ),
       setWindowPosition: (id: WindowId, point: Point, expectedIdentity?: ExpectedWindowIdentity) =>
-        guarded(request("setWindowFrame", WriteObservationSchema, {
-          id,
-          frame: { ...point, width: 0, height: 0 },
-          mode: "position",
-          ...(expectedIdentity ? { expectedIdentity } : {}),
-        })),
+        guarded(
+          request("setWindowFrame", WriteObservationSchema, {
+            id,
+            frame: { ...point, width: 0, height: 0 },
+            mode: "position",
+            ...(expectedIdentity ? { expectedIdentity } : {}),
+          }),
+        ),
       setWindowSize: (id: WindowId, size: Size, expectedIdentity?: ExpectedWindowIdentity) =>
-        guarded(request("setWindowFrame", WriteObservationSchema, {
-          id,
-          frame: { x: 0, y: 0, ...size },
-          mode: "size",
-          ...(expectedIdentity ? { expectedIdentity } : {}),
-        })),
+        guarded(
+          request("setWindowFrame", WriteObservationSchema, {
+            id,
+            frame: { x: 0, y: 0, ...size },
+            mode: "size",
+            ...(expectedIdentity ? { expectedIdentity } : {}),
+          }),
+        ),
       focusWindow: (id: WindowId, expected?: ExpectedWindowIdentity) =>
-        guarded(request("focusWindow", FocusResult, {
-          id,
-          ...(expected === undefined ? {} : { expectedIdentity: expected }),
-        })),
-      executeBatch: (batch: PlatformBatchRequest): Effect.Effect<PlatformBatchResult, PlatformError> =>
+        guarded(
+          request("focusWindow", FocusResult, {
+            id,
+            ...(expected === undefined ? {} : { expectedIdentity: expected }),
+          }),
+        ),
+      executeBatch: (
+        batch: PlatformBatchRequest,
+      ): Effect.Effect<PlatformBatchResult, PlatformError> =>
         guarded(request("executeBatch", BatchResult, { operations: batch.operations })),
       permissionsStatus: () =>
         Effect.map(
@@ -460,15 +464,15 @@ export const createMacOsSidecarAdapter = (
         ),
       configureKeybinds: (keybinds, alwaysSwallow = []) =>
         Effect.asVoid(
-          guarded(request("configureKeybinds", KeybindsConfiguredResult, {
-            keybinds,
-            alwaysSwallow,
-          })),
+          guarded(
+            request("configureKeybinds", KeybindsConfiguredResult, {
+              keybinds,
+              alwaysSwallow,
+            }),
+          ),
         ),
       setHotkeySwallowing: (swallow) =>
-        Effect.asVoid(
-          guarded(request("setHotkeySwallowing", HotkeySwallowingResult, { swallow })),
-        ),
+        Effect.asVoid(guarded(request("setHotkeySwallowing", HotkeySwallowingResult, { swallow }))),
       openPermissionsSettings: (target: SettingsTarget) =>
         Effect.asVoid(guarded(request("openPermissionsSettings", OpenedResult, { target }))),
       sidecarPath: path,

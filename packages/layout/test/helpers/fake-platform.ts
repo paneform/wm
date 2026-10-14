@@ -1,5 +1,5 @@
 import { Effect, Stream } from "effect";
-import { PlatformError } from "../../src/schema.ts";
+import { PlatformError, windowIdentityFingerprint } from "../../src/schema.ts";
 import type {
   Constraints,
   DisplayId,
@@ -272,6 +272,7 @@ export interface FakeDisplaySpec {
 export interface FakeWindowSpec {
   id?: WindowId | undefined;
   pid?: number | undefined;
+  instanceId?: string | undefined;
   bundleId?: string | undefined;
   executablePath?: string | undefined;
   title?: string | undefined;
@@ -371,6 +372,8 @@ export interface FakePlatform {
 
   // World mutation ops (scenario setup).
   addWindow(spec?: FakeWindowSpec): WindowId;
+  /** Simulate enumeration failure without destroying the native instance. */
+  setWindowObservationAvailable(id: WindowId, available: boolean): void;
   removeWindow(id: WindowId): void;
   /**
    * Arm identity replacement: the NEXT write behind this handle aborts
@@ -431,6 +434,7 @@ interface SimDisplay {
 interface SimWindow {
   id: WindowId;
   pid: number;
+  instanceId?: string | undefined;
   bundleId?: string | undefined;
   executablePath?: string | undefined;
   title: string;
@@ -453,6 +457,7 @@ interface SimWindow {
 interface MutableWindowObservation {
   id: WindowId;
   pid: number;
+  instanceId?: string;
   bundleId?: string;
   executablePath?: string;
   title?: string;
@@ -489,6 +494,7 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
     spec: makeDisplay(spec),
   }));
   const windows = new Map<WindowId, SimWindow>();
+  const unavailableWindows = new Set<WindowId>();
   let nextWindowNumber = 1;
   let nextPid = 4200 + rng.int(100);
   let focusedId: WindowId | null = null;
@@ -604,6 +610,7 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
       capabilities: capabilitiesOf(w),
     };
     if (w.bundleId !== undefined) observation.bundleId = w.bundleId;
+    if (w.instanceId !== undefined) observation.instanceId = w.instanceId;
     if (w.appName !== undefined) observation.appName = w.appName;
     if (w.executablePath !== undefined) observation.executablePath = w.executablePath;
     if (w.subrole !== undefined && w.subrole !== null) observation.subrole = w.subrole;
@@ -797,16 +804,10 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
 
   // macOS-style bookends: size → position → size (contract §setWindowFrame).
   /** Canonical fingerprint — MUST mirror engine windowIdentityOf exactly. */
-  const fingerprintOf = (
-    pid: number,
-    role: string | null | undefined,
-    subrole: string | null | undefined,
-  ): string => JSON.stringify([pid, role ?? null, subrole ?? null]);
-
   /** Atomic identity precondition: compared against live state BEFORE any
    * mutation; mismatch aborts `stale` leaving the window untouched. */
   const matchesExpected = (w: SimWindow, expected?: ExpectedWindowIdentity): boolean =>
-    expected === undefined || fingerprintOf(w.pid, w.role, w.subrole) === expected.fingerprint;
+    expected === undefined || windowIdentityFingerprint(w) === expected.fingerprint;
 
   const setWindowFrame = (
     id: WindowId,
@@ -888,15 +889,23 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
     getTopology: (): Effect.Effect<TopologyObservation, PlatformError> =>
       Effect.sync(() => ({ displays: sortedDisplays() })),
     getWindows: (): Effect.Effect<ReadonlyArray<WindowObservation>, PlatformError> =>
-      Effect.sync(() => [...windows.values()].map(observationOf)),
+      Effect.sync(() =>
+        [...windows.values()]
+          .filter((window) => !unavailableWindows.has(window.id))
+          .map(observationOf),
+      ),
     getWindow: (id: WindowId): Effect.Effect<WindowObservation | null, PlatformError> =>
-      Effect.sync(() => {
-        const w = windows.get(id);
-        if (w === undefined) return null;
-        // Settle reads drive the animation forward (17 ms apart on real macOS).
-        advanceAnimation(w);
-        return observationOf(w);
-      }),
+      Effect.suspend(() =>
+        unavailableWindows.has(id)
+          ? failWith("unavailable", "window observation is unavailable")
+          : Effect.sync(() => {
+              const w = windows.get(id);
+              if (w === undefined) return null;
+              // Settle reads drive the animation forward (17 ms apart on real macOS).
+              advanceAnimation(w);
+              return observationOf(w);
+            }),
+      ),
     setWindowFrame,
     setWindowPosition,
     setWindowSize,
@@ -1073,6 +1082,7 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
       initialFrame: { ...frame },
     };
     if (bundleId !== undefined) window.bundleId = bundleId;
+    if (spec.instanceId !== undefined) window.instanceId = spec.instanceId;
     if (spec.appName !== undefined) window.appName = spec.appName;
     if (spec.subrole !== undefined) window.subrole = spec.subrole;
     if (spec.constraints !== undefined) window.constraints = spec.constraints;
@@ -1089,11 +1099,24 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
   const removeWindow = (id: WindowId): void => {
     if (!windows.has(id)) return;
     windows.delete(id);
+    unavailableWindows.delete(id);
     if (focusedId === id) {
       focusedId = [...windows.keys()][0] ?? null;
       visibleFocusedId = focusedId;
     }
-    dispatch({ kind: "window_removed", windowId: id });
+    dispatch({ kind: "window_removed", windowId: id, closed: true });
+  };
+
+  const setWindowObservationAvailable = (id: WindowId, available: boolean): void => {
+    const window = windows.get(id);
+    if (window === undefined) return;
+    if (available) {
+      unavailableWindows.delete(id);
+      dispatch({ kind: "window_added", window: observationOf(window) });
+    } else {
+      unavailableWindows.add(id);
+      dispatch({ kind: "window_removed", windowId: id });
+    }
   };
 
   const focusWindowExternal = (id: WindowId | null): void => {
@@ -1172,6 +1195,7 @@ export function createFakePlatform(options: FakePlatformOptions): FakePlatform {
     adapter,
     seed,
     addWindow,
+    setWindowObservationAvailable,
     removeWindow,
     swapBackingElement,
     connectDisplay,

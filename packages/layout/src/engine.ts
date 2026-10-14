@@ -1,6 +1,12 @@
 import { Deferred, Effect, Either, Exit, Fiber, FiberSet, Schema, Scope, Stream } from "effect";
 import type { ConfigSource, PlatformAdapter, Clock } from "./platform.js";
-import { TopologyObservation, WindowObservation, windowIdentityFingerprint } from "./schema.js";
+import {
+  TopologyObservation,
+  WindowObservation,
+  WindowInventory,
+  sameWindowInstance,
+  windowIdentityFingerprint,
+} from "./schema.js";
 import type {
   Constraints,
   DisplayId,
@@ -188,8 +194,6 @@ interface HealthRef {
 type StepFailure = { code: string; message: string; diagnostic?: string };
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
-const TOMBSTONE_TTL_MS = 5 * 60 * 1000;
-
 export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
   Effect.gen(function* () {
     const { adapter, configSource, clock, observationStore } = options;
@@ -234,6 +238,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     let persistedLearning: LearningStore = initialLearning;
     let learningDirty = false;
     const tombstones = new Map<WindowId, TombstoneRecord>();
+    const knownInstances = new Map<WindowId, WindowObservation>();
     const overrides = { managed: new Set<WindowId>(), unmanaged: new Set<WindowId>() };
     const firstSeen = new Map<WindowId, Frame>();
     const startupQuarantine = new Set<WindowId>();
@@ -248,14 +253,49 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     /**
      * Focus tracking (review round 2, issue 6): the authoritative engine
      * intent lives in `world.focusIntent` (atomic with every swap). This
-     * shadow records the focus reported by the LAST observation pass so a
-     * PLATFORM-SIDE CHANGE can be detected: a changed report is newer
-     * information than any earlier engine decision and supersedes the
-     * intent; an unchanged report (stale/delayed snapshots, unrelated
-     * reconciles) never disturbs it.
+     * shadow records the LAST snapshot report for bootstrap change detection.
+     * Once a command or ordered focus event establishes authoritative focus,
+     * cached snapshots cannot supersede it, even when their reported ID changes.
      */
     let lastObservedFocusId: WindowId | null | undefined = undefined;
     let focusGeneration = 0;
+    let hasAuthoritativeFocus = false;
+    let topologyEventGeneration = 0;
+    let verifiedTopologyGeneration = -1;
+    let commandFocusTarget: WindowId | null = null;
+    let commandFocusEchoSeen = false;
+    let commandFocusSequence = 0;
+    let commandFocusExpectedChange = false;
+    const pendingCommandFocusEchoes = new Map<WindowId, number>();
+    const beginCommandFocus = (id: WindowId | null): void => {
+      commandFocusSequence += 1;
+      commandFocusTarget = id;
+      commandFocusEchoSeen = false;
+      commandFocusExpectedChange = id !== null && world.focusIntent?.id !== id;
+    };
+    const rememberCommandFocusEcho = (id: WindowId | null, focused: boolean | undefined): void => {
+      if (id !== null && focused === true && !commandFocusEchoSeen && commandFocusExpectedChange)
+        pendingCommandFocusEchoes.set(id, commandFocusSequence);
+    };
+    const discardCommandFocusEchoesThrough = (sequence: number): void => {
+      for (const [id, generation] of pendingCommandFocusEchoes) {
+        if (generation <= sequence) pendingCommandFocusEchoes.delete(id);
+      }
+    };
+    const consumeCommandFocusEcho = (id: WindowId | null): boolean => {
+      if (id === null) return false;
+      if (id === commandFocusTarget) {
+        commandFocusEchoSeen = true;
+        discardCommandFocusEchoesThrough(commandFocusSequence);
+        return true;
+      }
+      const sequence = pendingCommandFocusEchoes.get(id);
+      if (sequence === undefined) return false;
+      // An ordered later focus retires older expected echoes, including
+      // commands that did not actually change the OS focus at all.
+      discardCommandFocusEchoesThrough(sequence);
+      return true;
+    };
     /**
      * Focus signals consumed from ordered PlatformEvent.focus_changed
      * occurrences (review round 3, issue 5). An event is authoritative newer
@@ -266,19 +306,24 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
      */
     interface ReconcileBatch {
       readonly removals: ReadonlySet<WindowId>;
+      readonly closures?: Set<WindowId> | undefined;
       readonly focusSignals: (WindowId | null)[];
     }
 
     let pendingBatch: ReconcileBatch = { removals: new Set(), focusSignals: [] };
     const pendingFocusSignals: (WindowId | null)[] = [];
 
-    const applyFocusSignal = (id: WindowId | null): void => {
+    const applyFocusSignal = (id: WindowId | null, authoritative = true): void => {
+      // A command commits its own focus atomically. Its activation echo must
+      // not select a workspace before commit, or resurrect it after rollback.
+      if (authoritative && commandFocusTarget !== null && id === commandFocusTarget) return;
       // Deliberately does NOT touch lastObservedFocusId: the event is AHEAD
       // of observation snapshots; polluting snapshot-side state would make
       // the very next refresh look like a competing "change".
       focusGeneration += 1;
+      hasAuthoritativeFocus ||= authoritative;
       world = {
-        ...recordFocusedMember(world, id),
+        ...recordFocusedMember(world, id, true),
         focusIntent: id === null ? null : { id, generation: focusGeneration },
       };
     };
@@ -360,13 +405,32 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         () => "invalid topology observation",
       );
 
-    const validatedWindows = (): Effect.Effect<ReadonlyArray<WindowObservation>, string> =>
+    const validatedInventory = (): Effect.Effect<WindowInventory, string> =>
       Effect.mapError(
-        Effect.flatMap(adapter.getWindows(), (raw) =>
-          Schema.decodeUnknown(Schema.Array(WindowObservation))(raw),
+        Effect.flatMap(
+          adapter.getWindowInventory?.() ??
+            Effect.map(adapter.getWindows(), (windows) => ({
+              windows,
+              unavailableWindowIds: [],
+              closedWindowIds: [],
+            })),
+          (raw) => Schema.decodeUnknown(WindowInventory)(raw),
         ),
         () => "invalid window observations",
       );
+
+    const validatedWindows = (): Effect.Effect<ReadonlyArray<WindowObservation>, string> =>
+      Effect.map(validatedInventory(), (inventory) => inventory.windows);
+
+    const startupWindows = (): Effect.Effect<ReadonlyArray<WindowObservation>, string> =>
+      Effect.gen(function* () {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          const result = yield* Effect.either(validatedWindows());
+          if (result._tag === "Right") return result.right;
+          yield* clock.sleep(250);
+        }
+        return yield* validatedWindows();
+      });
 
     // ------------------------------------------------------------------
     // Learning integration (evidence-gated)
@@ -405,9 +469,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       ) {
         return false;
       }
-      return (
-        result.focused === true || (result.frontmostPid === observation.pid && result.main === true)
-      );
+      return result.frontmostPid === observation.pid && result.focused === true;
     };
 
     const refreshWindowAfterStale = (id: WindowId): Effect.Effect<void> =>
@@ -716,23 +778,32 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       insertTiledInto(home.name, windowId);
     };
 
-    const doRemove = (windowId: WindowId): void => {
+    const doRemove = (windowId: WindowId, remember = true): void => {
       const home = workspaceContaining(windowId);
       if (home === undefined) return;
       const wasFloating = home.floating.has(windowId);
       const updated = removeFromMembership(windowId, home);
       commitWorkspace(updated);
+      const observation = knownInstances.get(windowId) ?? world.windows.get(windowId);
+      if (!remember || observation === undefined) return;
       tombstones.set(windowId, {
         workspace: home.name,
         floating: wasFloating,
         tree: home.tree,
         parkedFrame: home.parkedFrames.get(windowId) ?? null,
         anchor: firstLeaf(updated.tree),
-        at: clock.now(),
+        observation,
       });
-      for (const [id, tombstone] of tombstones) {
-        if (clock.now() - tombstone.at > TOMBSTONE_TTL_MS) tombstones.delete(id);
-      }
+    };
+
+    const forgetWindowInstance = (id: WindowId): void => {
+      doRemove(id, false);
+      tombstones.delete(id);
+      knownInstances.delete(id);
+      firstSeen.delete(id);
+      shutdownRestoreIntents.delete(id);
+      overrides.managed.delete(id);
+      overrides.unmanaged.delete(id);
     };
 
     // ------------------------------------------------------------------
@@ -1039,24 +1110,12 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         if (workspace === undefined || workspace.mode !== "bsp") return;
         const display = displayOf(workspace.visibleOnDisplay);
         if (display === undefined) return;
-        const settings = effectiveSettings(config, workspaceName, display.id);
-        const resolver = constraintsResolver((id) => {
+        const frames = plannedWorkspaceFrames(workspace, display);
+        for (const [id, frame] of frames) {
           const obs = world.windows.get(id);
-          return obs === undefined ? {} : constraintsFor(obs);
-        });
-        const plan = planLayout({
-          tree: workspace.tree,
-          content: contentRect(display, settings.margins),
-          gap: settings.gap,
-          resolve: resolver,
-        });
-        if (plan.feasible) {
-          for (const [id, frame] of plan.frames) {
-            const obs = world.windows.get(id);
-            if (obs === undefined || obs.minimized || obs.hidden) continue;
-            if (withinTolerance(obs.frame, frame, 1)) continue;
-            yield* writeFrame(id, frame, 1);
-          }
+          if (obs === undefined || obs.minimized || obs.hidden) continue;
+          if (withinTolerance(obs.frame, frame, 1)) continue;
+          yield* writeFrame(id, frame, 1);
         }
         yield* restoreFloatingMembers(workspaceName, workspace, display);
       });
@@ -1089,7 +1148,12 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     ): Effect.Effect<void, StepFailure> =>
       Effect.gen(function* () {
         ensureWorkspace(workspaceName);
-        // Park the destination's previous workspace atomically first.
+        // External activation already chose the window. Reveal it before any
+        // old-workspace parking or peer tiling can delay the visible response.
+        yield* revealFocusedMember(workspaceName, displayId);
+        applyPendingFocusSignals();
+        if (world.focusedWorkspace !== workspaceName) return;
+        // Finish parking the displaced workspace after the selected window is visible.
         const displaced = [...world.workspaces.values()].find(
           (ws) => ws.visibleOnDisplay === displayId && ws.name !== workspaceName,
         );
@@ -1106,6 +1170,108 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         }
         yield* retileVisible(workspaceName);
       });
+
+    const focusedRevealTarget = (workspace: WorkspaceState, display: DisplayObservation) => {
+      const id = world.focusIntent?.id;
+      if (!hasAuthoritativeFocus || id === undefined || !isMemberOf(workspace, id)) return null;
+      const observation = world.windows.get(id);
+      if (observation === undefined || classify(observation) !== "normal") return null;
+      const target = workspace.floating.has(id)
+        ? clampFrameToBounds(
+            shutdownRestoreIntents.get(id)?.frame ?? firstSeen.get(id) ?? observation.frame,
+            display.workArea,
+          )
+        : plannedWorkspaceFrames(workspace, display).get(id);
+      return target === undefined ? null : { id, observation, target };
+    };
+
+    const revealFocusedMember = (
+      name: WorkspaceName,
+      displayId: DisplayId,
+    ): Effect.Effect<void, StepFailure> =>
+      Effect.gen(function* () {
+        const workspace = world.workspaces.get(name);
+        const display = displayOf(displayId);
+        if (workspace === undefined || display === undefined) return;
+        const reveal = focusedRevealTarget(workspace, display);
+        if (reveal === null || withinTolerance(reveal.observation.frame, reveal.target, 1)) return;
+        const observed = yield* writeFocusedReveal(reveal);
+        world = {
+          ...world,
+          windows: new Map(world.windows).set(reveal.id, {
+            ...reveal.observation,
+            frame: observed,
+          }),
+        };
+      });
+
+    interface FocusedReveal {
+      id: WindowId;
+      observation: WindowObservation;
+      target: Frame;
+    }
+
+    const focusedRevealFailure = (id: WindowId, code?: string, detail?: string): StepFailure => ({
+      code:
+        code === "stale" || code === "not_found"
+          ? "inventory_stale"
+          : code === "unresponsive"
+            ? "unresponsive"
+            : "geometry_rejected",
+      message: detail ?? `focused reveal ${id} failed (${code ?? "unknown"})`,
+    });
+
+    const focusedRevealWrite = (reveal: FocusedReveal) => {
+      const expected = { fingerprint: windowIdentityFingerprint(reveal.observation) };
+      const sizeMatches =
+        Math.abs(reveal.observation.frame.width - reveal.target.width) <= 1 &&
+        Math.abs(reveal.observation.frame.height - reveal.target.height) <= 1;
+      return sizeMatches
+        ? adapter.setWindowPosition(reveal.id, { x: reveal.target.x, y: reveal.target.y }, expected)
+        : adapter.setWindowFrame(reveal.id, reveal.target, expected);
+    };
+
+    const repairFocusedReveal = (reveal: FocusedReveal) =>
+      Effect.map(
+        writeFrame(
+          reveal.id,
+          reveal.target,
+          1,
+          undefined,
+          world.topology.displays,
+          reveal.observation,
+          { fingerprint: windowIdentityFingerprint(reveal.observation) },
+        ),
+        (verified) => verified.frame,
+      );
+
+    const verifyFocusedReveal = (
+      reveal: FocusedReveal,
+      result: WriteObservation,
+    ): Effect.Effect<Frame, StepFailure> => {
+      if (
+        result.errorKind === "stale" ||
+        result.errorKind === "not_found" ||
+        result.errorKind === "unresponsive"
+      ) {
+        return Effect.fail(focusedRevealFailure(reveal.id, result.errorKind));
+      }
+      return result.errorKind === undefined &&
+        result.stable &&
+        withinTolerance(result.observed, reveal.target, 1)
+        ? Effect.succeed(result.observed)
+        : repairFocusedReveal(reveal);
+    };
+
+    const writeFocusedReveal = (reveal: FocusedReveal): Effect.Effect<Frame, StepFailure> => {
+      phaseWrites?.add(reveal.id);
+      return Effect.flatMap(
+        Effect.mapError(focusedRevealWrite(reveal), (error) =>
+          focusedRevealFailure(reveal.id, error.code, error.detail),
+        ),
+        (result) => verifyFocusedReveal(reveal, result),
+      );
+    };
 
     const applyAction = (action: Action): Effect.Effect<unknown, StepFailure> =>
       Effect.gen(function* () {
@@ -1146,6 +1312,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 message: `unknown window ${action.windowId}`,
               } satisfies StepFailure);
             }
+            beginCommandFocus(action.windowId);
             const attempted = yield* Effect.either(
               adapter.focusWindow(action.windowId, {
                 fingerprint: windowIdentityFingerprint(observation),
@@ -1159,6 +1326,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 message: attempted.left.detail ?? "focus refused",
               } satisfies StepFailure);
             }
+            rememberCommandFocusEcho(action.windowId, attempted.right.focused);
             const result = attempted.right;
             if (!focusSatisfied(result, observation)) {
               if (result.error?.code === "stale") yield* refreshWindowAfterStale(action.windowId);
@@ -1203,7 +1371,11 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                             tombstone.parkedFrame,
                           ),
                   });
-                  world = recordFocusedMember(world, world.focusIntent?.id ?? null);
+                  world = recordFocusedMember(
+                    world,
+                    world.focusIntent?.id ?? null,
+                    hasAuthoritativeFocus && world.focusIntent?.id === action.windowId,
+                  );
                   tombstones.delete(action.windowId);
                   return;
                 }
@@ -1224,7 +1396,11 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             } else {
               insertTiledInto(action.workspace, action.windowId, action.beside, action.axis);
             }
-            world = recordFocusedMember(world, world.focusIntent?.id ?? null);
+            world = recordFocusedMember(
+              world,
+              world.focusIntent?.id ?? null,
+              hasAuthoritativeFocus && world.focusIntent?.id === action.windowId,
+            );
             tombstones.delete(action.windowId);
             return;
           case "removeWindow":
@@ -1378,10 +1554,13 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       readonly windows: readonly WindowObservation[] | null;
       readonly before: string;
       readonly failure: ReconcileFailure | null;
+      readonly topologyGeneration?: number;
+      readonly inventory?: WindowInventory;
     }
 
     const observePhase = (batch: ReconcileBatch): Effect.Effect<PhaseObservation> =>
       Effect.gen(function* () {
+        const topologyGeneration = topologyEventGeneration;
         const before = convergenceFingerprint();
         if (queue.isRecovering()) {
           return {
@@ -1402,15 +1581,15 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             failure: { code: "inventory_stale", message: "invalid topology observation" },
           };
         }
-        const windows = yield* Effect.either(validatedWindows());
-        if (windows._tag === "Left") {
+        const inventory = yield* Effect.either(validatedInventory());
+        if (inventory._tag === "Left") {
           setHealth("degraded", "inventory_stale");
-          bus.publish("diagnostic", { code: "inventory_invalid", detail: windows.left });
+          bus.publish("diagnostic", { code: "inventory_invalid", detail: inventory.left });
           return {
             topology: null,
             windows: null,
             before,
-            failure: { code: "inventory_stale", message: windows.left },
+            failure: { code: "inventory_stale", message: inventory.left },
           };
         }
         const authoritativeEmpty =
@@ -1418,7 +1597,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           world.windows.size > 0 &&
           [...world.windows.keys()].every((id) => batch.removals.has(id));
         if (
-          windows.right.length === 0 &&
+          inventory.right.windows.length === 0 &&
+          inventory.right.unavailableWindowIds.length === 0 &&
+          inventory.right.closedWindowIds.length === 0 &&
           world.windows.size > 0 &&
           topology.right.displays.length > 0 &&
           !authoritativeEmpty
@@ -1435,7 +1616,14 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             failure: { code: "inventory_stale", message: "window inventory is unavailable" },
           };
         }
-        return { topology: topology.right, windows: windows.right, before, failure: null };
+        return {
+          topology: topology.right,
+          windows: inventory.right.windows,
+          inventory: inventory.right,
+          before,
+          failure: null,
+          topologyGeneration,
+        };
       });
 
     const membershipFocusPhase = (
@@ -1444,11 +1632,16 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       verifiedWindows: ReadonlyMap<WindowId, WindowObservation>,
     ): PhaseObservation => {
       if (observation.topology === null || observation.windows === null) return observation;
-      for (const [id, tombstone] of tombstones) {
-        if (clock.now() - tombstone.at > TOMBSTONE_TTL_MS) tombstones.delete(id);
+      for (const id of batch.closures ?? []) forgetWindowInstance(id);
+      batch.closures?.clear();
+      for (const id of observation.inventory?.closedWindowIds ?? []) {
+        if (!observation.windows.some((window) => window.id === id)) forgetWindowInstance(id);
       }
       const windows = new Map<WindowId, WindowObservation>();
       for (const item of observation.windows) {
+        const known = knownInstances.get(item.id) ?? tombstones.get(item.id)?.observation;
+        if (known !== undefined && !sameWindowInstance(known, item)) forgetWindowInstance(item.id);
+        knownInstances.set(item.id, item);
         const verified = verifiedWindows.get(item.id);
         windows.set(
           item.id,
@@ -1466,6 +1659,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         }
       }
       world = { ...world, topology: observation.topology, windows };
+      if (observation.topologyGeneration === topologyEventGeneration) {
+        verifiedTopologyGeneration = topologyEventGeneration;
+      }
       // Include signals that arrived during the observation reads. Processing
       // each signal in order preserves a tiled focus even when a later signal
       // targets a not-yet-managed window or transient surface.
@@ -1474,7 +1670,11 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       const reportedId = [...windows.values()].find((item) => item.focused)?.id ?? null;
       if (reportedId !== lastObservedFocusId) {
         lastObservedFocusId = reportedId;
-        if (focusSignals.length === 0) applyFocusSignal(reportedId);
+        // Snapshots can lag commands/events and carry inactive app-local flags.
+        // Bootstrap from them only until an authoritative focus is established.
+        if (focusSignals.length === 0 && !hasAuthoritativeFocus) {
+          applyFocusSignal(reportedId, false);
+        }
       } else if (world.focusIntent !== null && !windows.has(world.focusIntent.id)) {
         world = { ...world, focusIntent: null };
       }
@@ -1578,6 +1778,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             // operation. Install it before a waiting command acquires the gate.
             // Splicing makes delivery exactly-once even when reconciliation retries.
             applyPendingFocusSignals();
+            commandFocusTarget = null;
             reconciling = false;
             yield* reconcileGate.release(1);
           }),
@@ -1601,6 +1802,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           let passBatch = batch;
           const verifiedWindows = new Map<WindowId, WindowObservation>();
           for (let pass = 0; pass < MAX_CONVERGENCE_PASSES; pass += 1) {
+            yield* prioritizeKnownFocus(passBatch);
             const result = yield* runLifecycle(
               {
                 observe: observePhase,
@@ -1666,6 +1868,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     const mergePendingBatch = (batch: ReconcileBatch): void => {
       pendingBatch = {
         removals: new Set([...batch.removals, ...pendingBatch.removals]),
+        closures: new Set([...(batch.closures ?? []), ...(pendingBatch.closures ?? [])]),
         focusSignals: [...batch.focusSignals, ...pendingBatch.focusSignals],
       };
     };
@@ -1718,6 +1921,32 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       });
 
     const gatedReconcile = (): Effect.Effect<void, CommandError> => requestReconcile(true);
+
+    /** A known focus target needs no inventory round trips before its first
+     * guarded write. Changed topology/removals still take the full observe path. */
+    const prioritizeKnownFocus = (batch: ReconcileBatch): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        for (const id of batch.focusSignals.splice(0)) applyFocusSignal(id);
+        applyPendingFocusSignals();
+        if (
+          world.paused ||
+          queue.isRecovering() ||
+          verifiedTopologyGeneration !== topologyEventGeneration
+        )
+          return;
+        const id = world.focusIntent?.id;
+        const workspace = id === undefined ? undefined : workspaceContaining(id);
+        if (
+          id === undefined ||
+          batch.removals.has(id) ||
+          workspace === undefined ||
+          workspace.visibleOnDisplay !== null
+        )
+          return;
+        const displayId = workspaceFocusDisplay(world, workspace.name);
+        if (displayId !== null)
+          yield* Effect.ignore(revealFocusedMember(workspace.name, displayId));
+      });
 
     // ------------------------------------------------------------------
     // Compound command transaction core — pure reducer → scoped plan →
@@ -2137,6 +2366,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       noOp: boolean;
       preserveLearning: boolean;
       appliedActions: number;
+      focusedWindow: WindowId | null;
     }
 
     const rollbackCompound = (ctx: CompoundCtx): Effect.Effect<void> =>
@@ -2248,6 +2478,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             noOp: false,
             preserveLearning: false,
             appliedActions: 0,
+            focusedWindow: null,
           };
 
           // ---- tentative phase; finalize on ANY exit incl. interruption.
@@ -2526,6 +2757,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                     failed: results.filter((result) => result.error !== undefined).length,
                   };
                 });
+              beginCommandFocus(focusId);
               const batch = yield* Effect.mapError(
                 operations.length === 0
                   ? Effect.succeed({ operations: [], completed: 0, failed: 0 })
@@ -2536,6 +2768,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                     message: error.detail ?? "native batch failed",
                   }),
               );
+              rememberCommandFocusEcho(focusId, batch.operations[built.writes.length]?.focused);
               const fatalBatchResult = built.writes
                 .map((_, index) => batch.operations[index])
                 .find(
@@ -2840,12 +3073,13 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 );
               }
               if (focusId !== null && focusResult !== undefined) {
+                ctx.focusedWindow = focusId;
                 focusGeneration += 1;
                 finalDraft = {
                   ...finalDraft,
                   focusIntent: { id: focusId, generation: focusGeneration },
                 };
-                finalDraft = recordFocusedMember(finalDraft, focusId);
+                finalDraft = recordFocusedMember(finalDraft, focusId, true);
                 applied += 1;
               }
               ctx.appliedActions = applied;
@@ -2869,6 +3103,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               Effect.gen(function* () {
                 if (ctx.noOp) return;
                 if (exit._tag === "Success" || ctx.committed) {
+                  hasAuthoritativeFocus ||= ctx.focusedWindow !== null;
                   world = {
                     ...ctx.finalDraft,
                     profiles: new Map(learning.profiles),
@@ -2898,8 +3133,13 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     // Focused-window / directional resolution (bean wm-pmys parity commands)
     // ------------------------------------------------------------------
 
-    /** Raw platform truth: whatever observation currently reports focused. */
+    /** Authoritative focus, including dialogs; snapshot flags are bootstrap-only. */
     const anyFocusedObservation = (): WindowObservation | null => {
+      if (hasAuthoritativeFocus) {
+        return world.focusIntent === null
+          ? null
+          : (world.windows.get(world.focusIntent.id) ?? null);
+      }
       for (const observation of world.windows.values()) {
         if (observation.focused) return observation;
       }
@@ -3014,7 +3254,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       }
       const intentId = source.focusIntent?.id;
       const logical = intentId === undefined ? undefined : source.windows.get(intentId);
-      const observed = [...source.windows.values()].find((observation) => observation.focused);
+      const observed = hasAuthoritativeFocus
+        ? undefined
+        : [...source.windows.values()].find((observation) => observation.focused);
       const focusedNormal =
         logical !== undefined && classify(logical) === "normal"
           ? logical
@@ -3878,6 +4120,88 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         // SAFETY: Remaining variants have no optional mutation target to resolve.
         return raw as ResolvedCommand;
       });
+    const workspaceFocusDisplay = (source: World, name: WorkspaceName): DisplayId | null => {
+      const workspace = source.workspaces.get(name);
+      const connected = (id: DisplayId | null | undefined): DisplayId | null =>
+        id != null && source.topology.displays.some((display) => display.id === id) ? id : null;
+      return (
+        connected(workspace?.visibleOnDisplay) ??
+        connected(workspace?.pinnedDisplayOverride) ??
+        connected(workspace?.preferredDisplay) ??
+        primaryDisplayIn(source)?.id ??
+        null
+      );
+    };
+
+    const workspaceFocusMember = (
+      source: World,
+      name: WorkspaceName,
+      selectedId?: WindowId,
+    ): WindowId | null => {
+      const workspace = source.workspaces.get(name);
+      if (workspace === undefined) return null;
+      const members = [...tiledMembers(workspace.tree), ...workspace.floating].filter(
+        (id) => id !== EMPTY_TREE_LEAF && source.windows.has(id),
+      );
+      if (selectedId !== undefined) return members.includes(selectedId) ? selectedId : null;
+      return workspace.lastFocusedMember !== null && members.includes(workspace.lastFocusedMember)
+        ? workspace.lastFocusedMember
+        : (members[0] ?? null);
+    };
+
+    const workspaceFocusCapture = (name: WorkspaceName) => {
+      const displayId = workspaceFocusDisplay(world, name);
+      const ids = Array.from(
+        new Set([
+          ...memberIdsOf(world.focusedWorkspace),
+          ...memberIdsOf(name),
+          ...occupantIdsOfDisplay(displayId),
+        ]),
+      );
+      return { displayId, tracked: { kind: "known" as const, ids } };
+    };
+
+    const workspaceFocusReducer =
+      (name: WorkspaceName, displayId: DisplayId | null) =>
+      ({ intents, buffer }: { intents: CompoundIntent[]; buffer: BufferedEvent[] }) =>
+      (w0: World): World => {
+        let w = ensureWorkspaceIn(w0, name);
+        w = { ...w, focusedWorkspace: name };
+        buffer.push({ topic: "focus", payload: { workspace: name } });
+        if (displayId !== null) w = revealIn(w, intents, name, displayId);
+        return w;
+      };
+
+    const validateWorkspaceFocus = (
+      draft: World,
+      name: WorkspaceName,
+      displayId: DisplayId | null,
+      selectedId?: WindowId,
+    ): CommandError | null => {
+      if (workspaceFocusDisplay(draft, name) !== displayId) {
+        return new CommandError({
+          code: "topology_unstable",
+          message: "focus workspace destination changed during capture",
+        });
+      }
+      return selectedId !== undefined && workspaceFocusMember(draft, name, selectedId) === null
+        ? new CommandError({
+            code: "inventory_stale",
+            message: `focus window ${selectedId} vanished during capture`,
+          })
+        : null;
+    };
+
+    const focusWorkspaceMember = (name: WorkspaceName, selectedId?: WindowId) => {
+      const { displayId, tracked } = workspaceFocusCapture(name);
+      return executeCompound(
+        tracked,
+        workspaceFocusReducer(name, displayId),
+        (draft) => validateWorkspaceFocus(draft, name, displayId, selectedId),
+        (draft) => workspaceFocusMember(draft, name, selectedId),
+      );
+    };
+
     const applyMutation = (raw: Command): Effect.Effect<CommandResult, CommandError> =>
       Effect.gen(function* () {
         yield* failIfStopping();
@@ -4118,12 +4442,13 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   );
                 }
                 focusGeneration += 1;
+                hasAuthoritativeFocus = true;
                 world = {
                   ...world,
                   focusIntent: { id: neighborId, generation: focusGeneration },
                 };
                 const ws = world.workspaces.get(ctx.workspaceName);
-                if (ws !== undefined) world = recordFocusedMember(world, neighborId);
+                if (ws !== undefined) world = recordFocusedMember(world, neighborId, true);
               }),
             );
             break;
@@ -4216,75 +4541,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             yield* Effect.ignore(gatedReconcile());
             break;
           case "focusWorkspace": {
-            // NO live mutation here: a missing workspace is created only
-            // inside the draft reducer (review round 3, issue 1). Displaced
-            // occupants of the target display are captured up front.
-            const prevName = world.focusedWorkspace;
-            const existingNext = world.workspaces.get(command.name);
-            const connectedDisplay = (id: DisplayId | null): DisplayId | null =>
-              id !== null && world.topology.displays.some((display) => display.id === id)
-                ? id
-                : null;
-            const desiredDisplayPre = existingNext
-              ? (connectedDisplay(existingNext.visibleOnDisplay) ??
-                connectedDisplay(existingNext.pinnedDisplayOverride) ??
-                connectedDisplay(existingNext.preferredDisplay) ??
-                primaryDisplay()?.id ??
-                null)
-              : (primaryDisplay()?.id ?? null);
-            const affected = Array.from(
-              new Set([
-                ...memberIdsOf(prevName),
-                ...(existingNext ? memberIdsOf(command.name) : []),
-                ...occupantIdsOfDisplay(desiredDisplayPre),
-              ]),
-            );
-            const desiredDisplayIn = (draft: World): DisplayId | null => {
-              const nextWs = draft.workspaces.get(command.name);
-              const connected = (id: DisplayId | null): DisplayId | null =>
-                id !== null && draft.topology.displays.some((display) => display.id === id)
-                  ? id
-                  : null;
-              return nextWs
-                ? (connected(nextWs.visibleOnDisplay) ??
-                    connected(nextWs.pinnedDisplayOverride) ??
-                    connected(nextWs.preferredDisplay) ??
-                    primaryDisplayIn(draft)?.id ??
-                    null)
-                : (primaryDisplayIn(draft)?.id ?? null);
-            };
-            yield* executeCompound(
-              { kind: "known", ids: affected },
-              ({ intents, buffer }) =>
-                (w0) => {
-                  let w = ensureWorkspaceIn(w0, command.name);
-                  const desiredDisplay = desiredDisplayIn(w);
-                  w = { ...w, focusedWorkspace: command.name };
-                  buffer.push({ topic: "focus", payload: { workspace: command.name } });
-                  if (desiredDisplay !== null) {
-                    w = revealIn(w, intents, command.name, desiredDisplay);
-                  }
-                  return w;
-                },
-              (draft) =>
-                desiredDisplayIn(draft) === desiredDisplayPre
-                  ? null
-                  : new CommandError({
-                      code: "topology_unstable",
-                      message: "focus workspace destination changed during capture",
-                    }),
-              (draft) => {
-                const workspace = draft.workspaces.get(command.name);
-                if (workspace === undefined) return null;
-                const members = [...tiledMembers(workspace.tree), ...workspace.floating].filter(
-                  (id) => id !== EMPTY_TREE_LEAF && draft.windows.has(id),
-                );
-                return workspace.lastFocusedMember !== null &&
-                  members.includes(workspace.lastFocusedMember)
-                  ? workspace.lastFocusedMember
-                  : (members[0] ?? null);
-              },
-            );
+            yield* focusWorkspaceMember(command.name);
             break;
           }
           case "moveWorkspaceToDisplay": {
@@ -4357,6 +4614,11 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             yield* gatedReconcile();
             break;
           case "focusWindow": {
+            const workspace = workspaceContaining(command.windowId);
+            if (workspace !== undefined && workspace.visibleOnDisplay === null) {
+              yield* focusWorkspaceMember(workspace.name, command.windowId);
+              break;
+            }
             yield* runExclusive(
               Effect.gen(function* () {
                 const applied = yield* Effect.either(
@@ -4366,11 +4628,12 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 // engine focus intent records only REAL successes.
                 if (applied._tag === "Right") {
                   focusGeneration += 1;
+                  hasAuthoritativeFocus = true;
                   world = {
                     ...world,
                     focusIntent: { id: command.windowId, generation: focusGeneration },
                   };
-                  world = recordFocusedMember(world, command.windowId);
+                  world = recordFocusedMember(world, command.windowId, true);
                 } else if (applied.left.code !== "window_not_controllable") {
                   return yield* Effect.fail(
                     new CommandError({
@@ -4475,7 +4738,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       );
     };
 
-    const shutdownTiledFrames = (
+    const plannedWorkspaceFrames = (
       workspace: WorkspaceState,
       display: DisplayObservation,
     ): ReadonlyMap<WindowId, Frame> => {
@@ -4537,7 +4800,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             continue;
           }
           const layoutKey = `${workspace.name}\u0000${display.id}`;
-          const tiledFrames = layouts.get(layoutKey) ?? shutdownTiledFrames(workspace, display);
+          const tiledFrames = layouts.get(layoutKey) ?? plannedWorkspaceFrames(workspace, display);
           layouts.set(layoutKey, tiledFrames);
           const frame = shutdownTargetFor(workspace, windowId, display, tiledFrames);
           if (frame === undefined) {
@@ -4718,11 +4981,14 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       Effect.gen(function* () {
         if (world.paused) return;
         const topology = yield* Effect.orDie(validatedTopology());
-        const observations = yield* Effect.orDie(validatedWindows());
+        const observations = yield* Effect.orDie(startupWindows());
         const windows = new Map(observations.map((observation) => [observation.id, observation]));
         lastObservedFocusId = observations.find((observation) => observation.focused)?.id ?? null;
         world = { ...world, topology, windows };
-        for (const observation of observations) firstSeen.set(observation.id, observation.frame);
+        for (const observation of observations) {
+          firstSeen.set(observation.id, observation.frame);
+          knownInstances.set(observation.id, observation);
+        }
 
         const ctx = makeCtx();
         const groups = new Map<WorkspaceName, WindowObservation[]>();
@@ -4935,7 +5201,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     const hydrateInitialLayout = (initialLayout: EngineInitialLayout): Effect.Effect<void> =>
       Effect.gen(function* () {
         const topology = yield* Effect.orDie(validatedTopology());
-        const observations = yield* Effect.orDie(validatedWindows());
+        const observations = yield* Effect.orDie(startupWindows());
         const windows = new Map(observations.map((observation) => [observation.id, observation]));
         const resolved = resolveInitialLayout(
           initialLayout,
@@ -4979,7 +5245,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                 : null,
           });
         }
-        for (const observation of observations) firstSeen.set(observation.id, observation.frame);
+        for (const observation of observations) {
+          firstSeen.set(observation.id, observation.frame);
+          knownInstances.set(observation.id, observation);
+        }
         lastObservedFocusId = focused;
         if (focused !== null) focusGeneration += 1;
         world = {
@@ -5118,10 +5387,26 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   pendingBatch = {
                     ...pendingBatch,
                     removals: new Set(pendingBatch.removals).add(event.windowId),
+                    closures:
+                      event.closed === true
+                        ? new Set(pendingBatch.closures).add(event.windowId)
+                        : pendingBatch.closures,
                   };
                 }
+                if (
+                  event.kind === "topology_changed" ||
+                  event.kind === "space_changed" ||
+                  event.kind === "sleep" ||
+                  event.kind === "wake"
+                )
+                  topologyEventGeneration += 1;
                 if (event.kind === "focus_changed") {
-                  pendingFocusSignals.push(event.windowId);
+                  // Command echoes still request observation, but cannot become
+                  // a new workspace selection before commit or after rollback.
+                  if (!consumeCommandFocusEcho(event.windowId)) {
+                    pendingCommandFocusEchoes.clear();
+                    pendingFocusSignals.push(event.windowId);
+                  }
                 }
                 yield* Effect.ignore(requestReconcile(false));
               }),

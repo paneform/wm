@@ -1,6 +1,7 @@
 import type { Config, EffectiveWorkspaceSettings } from "../config.js";
 import type { Action } from "../actions.js";
 import type { Constraints, DisplayId, Frame, WindowId, WindowObservation } from "../schema.js";
+import { sameWindowInstance } from "../schema.js";
 import {
   classify,
   type BspNode,
@@ -27,7 +28,8 @@ export interface TombstoneRecord {
   parkedFrame: Frame | null;
   /** Split partner to re-insert beside, when known. */
   anchor: WindowId | null;
-  at: number;
+  /** Last verified instance that owned this placement; no time-based expiry. */
+  observation: WindowObservation;
 }
 
 export interface ManagedOverrides {
@@ -51,6 +53,19 @@ export interface Rule {
   name: string;
   applies(world: World, ctx: RuleContext): boolean;
   run(world: World, ctx: RuleContext): Action[];
+}
+
+export function restorableMembership(
+  world: World,
+  ctx: RuleContext,
+  window: WindowObservation,
+): TombstoneRecord | undefined {
+  const record = ctx.tombstones.get(window.id);
+  return record !== undefined &&
+    sameWindowInstance(record.observation, window) &&
+    world.workspaces.has(record.workspace)
+    ? record
+    : undefined;
 }
 
 // ---------------------------------------------------------------------------

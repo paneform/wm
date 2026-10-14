@@ -111,8 +111,12 @@ export interface World {
   focusIntent: { id: WindowId; generation: number } | null;
 }
 
-/** Remember managed focus without letting a dialog or an unassigned window replace it. */
-export function recordFocusedMember(world: World, id: WindowId | null): World {
+/** Remember managed focus, optionally selecting its workspace for an authoritative change. */
+export function recordFocusedMember(
+  world: World,
+  id: WindowId | null,
+  selectWorkspace = false,
+): World {
   const observation = id === null ? undefined : world.windows.get(id);
   if (id === null || observation === undefined || classify(observation) !== "normal") return world;
   for (const workspace of world.workspaces.values()) {
@@ -120,7 +124,11 @@ export function recordFocusedMember(world: World, id: WindowId | null): World {
     if (!tiled && !workspace.floating.has(id)) continue;
     const updated = { ...workspace, lastFocusedMember: id };
     if (tiled && workspace.mode === "bsp") updated.lastFocusedTiledMember = id;
-    return { ...world, workspaces: new Map(world.workspaces).set(workspace.name, updated) };
+    return {
+      ...world,
+      focusedWorkspace: selectWorkspace ? workspace.name : world.focusedWorkspace,
+      workspaces: new Map(world.workspaces).set(workspace.name, updated),
+    };
   }
   return world;
 }

@@ -11,6 +11,7 @@ import type {
   TopologyObservation,
   WindowId,
   WindowObservation,
+  WindowInventory,
   WriteObservation,
 } from "./schema.js";
 
@@ -24,7 +25,7 @@ import type {
  * Every write returns the OBSERVED outcome; the engine decides what it means.
  */
 export interface PlatformAdapter {
-  /** Stream of generic events. Hints only — the engine re-queries to reconcile. */
+  /** Events request reconciliation; closed removals carry positive lifecycle evidence. */
   readonly events: Stream.Stream<PlatformEvent>;
 
   /**
@@ -35,6 +36,9 @@ export interface PlatformAdapter {
 
   getTopology(): Effect.Effect<TopologyObservation, PlatformError>;
   getWindows(): Effect.Effect<ReadonlyArray<WindowObservation>, PlatformError>;
+  /** Current facts only. Missing/unavailable entries do not prove closure.
+   * Fail with unavailable when the entire observation cannot be made. */
+  readonly getWindowInventory?: () => Effect.Effect<WindowInventory, PlatformError>;
   getWindow(id: WindowId): Effect.Effect<WindowObservation | null, PlatformError>;
 
   /**
@@ -51,7 +55,7 @@ export interface PlatformAdapter {
    *
    * When `expected` is provided its `fingerprint` is compared EXACTLY against
    * the live metadata fingerprint `JSON.stringify([pid, role ?? null,
-   * subrole ?? null])` at write time — same-pid replacements differing in
+   * subrole ?? null, ...optionalInstanceId])` at write time — same-pid replacements differing in
    * subrole (null or otherwise) are rejected.
    */
   setWindowFrame(

@@ -10,16 +10,17 @@ exist: the macOS sidecar host (`packages/platform-macos`), the headless test fak
 ```ts
 interface PlatformAdapter {
   // Stream of generic events. Adapter translates native callbacks; engine treats
-  // events as hints that trigger reconciliation, never as authoritative mutations.
+  // events trigger reconciliation; explicitly closed removals carry lifecycle evidence.
   events(): Stream<PlatformEvent>
 
   // Optional native-host control. The engine calls this when pause state
   // changes; adapters without native hotkey capture may omit it.
   setHotkeySwallowing?(enabled: boolean): Effect<void, PlatformError>
 
-  // Snapshot queries. Must be safe to call any time; return last-known state.
+  // Snapshot queries. Unavailable observation fails rather than returning an empty list.
   getTopology(): Effect<TopologyObservation, PlatformError>
   getWindows(): Effect<WindowObservation[], PlatformError>
+  getWindowInventory?(): Effect<WindowInventory, PlatformError>
 
   // Primitive write operations. Each returns the OBSERVED outcome; the engine
   // classifies success/constraint/failure. Adapters do NOT retry, classify, or clamp.
@@ -46,7 +47,7 @@ type PlatformError = { code: "not_found" | "not_controllable" | "stale" | "ambig
 PlatformEvent =
   | { kind: "topology_changed" }
   | { kind: "window_added"; window: WindowObservation }
-  | { kind: "window_removed"; windowId: WindowId }
+  | { kind: "window_removed"; windowId: WindowId; closed?: boolean }
   | { kind: "window_changed"; window: WindowObservation }   // frame/title/state
   | { kind: "focus_changed"; windowId: WindowId | null }
   | { kind: "space_changed" }                                // native Space switch
@@ -54,7 +55,42 @@ PlatformEvent =
 ```
 
 Rules for ALL implementations:
-- Events are hints. The engine re-queries snapshots to reconcile.
+
+- Layout events are hints. The engine re-queries snapshots to reconcile.
+- `WindowInventory` contains `windows` (current actionable observations),
+  `unavailableWindowIds` (known instances that could not be observed), and
+  `closedWindowIds` (positive destruction/process-exit evidence). Failure of the
+  whole inventory read is `PlatformError { code: "unavailable" }`, not `windows: []`.
+- Inventory-diff absence is not closure. Only positive lifecycle evidence may set
+  `window_removed.closed: true`. Enumeration failure, filtering, and failed AX/CG
+  joining must not generate that evidence. `getWindow` fails with `unavailable`
+  for a known unreadable instance instead of reporting it as nonexistent.
+- The engine remembers placement without a time limit while an instance is
+  unavailable. It restores only matching window ID/PID and `instanceId` when
+  provided. `instanceId` is an opaque platform lifetime token, not an app name,
+  title, frame, or state-dependent subrole. Confirmed closure or replacement retires
+  the old placement. Without tokens, the fallback matches ID/PID/role/application
+  identity; adapters must report confirmed closure to disambiguate reuse.
+- Unavailable windows are excluded from geometry plans. Remembered placement is
+  separate from actionable window facts, so recovery does not write stale frames.
+  New instances use configured assignment, then current workspace. Authoritative
+  focus follows the assigned workspace; discovery alone never changes focus.
+- `focused` in inventory and live readback means global focus, not an app-local
+  window flag. On macOS, match the window to the frontmost application's
+  `AXFocusedWindow`; inactive applications cannot report a globally focused window.
+- `focus_changed` carries authoritative, ordered focus changes, including user
+  activation outside wm. Snapshots bootstrap focus but cannot overwrite a newer
+  focus event or successful focus command. A focus result verifies the requested
+  window only when its application is frontmost and its focused-window reference
+  matches; `AXMain` alone is insufficient.
+- macOS focus detection runs separately from all-app inventory: activation
+  notifications trigger a targeted read, with a 25 ms active-app polling fallback
+  for window changes inside the same application. Cached AX window references
+  map that read to the existing normalized ID without waiting for other apps.
+- Window discovery includes normal CoreGraphics window owner PIDs even when
+  Launch Services omits their application from `NSWorkspace.runningApplications`.
+  AX enumeration and normal identity/reportability checks still apply. For these
+  owners, executable and bundle metadata are resolved from the process path.
 - `setWindowFrame` semantics: write position and size as separate component writes in
   an adapter-chosen order (macOS: size→position→size bookends; see engine-guide for why),
   then settle-poll readback and report. Never throw on "window refused the exact frame" —
@@ -75,6 +111,7 @@ Swift sidecar = separate executable speaking newline-delimited JSON over stdio
 per line, all Schema-validated on both ends.
 
 Engine → sidecar:
+
 ```jsonc
 { "op": "subscribe" }
 { "op": "getTopology" }
@@ -97,6 +134,7 @@ the command's completion latency, because the engine cannot commit until all res
 have settled.
 
 Sidecar → engine:
+
 ```jsonc
 { "ev": "topology_changed" } | { "ev": "window_added", "window": {...} } | ...
 { "result": { ... WriteObservation ... } }   // correlated by "reqId" on commands
@@ -115,6 +153,14 @@ Sidecar implementation requirements:
 3. **Window identity/normalization:**
    - Stable id: `window:cg:<id>` when CG id valid (non-zero); else
      `window:ax:<pid>:<role>:<subrole>:<fnv1a64(title) hex>:<occurrence-index>`.
+   - Lifetime token: retain the AX reference and sampled process start time across
+     observation gaps. Match by AX reference, or CG handle plus verified process
+     start time when AX handles are rebuilt. Keep the original public ID across
+     normalization changes for a matched instance. A changed process start time
+     or unmatched native window mints a new `instanceId`. Process exit or
+     `AXError.invalidUIElement` without a surviving CG surface retires a missing
+     instance; timeouts and unreadable process metadata do not. Filtered/minimized
+     windows retain their identity but are not made actionable using cached facts.
    - Join AX + CG inventories by evidence score: cg_window_id match +100, frame match +20,
      title +5, pid prerequisite. Two CG candidates with equal evidence ⇒ refuse the join
      (mark uncertain). CG id 0 is invalid/absent.
@@ -126,6 +172,8 @@ Sidecar implementation requirements:
 4. **Identity validation around every write:** re-read identity (pid + role +
    AXWindowNumber↔cgWindowID if present) before and after each component write; if the
    element was replaced, abort with `stale` rather than mutating a replacement window.
+   Expected fingerprints are `[pid, role ?? null, subrole ?? null, instanceId]`
+   when a lifetime token is available; otherwise retain the three-element format.
 5. **`AXEnhancedUserInterface` quirk:** before geometry writes, if the app has
    AXEnhancedUserInterface == true, temporarily set false and restore after (defer).
 6. **Settle polling:** up to 36 samples, 17 ms apart; stop early on 3 consecutive target
@@ -149,3 +197,7 @@ Sidecar implementation requirements:
 12. **Topology events:** poll CGGetOnlineDisplayList (AppKit notifications are
     insufficient without an event loop — see bean wm-dm8l); emit `topology_changed` on
     change. Also emit on wake/sleep notifications.
+13. **Sleep observation:** mark window inventory unavailable before forwarding sleep.
+    Wake requests a fresh pass; discard any pass spanning a sleep/wake transition.
+    Requests remain unavailable until a fresh pass completes. AX failures are
+    isolated per application so healthy windows remain manageable during recovery.

@@ -9,6 +9,7 @@ import {
   isIgnoredSurface,
   matchAffinity,
   primaryDisplay,
+  restorableMembership,
   windowClass,
 } from "./rule.js";
 import type { Rule, RuleContext } from "./rule.js";
@@ -32,13 +33,7 @@ export const assignNewWindows: Rule = {
         !isIgnoredSurface(world, ctx, observation) &&
         findMembership(world, observation.id) === null
       ) {
-        const tombstone = ctx.tombstones.get(observation.id);
-        if (
-          tombstone !== undefined &&
-          ctx.now - tombstone.at <= 5 * 60 * 1000 &&
-          world.workspaces.has(tombstone.workspace)
-        )
-          continue;
+        if (restorableMembership(world, ctx, observation) !== undefined) continue;
         return true;
       }
     }
@@ -51,13 +46,7 @@ export const assignNewWindows: Rule = {
       if (startupQuarantine(ctx).has(observation.id)) continue;
       if (isIgnoredSurface(world, ctx, observation)) continue;
       if (findMembership(world, observation.id) !== null) continue;
-      const tombstone = ctx.tombstones.get(observation.id);
-      if (
-        tombstone !== undefined &&
-        ctx.now - tombstone.at <= 5 * 60 * 1000 &&
-        world.workspaces.has(tombstone.workspace)
-      )
-        continue;
+      if (restorableMembership(world, ctx, observation) !== undefined) continue;
       // Only normal windows are auto-placed; transients follow parents (rule 6).
       if (windowClass(observation) === "transient") continue;
 

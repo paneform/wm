@@ -48,6 +48,7 @@ struct WindowMeta {
     var bundleID: String?
     var executablePath: String?
     var hidden: Bool
+    var instanceId: String? = nil
 
     init(id: String, raw: RawAXWindow, cgTitle: String?, cgWindowID: UInt32?, hidden: Bool) {
         self.id = id
@@ -70,6 +71,7 @@ struct WindowMeta {
             cgTitle: joined.value.title != joined.raw.title ? joined.value.title : nil,
             cgWindowID: joined.cgWindowID,
             hidden: joined.value.hidden)
+        self.instanceId = joined.value.instanceId
     }
 }
 
@@ -98,16 +100,18 @@ final class GeometryAdapter {
 
     // MARK: Cache maintenance (ground-truth `reconcile`)
 
-    /// Drops retained elements whose logical window vanished or was replaced.
-    func reconcile(windows: [WindowMeta]) {
-        let byID = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        for id in records.keys {
-            guard let meta = byID[id], sameLogicalWindow(records[id]!.element, meta),
-                  (try? frame(of: records[id]!.element)) != nil else {
-                records.removeValue(forKey: id)
-                continue
-            }
-        }
+    /// Inventory already read and normalized these handles. Reuse that evidence
+    /// instead of issuing per-window AX reads that block foreground focus.
+    /// Every later mutation still validates its live expected identity.
+    func reconcile(windows: [WindowMeta], references: [String: AXUIElement]) {
+        records = Dictionary(
+            windows.compactMap { meta in
+                guard let element = references[meta.id] else { return nil }
+                var pid: pid_t = 0
+                guard AXUIElementGetPid(element, &pid) == .success, pid == meta.pid else { return nil }
+                setMessagingTimeout(element, 1.5)
+                return (meta.id, Record(element: element, meta: meta))
+            }, uniquingKeysWith: { first, _ in first })
     }
 
     // MARK: Readback
@@ -133,17 +137,23 @@ final class GeometryAdapter {
     }
 
     /// Cheap live readback of one window for settle polling.
-    func observation(for meta: WindowMeta) -> WindowValue? {
+    func observation(for meta: WindowMeta, focusTimeout: CFTimeInterval = 1.5) -> WindowValue? {
         guard let element = try? resolve(meta) else { return nil }
+        return readObservation(meta: meta, element: element, focusTimeout: focusTimeout)
+    }
+
+    private func readObservation(meta: WindowMeta, element: AXUIElement, focusTimeout: CFTimeInterval) -> WindowValue {
         var errors: [String] = []
         let liveFrame = Self.readFrame(element, errors: &errors) ?? meta.frame
         let title: String? = Self.optionalRead(element, kAXTitleAttribute)
         let minimized: Bool? = Self.optionalRead(element, kAXMinimizedAttribute)
         let fullscreen: Bool? = Self.optionalRead(element, "AXFullScreen")
-        let focused: Bool? = Self.optionalRead(element, kAXFocusedAttribute)
-        let movable: Bool? = Self.optionalRead(element, "AXMovable")
+        let focused = WindowFocus.isFocused(element, pid: meta.pid, timeout: focusTimeout)
+        let movable: Bool? =
+            Self.optionalRead(element, "AXMovable")
             ?? Self.attributeSettable(element, kAXPositionAttribute)
-        let resizable: Bool? = Self.optionalRead(element, "AXResizable")
+        let resizable: Bool? =
+            Self.optionalRead(element, "AXResizable")
             ?? Self.attributeSettable(element, kAXSizeAttribute)
         return WindowValue(
             id: meta.id,
@@ -159,14 +169,27 @@ final class GeometryAdapter {
             hidden: meta.hidden,
             fullscreen: fullscreen ?? false,
             focused: focused ?? false,
-            capabilities: capabilityValue(movable: movable, resizable: resizable))
+            capabilities: capabilityValue(movable: movable, resizable: resizable),
+            instanceId: meta.instanceId)
     }
 
     // MARK: Geometry writes
 
-    enum Component {
+    enum Component: Equatable {
         case position
         case size
+    }
+
+    /// Merge untouched dimensions from the same pre-write read used to settle,
+    /// rather than resolving and reading the window a second time in the router.
+    nonisolated static func componentTarget(_ requested: Rect, baseline: Rect, components: [Component]) -> Rect {
+        guard components.count == 1 else { return requested }
+        switch components[0] {
+        case .position:
+            return Rect(x: requested.x, y: requested.y, width: baseline.width, height: baseline.height)
+        case .size:
+            return Rect(x: baseline.x, y: baseline.y, width: requested.width, height: requested.height)
+        }
     }
 
     /// Executes the component writes for one operation, settles against the
@@ -176,7 +199,7 @@ final class GeometryAdapter {
     /// - modes `.position` / `.size`: a single component write.
     func write(
         meta: WindowMeta,
-        requested: Rect,
+        requested input: Rect,
         components: [Component],
         expectedIdentity: ExpectedIdentityValue? = nil
     ) async throws -> WriteValue {
@@ -189,7 +212,7 @@ final class GeometryAdapter {
         }
         do {
             guard AXIsProcessTrusted() else { throw AdapterError.notControllable }
-            let element = try resolve(meta)
+            let element = try resolve(meta, requireFrameRead: false)
             try validateIdentity(element: element, meta: meta, expected: expectedIdentity)
             try validateControllability(element: element, components: components)
             var beforeErrors: [String] = []
@@ -198,13 +221,16 @@ final class GeometryAdapter {
             // sample already sits at the final frame — improvement is only
             // meaningful against the frame BEFORE the mutation.
             let before = Self.readFrame(element, errors: &beforeErrors)
+            let requested = Self.componentTarget(input, baseline: before ?? meta.frame, components: components)
 
             try await withEnhancedUserInterfaceDisabled(pid: meta.pid) {
-                for component in components {
+                for (index, component) in components.enumerated() {
                     // Identity BEFORE the write: never mutate a replacement window.
                     try validateIdentity(element: element, meta: meta, expected: expectedIdentity)
                     try writeComponent(component, requested, element: element)
-                    try await Task.sleep(for: .milliseconds(interWriteDelayMs))
+                    if index + 1 < components.count {
+                        try await Task.sleep(for: .milliseconds(interWriteDelayMs))
+                    }
                     // Identity AFTER the write: abort rather than continue on a swap.
                     try validateIdentity(element: element, meta: meta, expected: expectedIdentity)
                 }
@@ -258,7 +284,8 @@ final class GeometryAdapter {
         for component in components {
             let attribute = component == .position ? kAXPositionAttribute : kAXSizeAttribute
             var settable = DarwinBoolean(false)
-            guard AXUIElementIsAttributeSettable(element, attribute as CFString, &settable) == .success else {
+            guard AXUIElementIsAttributeSettable(element, attribute as CFString, &settable) == .success
+            else {
                 throw AdapterError.notControllable
             }
             guard settable.boolValue else { throw AdapterError.notControllable }
@@ -267,7 +294,9 @@ final class GeometryAdapter {
 
     /// Requirement 5: temporarily clear `AXEnhancedUserInterface` around
     /// geometry writes and always restore it afterwards.
-    private func withEnhancedUserInterfaceDisabled(pid: Int32, _ body: () async throws -> Void) async throws {
+    private func withEnhancedUserInterfaceDisabled(pid: Int32, _ body: () async throws -> Void)
+        async throws
+    {
         let app = AXUIElementCreateApplication(pid)
         setMessagingTimeout(app, 1.5)
         let enhanced: Bool? = Self.optionalRead(app, "AXEnhancedUserInterface")
@@ -318,7 +347,9 @@ final class GeometryAdapter {
     /// Up to 36 samples, 17 ms apart. Early exit on 3 consecutive target
     /// matches, or 3 consecutive stable reads (≤0.5 pt movement) that also
     /// improved on the pre-write distance at least once.
-    private func settle(element: AXUIElement, requested: Rect, before: Rect?) async throws -> Settlement {
+    private func settle(element: AXUIElement, requested: Rect, before: Rect?) async throws
+        -> Settlement
+    {
         let tolerance = 1.0
         var targetSamples = 0
         var stableSamples = 0
@@ -331,7 +362,8 @@ final class GeometryAdapter {
             }
             let matches = observed.approximatelyEquals(requested, tolerance: tolerance)
             targetSamples = matches ? targetSamples + 1 : 0
-            stableSamples = previous?.approximatelyEquals(observed, tolerance: 0.5) == true ? stableSamples + 1 : 0
+            stableSamples =
+                previous?.approximatelyEquals(observed, tolerance: 0.5) == true ? stableSamples + 1 : 0
             let distance = normalizedDistance(observed, to: requested)
             let distanceImproved = beforeDistance.map { distance < $0 - 0.0001 } ?? false
             if Self.shouldSettleEarly(
@@ -339,7 +371,8 @@ final class GeometryAdapter {
                 stableSamples: stableSamples,
                 distanceImproved: distanceImproved)
             {
-                return Settlement(frame: observed, stable: true, stableReads: max(targetSamples, stableSamples))
+                return Settlement(
+                    frame: observed, stable: true, stableReads: max(targetSamples, stableSamples))
             }
             previous = observed
             try await Task.sleep(for: .milliseconds(settleIntervalMs))
@@ -385,7 +418,7 @@ final class GeometryAdapter {
                 operationError = .stale
             }
         }
-        let focused: Bool? = element.flatMap { Self.optionalRead($0, kAXFocusedAttribute) }
+        let focused = element.flatMap { WindowFocus.isFocused($0, pid: meta.pid) }
         let main: Bool? = element.flatMap { Self.optionalRead($0, kAXMainAttribute) }
         return FocusValue(
             frontmostPid: frontmostPid().map(Int.init),
@@ -402,15 +435,19 @@ final class GeometryAdapter {
             throw AdapterError.stale
         }
         guard let runningApplication = NSRunningApplication(processIdentifier: pid),
-              runningApplication.activate(options: [.activateAllWindows]) else {
+            runningApplication.activate(options: [.activateAllWindows])
+        else {
             throw AdapterError.rejected
         }
         let app = AXUIElementCreateApplication(pid)
         setMessagingTimeout(app, 3.0)
-        try checkWrite(AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue))
+        try checkWrite(
+            AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue))
         try checkWrite(AXUIElementPerformAction(element, kAXRaiseAction as CFString))
-        try checkWrite(AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue))
-        try checkWrite(AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue))
+        try checkWrite(
+            AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue))
+        try checkWrite(
+            AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue))
     }
 
     private func frontmostPid() -> Int32? {
@@ -424,18 +461,20 @@ final class GeometryAdapter {
     ) throws {
         guard sameLogicalWindow(element, meta) else { throw AdapterError.stale }
         guard let expected else { return }
-        var pid: pid_t = 0
-        guard AXUIElementGetPid(element, &pid) == .success else { throw AdapterError.stale }
-        let role: String? = Self.optionalRead(element, kAXRoleAttribute)
+        // sameLogicalWindow already read and matched PID and role. Reuse that
+        // evidence instead of sending a duplicate AXRole request for the token.
         let subrole: String? = Self.optionalRead(element, kAXSubroleAttribute)
-        guard ExpectedIdentityValue.fingerprint(
-            pid: Int(pid), role: role, subrole: subrole) == expected.fingerprint
+        guard
+            ExpectedIdentityValue.fingerprint(
+                pid: Int(meta.pid), role: meta.role, subrole: subrole, instanceId: meta.instanceId)
+                == expected.fingerprint
         else { throw AdapterError.stale }
     }
 
     private static func attributeSettable(_ element: AXUIElement, _ attribute: String) -> Bool? {
         var settable = DarwinBoolean(false)
-        guard AXUIElementIsAttributeSettable(element, attribute as CFString, &settable) == .success else {
+        guard AXUIElementIsAttributeSettable(element, attribute as CFString, &settable) == .success
+        else {
             return nil
         }
         return settable.boolValue
@@ -443,21 +482,27 @@ final class GeometryAdapter {
 
     // MARK: Element resolution (ground-truth `resolve`)
 
-    private func resolve(_ meta: WindowMeta) throws -> AXUIElement {
+    private func resolve(_ meta: WindowMeta, requireFrameRead: Bool = true, timeout: CFTimeInterval? = nil) throws
+        -> AXUIElement
+    {
         if let record = records[meta.id] {
-            if sameLogicalWindow(record.element, meta), (try? frame(of: record.element)) != nil {
+            if sameLogicalWindow(record.element, meta),
+                !requireFrameRead || (try? frame(of: record.element)) != nil
+            {
                 return record.element
             }
             records.removeValue(forKey: meta.id)
             if !sameLogicalWindow(record.element, meta) { throw AdapterError.stale }
         }
         let app = AXUIElementCreateApplication(meta.pid)
-        setMessagingTimeout(app, 3.0)
+        setMessagingTimeout(app, timeout ?? 3.0)
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
-              let elements = value as? [AXUIElement] else {
+            let elements = value as? [AXUIElement]
+        else {
             throw AdapterError.notFound
         }
+        if let timeout { for element in elements { setMessagingTimeout(element, timeout) } }
         if let index = axOccurrenceIndex(meta.id) {
             let candidates = elements.filter { matches($0, meta) }
             if candidates.indices.contains(index) {
@@ -480,7 +525,9 @@ final class GeometryAdapter {
     private func sameLogicalWindow(_ element: AXUIElement, _ meta: WindowMeta) -> Bool {
         var pid: pid_t = 0
         guard AXUIElementGetPid(element, &pid) == .success, pid == meta.pid else { return false }
-        guard let role: String = Self.optionalRead(element, kAXRoleAttribute), role == meta.role, role == kAXWindowRole else {
+        guard let role: String = Self.optionalRead(element, kAXRoleAttribute), role == meta.role,
+            role == kAXWindowRole
+        else {
             return false
         }
         if let expected = meta.axWindowID, expected != 0 {
@@ -498,7 +545,8 @@ final class GeometryAdapter {
             let number: NSNumber? = Self.optionalRead(element, "AXWindowNumber")
             if let number { return number.uint32Value == expected }
         }
-        guard let actualFrame = try? frame(of: element), actualFrame.approximatelyEquals(meta.frame) else {
+        guard let actualFrame = try? frame(of: element), actualFrame.approximatelyEquals(meta.frame)
+        else {
             return false
         }
         let title: String? = Self.optionalRead(element, kAXTitleAttribute)
@@ -523,13 +571,15 @@ final class GeometryAdapter {
 
     fileprivate static func readFrame(_ element: AXUIElement, errors: inout [String]) -> Rect? {
         guard let positionValue: AXValue = optionalRead(element, kAXPositionAttribute),
-              let sizeValue: AXValue = optionalRead(element, kAXSizeAttribute) else {
+            let sizeValue: AXValue = optionalRead(element, kAXSizeAttribute)
+        else {
             return nil
         }
         var position = CGPoint.zero
         var size = CGSize.zero
         guard AXValueGetValue(positionValue, .cgPoint, &position),
-              AXValueGetValue(sizeValue, .cgSize, &size) else {
+            AXValueGetValue(sizeValue, .cgSize, &size)
+        else {
             return nil
         }
         return Rect(x: position.x, y: position.y, width: size.width, height: size.height)
