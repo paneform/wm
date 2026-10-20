@@ -3,8 +3,9 @@
   import { playbackSteps } from "@paneform/layout-browser";
   import DemoStage from "$lib/docs/DemoStage.svelte";
   import { demoDefinitions, demosForCommand } from "$lib/docs/demo-data.js";
+  import { payloadTooltips } from "$lib/docs/payload-tooltip.js";
   import { commandHref, commandBreadcrumbs } from "$lib/docs/navigation.js";
-  import { invocationRows } from "$lib/docs/invocations.js";
+  import { argumentRows, invocationRows } from "$lib/docs/invocations.js";
   let { data } = $props();
   const doc = $derived(data.doc);
   const related = $derived(commandDocs.filter((item) => item.domain === doc.domain && item.slug !== doc.slug).slice(0, 3));
@@ -15,6 +16,7 @@
     return step && 'command' in step ? [step.command] : [];
   }) ?? [])]);
   const invocations = $derived(invocationRows(doc));
+  const argumentsList = $derived(argumentRows(doc));
 </script>
 <svelte:head><title>{doc.title} · Paneform WM docs</title><meta name="description" content={doc.summary} /></svelte:head>
 <p class="docs-breadcrumb">Docs / Commands / {commandBreadcrumbs(doc).join(' / ')}</p>
@@ -26,16 +28,17 @@
   {#each exceptions as reason}<p class="lede">{reason}</p>{/each}
 {/if}
 <h2 id="invocation">Invocation</h2>
-<table><tbody><tr><th>Method</th><th>Invocation</th></tr>
-  {#each invocations as row}<tr><td data-label="Method"><span class="method" class:ws={row.method === 'WebSocket'} class:key={row.method === 'Keybind'} class:scenario={row.method === 'Scenario'}>{row.method}</span></td><td data-label="Invocation">{#if row.method === 'WebSocket'}<pre class="websocket-payload"><code>{row.syntax}</code></pre>{:else}<code>{row.syntax}</code>{/if}{#if row.note}<small>{row.note}</small>{/if}</td></tr>{/each}
+<table use:payloadTooltips><tbody><tr><th>Method</th><th>Invocation</th></tr>
+  {#each invocations as row}<tr><td data-label="Method"><span class="method" class:ws={row.method === 'WebSocket'} class:key={row.method === 'Keybind'} class:scenario={row.method === 'Scenario'}>{row.method}</span></td><td data-label="Invocation">{#if row.method === 'WebSocket' && row.fields !== undefined && row.fields.length > 0}<pre class="websocket-payload"><code>{'{'}{#each row.fields as field, index}{'\n'}{'  '}<span class="payload-line" class:required={field.required} class:optional={!field.required} data-tip={field.summary}><span class="payload-key">"{field.name}"</span>{': '}{field.value}{index < row.fields.length - 1 ? ',' : ''}</span>{/each}{'\n'}{'}'}</code></pre>{:else}<code>{row.syntax}</code>{/if}{#if row.note}<small>{row.note}</small>{/if}</td></tr>{/each}
 </tbody></table>
+{#if invocations.some((row) => row.fields !== undefined && row.fields.length > 0)}
+  <p class="payload-legend">Payload fields: <span class="required">required</span> · <span class="optional">optional</span> — hover a line for details.</p>
+{/if}
 <p class="note">CLI output shows useful summary fields by default. Add <code>--verbose</code> for the full response and diagnostic details. WebSocket results retain their full structured data.</p>
 <h2 id="arguments">Arguments</h2>
-{#if doc.forms.some((form) => form.syntax.includes('<')) || doc.slug.endsWith('-directional')}
-  <table><tbody><tr><th>Name</th><th>Usage</th></tr>
-    {#each [...new Set(doc.forms.flatMap((form) => [...form.syntax.matchAll(/<([^>]+)>/g)].map((match) => match[1]!)).concat(doc.slug.endsWith('-directional') ? ['direction'] : []))] as slot}
-      <tr><td data-label="Name"><code>{slot}</code></td><td data-label="Usage">{slot === 'workspace' ? 'A workspace name. Quote names containing spaces.' : slot === 'window' ? 'A current window ID from wm window list.' : slot === 'display' ? 'A connected display ID from wm display list.' : slot === 'direction' ? 'left, right, up, down' : 'A value in display-coordinate units.'}</td></tr>
-    {/each}
+{#if argumentsList.length > 0}
+  <table><tbody><tr><th>Text (CLI · scenario · keybind)</th><th>WebSocket</th><th>Status</th><th>Description</th></tr>
+    {#each argumentsList as argument}<tr><td data-label="Text">{#if argument.text !== null}<code>{argument.text}</code>{:else}<span class="argument-none">—</span>{/if}</td><td data-label="WebSocket"><code>{argument.wire}</code></td><td data-label="Status"><span class="option-chip" class:required={argument.required} class:optional={!argument.required}>{argument.required ? 'required' : 'optional'}</span></td><td data-label="Description">{argument.description}</td></tr>{/each}
   </tbody></table>
 {:else}<p>This command has no arguments.</p>{/if}
 {#if doc.errors.length}

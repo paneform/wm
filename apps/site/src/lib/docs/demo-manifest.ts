@@ -111,11 +111,29 @@ export const demoManifest = {
     "Resize the focused floating window without moving it.",
   ),
   setWindowFrame: { kind: "unavailable", reason: "Internal API only; not a public command." },
-  floatWindow: one(
-    "float-window.json",
-    "Leave tiling",
-    "The focused window leaves tiling but stays in its workspace.",
-  ),
+  floatWindow: {
+    kind: "desktop",
+    situations: [
+      {
+        file: "float-toggle-two-floating.json",
+        slug: "two-floating",
+        title: "Two floating windows",
+        intro: "Both windows float; the focused one is toggled.",
+      },
+      {
+        file: "float-toggle-floating-over-tiled.json",
+        slug: "floating-over-tiled",
+        title: "Floating over tiled",
+        intro: "The focused window floats over one tiled window.",
+      },
+      {
+        file: "float-toggle-two-tiled.json",
+        slug: "two-tiled",
+        title: "Two tiled windows",
+        intro: "Both windows are tiled side by side.",
+      },
+    ],
+  },
   tileWindow: one(
     "tile-window.json",
     "Return to tiling",

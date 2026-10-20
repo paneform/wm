@@ -328,6 +328,60 @@
   background: none;
   white-space: pre;
 }
+.docs main .payload-line.required .payload-key {
+  color: var(--rp-iris);
+}
+.docs main .payload-line.optional {
+  color: var(--docs-quiet);
+}
+.docs main .payload-line.optional .payload-key {
+  color: var(--rp-gold);
+}
+.payload-tooltip {
+  position: fixed;
+  z-index: 60;
+  max-width: min(26rem, 80vw);
+  padding: 0.35rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--rp-muted) 40%, var(--rp-base));
+  border-radius: var(--radius-small);
+  background: color-mix(in srgb, var(--rp-overlay) 55%, var(--rp-base));
+  color: var(--rp-text);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  white-space: normal;
+  pointer-events: none;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.25);
+}
+.docs main .payload-legend {
+  margin-top: 0.4rem;
+  color: var(--docs-quiet);
+  font-size: 0.8rem;
+}
+.docs main .payload-legend .required {
+  color: var(--rp-iris);
+}
+.docs main .payload-legend .optional {
+  color: var(--rp-gold);
+}
+.docs main .option-chip {
+  display: inline-block;
+  border: 1px solid var(--docs-line);
+  border-radius: 99px;
+  padding: 0.05rem 0.5rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+}
+.docs main .option-chip.required {
+  border-color: var(--rp-iris);
+  color: var(--rp-iris);
+}
+.docs main .option-chip.optional {
+  border-color: var(--rp-gold);
+  color: var(--rp-gold);
+}
+.docs main .argument-none {
+  color: var(--docs-quiet);
+}
 .docs .method {
   display: inline-block;
   border: 1px solid var(--rp-foam);

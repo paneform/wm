@@ -82,7 +82,11 @@ export const Command = Schema.Union(
     windowId: Schema.optional(Schema.String),
     size: SizeStruct,
   }),
-  Schema.Struct({ type: Schema.Literal("floatWindow"), windowId: Schema.optional(Schema.String) }),
+  Schema.Struct({
+    type: Schema.Literal("floatWindow"),
+    windowId: Schema.optional(Schema.String),
+    toggle: Schema.optional(Schema.Boolean),
+  }),
   Schema.Struct({ type: Schema.Literal("tileWindow"), windowId: Schema.optional(Schema.String) }),
   Schema.Struct({ type: Schema.Literal("manageWindow"), windowId: Schema.optional(Schema.String) }),
   Schema.Struct({
@@ -131,9 +135,14 @@ export type Command = typeof Command.Type;
 /** Idempotent intents safe to coalesce while pending share a receipt.
  * State-relative commands (togglePause, *Focused*, *Direction) are NEVER
  * coalescable: each press re-resolves the current focus/state, so collapsing
- * two pending presses would drop a toggle or a cycle step. */
+ * two pending presses would drop a toggle or a cycle step. floatWindow with
+ * `toggle` is state-relative the same way; keep it out of this switch. */
 export function coalesceKeyFor(command: Command): string | undefined {
   switch (command.type) {
+    case "floatWindow":
+      // Plain float is idempotent, but `toggle: true` shares the type and is
+      // state-relative — coalescing two pending toggles would drop a press.
+      return undefined;
     case "focusWindow":
       return command.windowId === undefined ? undefined : `focus:${command.windowId}`;
     case "focusWorkspace":

@@ -15,7 +15,7 @@ keybindings and scenario steps share one portable TypeScript parser in
 | Move directionally             | `wm window move <left\|right\|up\|down>`                        |
 | Set position                   | `wm window move position <x> <y> [--window <id>]`               |
 | Set size                       | `wm window resize <width> <height> [--window <id>]`             |
-| Float/tile                     | `wm window <float\|tile> [--window <id>]`                       |
+| Float/tile                     | `wm window <float\|tile> [--toggle] [--window <id>]`             |
 | Manage/unmanage                | `wm window <manage\|unmanage> [--window <id>]`                  |
 | Assign workspace               | `wm window assign <workspace> [--window <id>] [--no-follow]`    |
 | List workspaces                | `wm workspace list`                                             |
@@ -36,6 +36,8 @@ keybindings and scenario steps share one portable TypeScript parser in
 | Start daemon                   | `wm serve [--port <port>] [--observe-only] [--sidecar <path>]`  |
 
 Omitted targets mean the focused window or workspace, resolved at execution.
+`wm window float --toggle` floats a tiled window or tiles a floating one;
+the state is read at execution, like other toggle commands.
 Assignment follows and focuses the assigned window by default. `--no-follow`
 keeps the source workspace visible; when assigning its focused window, focus
 moves to a remaining source window if one exists. Target selection never changes
@@ -68,6 +70,28 @@ For example, `wm window assign 2 --window w17 --no-follow` becomes:
 WebSocket clients submit this structured command directly in a request envelope.
 The wire schema validates it; the engine applies it. Omitting `windowId` uses
 the focused window, and omitting `follow` means `true`, just as in text commands.
+
+Valued options become payload fields: `--window w12` supplies `"windowId"` and
+`--workspace 2` supplies `"workspace"`. Boolean flags become payload fields too:
+`--no-follow` sets `"follow": false`, and `--toggle` sets `"toggle": true`.
+`wm window float --toggle --window w12` becomes:
+
+```json
+{
+  "type": "floatWindow",
+  "windowId": "w12",
+  "toggle": true
+}
+```
+
+The engine resolves `"toggle": true` against committed state at execution —
+it tiles a floating window and floats a tiled one — and, like other toggle
+commands, a pending toggle is never coalesced with another. Without `"toggle"`,
+the same words parse to a plain `"floatWindow"`. Boolean flags take no value,
+so `--toggle=true` is an option error. Transport flags (`--verbose`, `--port`,
+`--url`, `--sidecar`) configure the CLI itself and never appear in command
+payloads.
+
 Host and service commands use the same parser but dispatch outside the engine.
 Scenarios support simulated service start/stop/restart, not native host actions.
 

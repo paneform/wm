@@ -10,7 +10,18 @@ A workspace groups windows. The focused workspace is the one you are viewing. Us
 
 ## Tiling and floating
 
-In BSP mode, windows share the available area. Floating windows remain in their workspace but are excluded from automatic tiling. Use the [command reference](/wm/docs/commands/) to see the exact forms.
+In BSP mode, tiled windows share the available area. A floating window still
+belongs to a workspace — it keeps its assigned workspace and appears in that
+workspace's window list — but it does not participate in that workspace's
+tiling layout. The manager does not reposition or resize it: it keeps the frame
+it had, and the remaining tiled windows are laid out as if it were not there.
+Floating windows can overlap tiled windows; the focused window is frontmost.
+
+`wm window float --toggle` switches the focused window (or `--window <id>`)
+between the two states. A floating window that is toggled joins the tiling and
+its peers resize to make room; a tiled window that is toggled keeps its tile's
+frame and floats above the re-tiled workspace. See the
+[command reference](/wm/docs/commands/) for the exact forms.
 
 ## Pausing
 

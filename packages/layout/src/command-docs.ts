@@ -5,7 +5,16 @@ import {
   serviceCommandPaths,
   type CommandPath,
 } from "./command-syntax.js";
-import type { Command, CommandErrorCode } from "./commands.js";
+import type { CommandErrorCode } from "./commands.js";
+import { Command } from "./commands.js";
+import {
+  isLiteral,
+  isRefinement,
+  isTypeLiteral,
+  type AST,
+  type TypeLiteral,
+} from "effect/SchemaAST";
+import { isString } from "effect/Predicate";
 
 export interface DocumentedError {
   code: CommandErrorCode;
@@ -25,6 +34,100 @@ export interface DocumentedCommand {
     example: string | null;
   }[];
   errors: DocumentedError[];
+}
+
+/** CLI-phrased option notes; a few flags read differently per command. */
+const optionNotes = new Map<string, string>([
+  ["window", "the window the command should target. If omitted, the focused window is used"],
+  ["workspace", "the workspace the command should target. If omitted, the focused workspace is used"],
+  ["no-follow", "keeps the current workspace in view instead of following the assigned window"],
+  ["pid", "inspects a raw application window by process ID instead of a window ID"],
+]);
+const optionNotesBySlug = new Map<string, Map<string, string>>([
+  [
+    "windows/float",
+    new Map([["toggle", "toggles the targeted window between floating and tiling behavior"]]),
+  ],
+  ["system/pause", new Map([["toggle", "toggles the paused state instead of pausing"]])],
+  ["windows/focus", new Map([["window", "the window the command should target"]])],
+]);
+
+/** CLI/scenario/keybind phrasing of an option flag on a command page. */
+export const optionSummary = (slug: string, flag: string): string => {
+  const note = optionNotesBySlug.get(slug)?.get(flag) ?? optionNotes.get(flag) ?? "";
+  return note === "" ? "" : `${note}.`;
+};
+
+export interface DocumentedField {
+  readonly name: string;
+  readonly required: boolean;
+  /** Tooltip text: Required/Optional plus the field's meaning. */
+  readonly summary: string;
+}
+
+const fieldNotes = new Map<string, string>([
+  ["type", "selects the command to execute"],
+  ["windowId", "omitted, the focused window is resolved at execution"],
+  ["toggle", "resolved against committed state at execution; toggles float and tile"],
+  ["follow", "defaults to true: focus follows the assigned window"],
+  ["pid", "inspect by process ID instead; use either pid or windowId"],
+  ["id", "the transaction ID from a command response"],
+  ["name", "the workspace to reveal; a new name is created on first use"],
+  ["direction", "one of left, right, up or down"],
+  ["point", "global x/y coordinates"],
+  ["size", "width and height"],
+  ["displayId", "a connected display ID from wm display list"],
+  ["mode", "bsp or floating"],
+  ["topics", "defaults to every topic"],
+]);
+
+/** A few fields mean different things per command; these override fieldNotes. */
+const notesByType = new Map<string, Map<string, string>>([
+  ["moveWindowToWorkspace", new Map([["workspace", "the destination workspace"]])],
+  ["moveWorkspaceToDisplay", new Map([["workspace", "omitted, the focused workspace moves"]])],
+  ["setWorkspaceMode", new Map([["workspace", "omitted, the focused workspace changes mode"]])],
+  ["retile", new Map([["workspace", "omitted, the focused workspace is retiled"]])],
+  ["reloadConfig", new Map([["mode", "delta or full; omitted, delta"]])],
+]);
+
+let fieldsCache: ReadonlyMap<string, readonly DocumentedField[]> | null = null;
+
+function typeLiteralOf(ast: AST): TypeLiteral | null {
+  if (isRefinement(ast)) return typeLiteralOf(ast.from);
+  return isTypeLiteral(ast) ? ast : null;
+}
+
+const literalNameOf = (ast: AST): string | null =>
+  isLiteral(ast) && isString(ast.literal) ? ast.literal : null;
+
+/** Payload fields with required/optional derived from the wire schema itself. */
+export function documentedFields(type: string): readonly DocumentedField[] {
+  if (fieldsCache === null) {
+    const map = new Map<string, readonly DocumentedField[]>();
+    const union = Command.ast;
+    for (const member of union._tag === "Union" ? union.types : [union]) {
+      const literal = typeLiteralOf(member);
+      if (literal === null) continue;
+      const namePs = literal.propertySignatures.find((ps) => ps.name === "type");
+      const name = namePs === undefined ? null : literalNameOf(namePs.type);
+      if (name === null) continue;
+      const typeNotes = notesByType.get(name) ?? new Map<string, string>();
+      map.set(
+        name,
+        literal.propertySignatures.map((ps) => {
+          const fieldName = String(ps.name);
+          const note = typeNotes.get(fieldName) ?? fieldNotes.get(fieldName) ?? "";
+          return {
+            name: fieldName,
+            required: !ps.isOptional,
+            summary: `${ps.isOptional ? "Optional" : "Required"}${note === "" ? "." : ` — ${note}.`}`,
+          };
+        }),
+      );
+    }
+    fieldsCache = map;
+  }
+  return fieldsCache.get(type) ?? [];
 }
 
 /** Documentation joins the CLI grammar to the command builder. Syntax and descriptions

@@ -162,6 +162,41 @@ describe("togglePause", () => {
   });
 });
 
+describe("floatWindow toggle", () => {
+  test("omitted target resolves to the focused window; tiled ⇄ floating", async () => {
+    const h = await bootstrap();
+    const first = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    const second = h.fake.addWindow(makeWindow({ x: 400, y: 400 }));
+    await seedWorkspace(h, [first, second]);
+    await h.run({ type: "floatWindow", windowId: second });
+    expect(workspaceOf(await h.snapshot(), "1")?.floating).toEqual([second]);
+
+    // second is focused and floating ⇒ the toggle tiles it.
+    await h.run({ type: "focusWindow", windowId: second });
+    await h.run({ type: "floatWindow", toggle: true });
+    let snap = await h.snapshot();
+    expect(workspaceOf(snap, "1")?.floating).toEqual([]);
+    expect(sorted(workspaceOf(snap, "1")?.members ?? [])).toEqual(sorted([first, second]));
+
+    // Explicit target: the tiled window floats again.
+    await h.run({ type: "floatWindow", toggle: true, windowId: second });
+    snap = await h.snapshot();
+    expect(workspaceOf(snap, "1")?.floating).toEqual([second]);
+    expect(workspaceOf(snap, "1")?.members).toEqual([first]);
+  });
+
+  test("an unmanaged target is not a structured failure (same as float/tile)", async () => {
+    const h = await bootstrap();
+    const id = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    await seedWorkspace(h, [id]);
+    await h.run({ type: "unmanageWindow", windowId: id });
+    await h.run({ type: "floatWindow", toggle: true, windowId: id });
+    const snap = await h.snapshot();
+    expect(workspaceOf(snap, "1")?.members ?? []).toEqual([]);
+    expect(workspaceOf(snap, "1")?.floating ?? []).toEqual([]);
+  });
+});
+
 describe("window assignment", () => {
   test("no-follow assignment to the current workspace preserves focus", async () => {
     const h = await bootstrap();

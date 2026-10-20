@@ -119,6 +119,7 @@ describe("daemon over the wire (node-host integration)", () => {
 
     const commands = [
       { type: "togglePause" },
+      { type: "floatWindow", toggle: true },
       { type: "moveWindowToWorkspace", workspace: "2" },
       { type: "moveFocusedWorkspaceToNextDisplay" },
       { type: "focusDirection", direction: "left" },

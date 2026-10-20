@@ -11,7 +11,9 @@ import focusTwoNeighbors from "./demos/focus-two-neighbors.json";
 import focusExclusiveEdge from "./demos/focus-exclusive-edge.json";
 import move from "./demos/move-window.json";
 import resize from "./demos/resize-window.json";
-import float from "./demos/float-window.json";
+import toggleTwoFloating from "./demos/float-toggle-two-floating.json";
+import toggleFloatingOverTiled from "./demos/float-toggle-floating-over-tiled.json";
+import toggleTwoTiled from "./demos/float-toggle-two-tiled.json";
 import tile from "./demos/tile-window.json";
 import manage from "./demos/manage-window.json";
 import unmanage from "./demos/unmanage-window.json";
@@ -50,7 +52,9 @@ export const scenarioFiles = {
   "focus-exclusive-edge.json": focusExclusiveEdge,
   "move-window.json": move,
   "resize-window.json": resize,
-  "float-window.json": float,
+  "float-toggle-two-floating.json": toggleTwoFloating,
+  "float-toggle-floating-over-tiled.json": toggleFloatingOverTiled,
+  "float-toggle-two-tiled.json": toggleTwoTiled,
   "tile-window.json": tile,
   "manage-window.json": manage,
   "unmanage-window.json": unmanage,

@@ -91,9 +91,8 @@ const spec = (
 const windowOptions = { window: windowSlot };
 const workspaceOptions = { workspace: workspaceSlot };
 const directions = ["left", "right", "up", "down"] as const;
-const windowActions = ["float", "tile", "manage", "unmanage", "observe"] as const;
+const windowActions = ["tile", "manage", "unmanage", "observe"] as const;
 const windowTypes = {
-  float: "floatWindow",
   tile: "tileWindow",
   manage: "manageWindow",
   unmanage: "unmanageWindow",
@@ -132,6 +131,16 @@ const engineSpecs: readonly CommandSpec[] = [
       `${mode === "delta" ? "Merge" : "Replace"} configuration settings.`,
       () => ({ type: "reloadConfig", mode }),
     ),
+  ),
+  spec(
+    "window float",
+    "Float the selected or focused window; --toggle switches float and tile.",
+    (_, options) =>
+      options["toggle"] === true
+        ? { type: "floatWindow", toggle: true, ...target(options) }
+        : { type: "floatWindow", ...target(options) },
+    [],
+    { ...windowOptions, toggle: true },
   ),
   ...windowActions.map((action) =>
     spec(

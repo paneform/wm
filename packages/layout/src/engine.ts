@@ -4532,10 +4532,22 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             yield* Effect.ignore(gatedReconcile());
             break;
           }
-          case "floatWindow":
-            doFloat(command.windowId);
+          case "floatWindow": {
+            // `toggle` is state-relative (like togglePause): the floating/tiled
+            // decision reads committed membership inside the serialized
+            // transaction step, never before the queue.
+            if (command.toggle === true) {
+              const isFloating = [...world.workspaces.values()].some((ws) =>
+                ws.floating.has(command.windowId),
+              );
+              if (isFloating) doTile(command.windowId);
+              else doFloat(command.windowId);
+            } else {
+              doFloat(command.windowId);
+            }
             yield* Effect.ignore(gatedReconcile());
             break;
+          }
           case "tileWindow":
             doTile(command.windowId);
             yield* Effect.ignore(gatedReconcile());

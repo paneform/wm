@@ -1,0 +1,64 @@
+{
+  "config": { "defaults": { "margins": { "top": 28 } } },
+  "presentation": {
+    "device": "display",
+    "showDock": false,
+    "showKeyboard": false,
+    "interactive": false
+  },
+  "state": {
+    "topology": [
+      {
+        "id": "display:main",
+        "frame": { "x": 0, "y": 0, "width": 1440, "height": 900 },
+        "workspace": "1"
+      }
+    ],
+    "windows": [
+      {
+        "id": "tiled-window",
+        "title": "Tiled window",
+        "workspace": "1",
+        "floating": false,
+        "frame": { "x": 0, "y": 28, "width": 1440, "height": 872 }
+      },
+      {
+        "id": "focused-window",
+        "title": "Focused window",
+        "workspace": "1",
+        "floating": true,
+        "frame": { "x": 700, "y": 240, "width": 600, "height": 400 }
+      }
+    ],
+    "focusedWindow": "focused-window",
+    "focusedWorkspace": "1"
+  },
+  "steps": [
+    {
+      "command": "state",
+      "expect": {
+        "windows": {
+          "tiled-window": { "floating": false },
+          "focused-window": { "floating": true }
+        }
+      }
+    },
+    {
+      "playback": "start",
+      "command": "window float --toggle --window focused-window",
+      "caption": "Toggling tiles the focused window beside the tiled peer.",
+      "expect": {
+        "windows": {
+          "tiled-window": {
+            "floating": false,
+            "frame": { "x": 0, "y": 28, "width": 716, "height": 872 }
+          },
+          "focused-window": {
+            "floating": false,
+            "frame": { "x": 724, "y": 28, "width": 716, "height": 872 }
+          }
+        }
+      }
+    }
+  ]
+}

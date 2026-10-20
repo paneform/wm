@@ -372,6 +372,20 @@ describe("skhd hotkey syntax parity (bean wm-pmys)", () => {
     expect(buildCommand("workspace", ["pause"], {})).toBeNull(); // requires --toggle
   });
 
+  test("`wm window float --toggle` toggles via the floatWindow payload", () => {
+    expect(parseArgs(["window", "float"]).command).toEqual({ type: "floatWindow" });
+    expect(parseArgs(["window", "float", "--toggle"]).command).toEqual({
+      type: "floatWindow",
+      toggle: true,
+    });
+    expect(parseArgs(["window", "float", "--toggle", "--window", "w1"]).command).toEqual({
+      type: "floatWindow",
+      toggle: true,
+      windowId: "w1",
+    });
+    expect(parseArgs(["window", "float", "--toggle=true"]).command).toBeNull();
+  });
+
   test("`wm window assign NAME` assigns the FOCUSED window", () => {
     for (const name of ["1", "9", "A", "W"]) {
       expect(parseArgs(["window", "assign", name]).command).toEqual({
