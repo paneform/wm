@@ -4,6 +4,7 @@ import {
   PlatformEvent,
   TopologyObservation,
   WindowObservation,
+  WindowInspection,
   WriteObservation,
 } from "@paneform/layout";
 
@@ -37,6 +38,8 @@ export type SidecarRequest =
   | { readonly op: "getTopology"; readonly reqId: string }
   | { readonly op: "getWindows"; readonly reqId: string }
   | { readonly op: "getWindow"; readonly reqId: string; readonly id: string }
+  | { readonly op: "inspectWindow"; readonly reqId: string; readonly id: string }
+  | { readonly op: "inspectApplication"; readonly reqId: string; readonly pid: number }
   | SetWindowFrameRequest
   | { readonly op: "executeBatch"; readonly reqId: string; readonly operations: readonly unknown[] }
   | {
@@ -86,6 +89,8 @@ export type ResultSchemaFor = {
   getTopology: typeof TopologyResult;
   getWindows: typeof WindowsResult;
   getWindow: typeof WindowResult;
+  inspectWindow: typeof WindowInspection;
+  inspectApplication: typeof WindowInspection;
   setWindowFrame: typeof WriteObservation;
   executeBatch: typeof BatchResult;
   focusWindow: typeof FocusResult;

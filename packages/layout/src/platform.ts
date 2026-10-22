@@ -1,4 +1,5 @@
 import { Effect, Stream } from "effect";
+import type { WindowInspection } from "./window-inspection.js";
 import type { Config, ConfigInvalidError } from "./config.js";
 import type {
   DisplayId,
@@ -40,6 +41,10 @@ export interface PlatformAdapter {
    * Fail with unavailable when the entire observation cannot be made. */
   readonly getWindowInventory?: () => Effect.Effect<WindowInventory, PlatformError>;
   getWindow(id: WindowId): Effect.Effect<WindowObservation | null, PlatformError>;
+  /** Fresh read-only facts and query errors in the granted native host context. */
+  readonly inspectWindow?: (id: WindowId) => Effect.Effect<WindowInspection, PlatformError>;
+  /** Inspect an application's raw windows even when none are in managed inventory. */
+  readonly inspectApplication?: (pid: number) => Effect.Effect<WindowInspection, PlatformError>;
 
   /**
    * Write position+size as separate component writes in an adapter-chosen order

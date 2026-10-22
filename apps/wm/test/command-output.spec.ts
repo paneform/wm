@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { makeWindowDiagnostics } from "../../../packages/layout/test/helpers/window-diagnostics.ts";
 import type {
   StateSnapshot,
   WindowListing,
@@ -48,6 +49,20 @@ const response = (data: unknown): WireResponse => ({
 });
 
 describe("compact command output", () => {
+  test("observe includes query errors and reader privileges even without verbose mode", () => {
+    const diagnostics = makeWindowDiagnostics(window.id, window.pid);
+    expect(
+      commandOutput(response({ type: "window", window, cachedWindow: window, diagnostics })),
+    ).toMatchObject({
+      window,
+      cachedWindow: window,
+      diagnostics: {
+        observer: { accessibility: true },
+        target: { registered: false },
+        queries: [{ errorCode: 0 }, { errorCode: -25204, value: null }],
+      },
+    });
+  });
   test("window lists contain identity, assignment and one current workspace", () => {
     expect(
       commandOutput(response({ type: "windows", currentWorkspace: "1", windows: [window] })),
@@ -109,10 +124,10 @@ describe("compact command output", () => {
       ],
     });
   });
-  test("observe and mutation outputs omit diagnostics and transaction receipts", () => {
+  test("observe preserves detailed facts while mutations omit transaction receipts", () => {
     expect(commandOutput(response({ type: "window", window, currentWorkspace: "1" }))).toEqual({
       currentWorkspace: "1",
-      window: { id: window.id, title: "Project", appName: "Editor", assignedWorkspace: "2" },
+      window,
     });
     expect(
       commandOutput(response({ type: "window", window: null, currentWorkspace: "1" })),

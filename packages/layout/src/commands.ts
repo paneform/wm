@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect";
+import { WindowDiagnostics, type WindowInspection } from "./window-inspection.js";
 import type { Clock } from "./platform.js";
 import { Direction } from "./direction.js";
 import {
@@ -17,8 +18,8 @@ import { classify, type WorkspaceMode, type World } from "./world.js";
 // Command execution layer — docs/rewrite/engine-guide.md §Command execution
 // layer + docs/rewrite/domain-schema.md §Wire protocol messages.
 // CLI, WebSocket server and renderer ALL call this same layer.
-// Queries return last committed state plus pending metadata — queries NEVER
-// wait on platform I/O.
+// State/list queries return committed state. Explicit window observation may
+// perform read-only platform I/O for privileged live diagnostics.
 
 // ---------------------------------------------------------------------------
 // Error codes (closed union per domain-schema.md)
@@ -60,7 +61,15 @@ const SizeStruct = Schema.Struct({ width: Schema.Number, height: Schema.Number }
 export const Command = Schema.Union(
   Schema.Struct({ type: Schema.Literal("getState") }),
   Schema.Struct({ type: Schema.Literal("getWindows") }),
-  Schema.Struct({ type: Schema.Literal("getWindow"), windowId: Schema.optional(Schema.String) }),
+  Schema.Struct({
+    type: Schema.Literal("getWindow"),
+    windowId: Schema.optional(Schema.String),
+    pid: Schema.optional(Schema.Int.pipe(Schema.between(1, 2147483647))),
+  }).pipe(
+    Schema.filter((command) => command.pid === undefined || command.windowId === undefined, {
+      message: () => "observe accepts either a window ID or a PID, not both",
+    }),
+  ),
   Schema.Struct({ type: Schema.Literal("getDisplays") }),
   Schema.Struct({ type: Schema.Literal("getWorkspaces") }),
   Schema.Struct({ type: Schema.Literal("getTransaction"), id: Schema.String }),
@@ -157,9 +166,11 @@ export function coalesceKeyFor(command: Command): string | undefined {
   }
 }
 
-/** Only commands that can leave paused mode may execute while paused. */
+/** Explicit read-only observation remains available during a paused investigation. */
 export function isAllowedWhenPaused(command: Command): boolean {
-  return command.type === "resume" || command.type === "togglePause";
+  return (
+    command.type === "getWindow" || command.type === "resume" || command.type === "togglePause"
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -298,6 +309,8 @@ export const CommandResult = Schema.Union(
   Schema.Struct({
     type: Schema.Literal("window"),
     window: Schema.NullOr(WindowListing),
+    diagnostics: Schema.optional(WindowDiagnostics),
+    cachedWindow: Schema.optional(Schema.NullOr(WindowListing)),
     currentWorkspace: Schema.optional(Schema.NullOr(Schema.String)),
   }),
   Schema.Struct({ type: Schema.Literal("displays"), displays: Schema.Array(DisplayObservation) }),
@@ -515,8 +528,12 @@ export function projectSnapshot(
 export interface CommandBusDeps {
   clock: Clock;
   queue: TransactionQueue;
-  /** Committed world accessor — queries read ONLY from this. */
+  /** Committed world accessor for state, membership and cached observation. */
   getWorld(): World;
+  readonly observeWindow?: (
+    id: string | undefined,
+    pid?: number,
+  ) => Effect.Effect<WindowInspection, CommandError>;
   health(): HealthState;
   /** Engine-provided mutation application (desired state + rule pass). */
   applyMutation(command: Command): Effect.Effect<CommandResult, CommandError>;
@@ -557,15 +574,31 @@ export function createCommandBus(deps: CommandBusDeps): CommandBus {
         }
         case "getWindow": {
           const id =
-            command.windowId ??
-            world.focusIntent?.id ??
-            [...world.windows.values()].find((window) => window.focused)?.id;
-          const window = id === undefined ? undefined : world.windows.get(id);
-          return {
+            command.pid === undefined
+              ? (command.windowId ??
+                world.focusIntent?.id ??
+                [...world.windows.values()].find((window) => window.focused)?.id)
+              : undefined;
+          const cached = id === undefined ? undefined : world.windows.get(id);
+          const inspection =
+            (id === undefined && command.pid === undefined) || deps.observeWindow === undefined
+              ? undefined
+              : yield* deps.observeWindow(id, command.pid);
+          const latest = deps.getWorld();
+          const memberships = windowMemberships(latest);
+          const window = inspection === undefined ? cached : inspection.window;
+          const result: Extract<CommandResult, { type: "window" }> = {
             type: "window",
-            currentWorkspace: world.focusedWorkspace,
-            window: window === undefined ? null : windowListing(windowMemberships(world), window),
+            currentWorkspace: latest.focusedWorkspace,
+            window: window == null ? null : windowListing(memberships, window),
           };
+          if (inspection === undefined) return result;
+          const observed = {
+            ...result,
+            cachedWindow: cached === undefined ? null : windowListing(memberships, cached),
+          };
+          if (inspection.diagnostics === undefined) return observed;
+          return { ...observed, diagnostics: inspection.diagnostics };
         }
         case "getDisplays":
           return { type: "displays", displays: world.topology.displays.map((d) => ({ ...d })) };

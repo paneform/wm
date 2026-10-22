@@ -14,6 +14,7 @@ import type {
 import {
   PlatformError as PlatformErrorClass,
   WriteObservation as WriteObservationSchema,
+  WindowInspection,
 } from "@paneform/layout";
 import type { PermissionStatus, SettingsTarget } from "./protocol.ts";
 import { existsSync } from "node:fs";
@@ -414,6 +415,9 @@ export const createMacOsSidecarAdapter = (
         })),
       getWindow: (id: WindowId) =>
         Effect.map(guarded(request("getWindow", WindowResult, { id })), ({ window }) => window),
+      inspectWindow: (id: WindowId) => guarded(request("inspectWindow", WindowInspection, { id })),
+      inspectApplication: (pid: number) =>
+        guarded(request("inspectApplication", WindowInspection, { pid })),
       setWindowFrame: (id: WindowId, frame: Frame, expectedIdentity?: ExpectedWindowIdentity) =>
         guarded(
           request("setWindowFrame", WriteObservationSchema, {

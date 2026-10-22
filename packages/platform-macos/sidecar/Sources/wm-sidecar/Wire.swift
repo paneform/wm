@@ -138,6 +138,7 @@ enum ResultPayload: Encodable {
   case windows([WindowValue])
   case inventory(WindowInventoryValue)
   case window(WindowValue?)
+  case inspection(WindowInspectionValue)
   case write(WriteValue)
   case batch(BatchResultValue)
   case focus(FocusValue)
@@ -161,6 +162,8 @@ enum ResultPayload: Encodable {
       try container.encode(inventory)
     case .window(let window):
       try container.encode(WindowPayload(window: window))
+    case .inspection(let inspection):
+      try container.encode(inspection)
     case .write(let write):
       try container.encode(write)
     case .batch(let batch):
@@ -334,6 +337,7 @@ struct RequestMessage: Decodable, Sendable {
   var op: String
   var reqId: String?
   var id: String?
+  var pid: Int32?
   var frame: FrameValue?
   /// "frame" | "position" | "size"
   var mode: String?

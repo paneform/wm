@@ -74,6 +74,9 @@ final class InventoryService {
     func liveObservation(for meta: WindowMeta) -> WindowValue? {
         adapter.observation(for: meta)
     }
+    func inspectWindow(_ id: String) -> WindowInspectionValue {
+        adapter.inspectWindow(id: id, meta: metadata(for: id))
+    }
 
     func currentObservedFrame(for meta: WindowMeta) -> Rect? {
         try? adapter.readFrame(meta: meta)

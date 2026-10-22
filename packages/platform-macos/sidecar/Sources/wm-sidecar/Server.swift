@@ -210,6 +210,25 @@ final class SidecarServer {
           reqId: requestId(request),
           result: .window(inventory.liveObservation(for: meta))))
 
+    case "inspectWindow":
+      guard let id = request.id else {
+        return sendError(request, code: "invalid_request", detail: "inspectWindow requires id")
+      }
+      send(
+        ResultMessage(reqId: requestId(request), result: .inspection(inventory.inspectWindow(id))))
+
+    case "inspectApplication":
+      guard let pid = request.pid, pid > 0 else {
+        return sendError(
+          request, code: "invalid_request", detail: "inspectApplication requires a positive pid")
+      }
+      let diagnostics = WindowInspector.collect(
+        windowId: nil, meta: nil, element: nil, resolutionError: nil, pid: pid)
+      send(
+        ResultMessage(
+          reqId: requestId(request),
+          result: .inspection(.init(window: nil, diagnostics: diagnostics))))
+
     case "setWindowFrame":
       await dispatchWrite(request)
 

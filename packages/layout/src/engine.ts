@@ -7,6 +7,7 @@ import {
   sameWindowInstance,
   windowIdentityFingerprint,
 } from "./schema.js";
+import { WindowInspection } from "./window-inspection.js";
 import type {
   Constraints,
   DisplayId,
@@ -4711,10 +4712,59 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         submittedAt: p.submittedAt,
       }));
 
+    const inspectionRead = (id: WindowId | undefined, pid?: number) => {
+      if (pid !== undefined) return adapter.inspectApplication?.(pid);
+      if (id === undefined) return undefined;
+      return (
+        adapter.inspectWindow?.(id) ?? Effect.map(adapter.getWindow(id), (window) => ({ window }))
+      );
+    };
+
+    const decodeInspection = (raw: WindowInspection, id: WindowId | undefined, pid?: number) => {
+      const parsed = Schema.decodeUnknownEither(WindowInspection)(raw);
+      if (
+        Either.isLeft(parsed) ||
+        (parsed.right.window !== null && parsed.right.window.id !== id) ||
+        (parsed.right.diagnostics !== undefined &&
+          (parsed.right.diagnostics.target.windowId !== (id ?? null) ||
+            (pid !== undefined && parsed.right.diagnostics.target.pid !== pid)))
+      ) {
+        return Effect.fail(
+          new CommandError({ code: "inventory_stale", message: "invalid live window inspection" }),
+        );
+      }
+      return Effect.succeed(parsed.right);
+    };
+
+    const observeWindow = (
+      id: WindowId | undefined,
+      pid?: number,
+    ): Effect.Effect<WindowInspection, CommandError> =>
+      Effect.gen(function* () {
+        const read = inspectionRead(id, pid);
+        if (read === undefined)
+          return yield* Effect.fail(
+            new CommandError({
+              code: "invalid_request",
+              message: "application inspection is not supported by this platform",
+            }),
+          );
+        const raw = yield* Effect.mapError(
+          read,
+          (error) =>
+            new CommandError({
+              code: mapStepCode(error.code),
+              message: error.detail ?? "window observation failed",
+            }),
+        );
+        return yield* decodeInspection(raw, id, pid);
+      });
+
     const commandBus: CommandBus = createCommandBus({
       clock,
       queue,
       getWorld: () => world,
+      observeWindow,
       health: () => health.state,
       applyMutation,
       probeWindowLimits,

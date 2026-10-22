@@ -734,16 +734,21 @@ describe("engine pipeline (fake platform)", () => {
     expect(peerWrites.every((write) => write.requested.width >= 900)).toBe(true);
   });
 
-  test("gets one committed window observation without platform I/O", async () => {
+  test("gets one live window observation with its committed comparison", async () => {
     const h = await bootstrap();
     const windowId = h.fake.addWindow(makeWindow({ title: "Observed" }));
     await Effect.runPromise(h.engine.reconcile());
 
     const found = await h.run({ type: "getWindow", windowId });
-    expect(found).toMatchObject({ type: "window", window: { id: windowId, title: "Observed" } });
+    expect(found).toMatchObject({
+      type: "window",
+      window: { id: windowId, title: "Observed" },
+      cachedWindow: { id: windowId, title: "Observed" },
+    });
     expect(await h.run({ type: "getWindow", windowId: "missing" })).toEqual({
       type: "window",
       window: null,
+      cachedWindow: null,
       currentWorkspace: (await h.snapshot()).focusedWorkspace,
     });
   });

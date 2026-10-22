@@ -42,6 +42,7 @@ export interface CommandPath {
 type Options = Readonly<Record<string, string | boolean>>;
 interface CommandSpec extends CommandPath {
   readonly requiredOptions?: readonly string[];
+  readonly exclusiveOptions?: readonly string[];
   readonly options?: Readonly<Record<string, CommandToken | true>>;
   readonly build: (values: readonly string[], options: Options) => ParsedCommand;
 }
@@ -91,12 +92,11 @@ const spec = (
 const windowOptions = { window: windowSlot };
 const workspaceOptions = { workspace: workspaceSlot };
 const directions = ["left", "right", "up", "down"] as const;
-const windowActions = ["tile", "manage", "unmanage", "observe"] as const;
+const windowActions = ["tile", "manage", "unmanage"] as const;
 const windowTypes = {
   tile: "tileWindow",
   manage: "manageWindow",
   unmanage: "unmanageWindow",
-  observe: "getWindow",
 } as const;
 
 /** One specification supplies parsing, help, docs and guided command clients. */
@@ -153,8 +153,21 @@ const engineSpecs: readonly CommandSpec[] = [
   ),
   {
     ...spec(
+      "window observe",
+      "Read live window facts and platform diagnostics; --pid inspects raw application windows on macOS.",
+      (_, options) =>
+        options["pid"] === undefined
+          ? { type: "getWindow", ...target(options) }
+          : { type: "getWindow", pid: Number(options["pid"]) },
+      [],
+      { ...windowOptions, pid: dimension("Process ID") },
+    ),
+    exclusiveOptions: ["window", "pid"],
+  },
+  {
+    ...spec(
       "window focus",
-      "Focus the specified window.",
+      "Focus the specified window and the workspace that contains it.",
       (_, options) => ({ type: "focusWindow", ...target(options) }),
       [],
       windowOptions,
@@ -288,12 +301,18 @@ function pathsFor(entry: CommandSpec): CommandPath[] {
       ],
       [{ tokens: entry.tokens, description: entry.description ?? "" }],
     )
-    .filter((path) =>
-      (entry.requiredOptions ?? []).every((name) =>
-        path.tokens.some((token) => token.kind === "literal" && token.value === `--${name}`),
-      ),
-    );
+    .filter((path) => {
+      const names = path.tokens.flatMap((token) =>
+        token.kind === "literal" && token.value.startsWith("--") ? [token.value.slice(2)] : [],
+      );
+      return (
+        (entry.requiredOptions ?? []).every((name) => names.includes(name)) &&
+        !conflictingOptions(entry, names)
+      );
+    });
 }
+const conflictingOptions = (entry: CommandSpec, names: readonly string[]) =>
+  (entry.exclusiveOptions ?? []).filter((name) => names.includes(name)).length > 1;
 export const commandPaths: readonly CommandPath[] = engineSpecs.flatMap(pathsFor);
 export const serviceCommandPaths: readonly CommandPath[] = serviceSpecs.flatMap(pathsFor);
 export const hostCommandPaths: readonly CommandPath[] = hostSpecs.flatMap(pathsFor);
@@ -416,6 +435,16 @@ function validateValues(
   return success(values);
 }
 function allowedOptions(entry: CommandSpec, options: Options): Result<Options, CommandParseError> {
+  if (conflictingOptions(entry, Object.keys(options)))
+    return failure(
+      "invalid_option",
+      `Use only one of ${(entry.exclusiveOptions ?? []).map((name) => `--${name}`).join(", ")}`,
+    );
+  if (entry.options?.["pid"] !== undefined && options["pid"] !== undefined) {
+    const pid = Number(options["pid"]);
+    if (!Number.isInteger(pid) || pid < 1 || pid > 2147483647)
+      return failure("invalid_value", "--pid requires a positive 32-bit process ID");
+  }
   const missing = entry.requiredOptions?.find((name) => !Object.hasOwn(options, name));
   if (missing) return failure("invalid_option", `--${missing} is required for this command`);
   const allowed = [...Object.keys(entry.options ?? {}), ...transportOptions];

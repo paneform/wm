@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { makeWindowDiagnostics } from "./helpers/window-diagnostics.ts";
 import { Cause, Effect, Exit, Fiber, Stream } from "effect";
 import { createEngine } from "../src/engine.ts";
 import type { Engine } from "../src/engine.ts";
@@ -2140,6 +2141,100 @@ describe("focused-window-first external reveal", () => {
     } finally {
       DEADLINE.deadlineMs = 3;
     }
+  });
+});
+
+describe("read-only live window observation", () => {
+  test("PID observation reads an omitted application while paused without selecting the focused window", async () => {
+    const reads: number[] = [];
+    const diagnostics = makeWindowDiagnostics(null, 65900);
+    const h = await bootstrap(undefined, (inner) => ({
+      ...inner,
+      inspectApplication: (pid) =>
+        Effect.sync(() => {
+          reads.push(pid);
+          return { window: null, diagnostics };
+        }),
+    }));
+    const id = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    await seedWorkspace(h, [id]);
+    await h.run({ type: "pause" });
+    const before = await h.snapshot();
+    const writes = h.fake.writes().length;
+    expect(await h.run({ type: "getWindow", pid: 65900 })).toMatchObject({
+      type: "window",
+      window: null,
+      cachedWindow: null,
+      diagnostics,
+    });
+    expect(reads).toEqual([65900]);
+    expect(await h.snapshot()).toEqual(before);
+    expect(h.fake.writes().length).toBe(writes);
+  });
+
+  test("PID observation rejects a native result for a different process", async () => {
+    const h = await bootstrap(undefined, (inner) => ({
+      ...inner,
+      inspectApplication: () =>
+        Effect.succeed({ window: null, diagnostics: makeWindowDiagnostics(null, 7) }),
+    }));
+    expect((await h.failure({ type: "getWindow", pid: 65900 })).code).toBe("inventory_stale");
+  });
+
+  test("PID observation reports unsupported adapters rather than inspecting another window", async () => {
+    const h = await bootstrap();
+    expect((await h.failure({ type: "getWindow", pid: 65900 })).code).toBe("invalid_request");
+  });
+
+  test("returns privileged diagnostics and live facts without changing cached state, geometry, or focus", async () => {
+    const h = await bootstrap(undefined, (inner) => ({
+      ...inner,
+      inspectWindow: (id) =>
+        Effect.map(inner.getWindow(id), (window) => ({
+          window,
+          diagnostics: makeWindowDiagnostics(id, window?.pid ?? 42),
+        })),
+    }));
+    const id = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    await seedWorkspace(h, [id]);
+    const before = await h.snapshot();
+    const cached = h.fake.frameOf(id)!;
+    await h.run({ type: "pause" });
+    h.fake.nudgeSilent(id, { x: cached.x + 37 });
+    const writesBefore = h.fake.writes().length;
+    const result = await h.run({ type: "getWindow", windowId: id });
+    if (result.type !== "window") throw new Error("expected window inspection");
+    expect(result.window?.frame.x).toBe(cached.x + 37);
+    expect(result.cachedWindow?.frame).toEqual(cached);
+    expect(result.diagnostics?.target.registered).toBe(false);
+    expect(result.diagnostics?.queries[1]).toMatchObject({ errorCode: -25204, value: null });
+    expect(h.fake.writes().length).toBe(writesBefore);
+    const after = await h.snapshot();
+    expect(after.windows.find((window) => window.id === id)?.frame).toEqual(cached);
+    expect(after.focusedWindow).toBe(before.focusedWindow);
+    expect(after.focusedWorkspace).toBe(before.focusedWorkspace);
+  });
+
+  test("a vanished live window remains explicit null instead of reusing its cached observation", async () => {
+    let vanished = false;
+    const h = await bootstrap(undefined, (inner) => ({
+      ...inner,
+      inspectWindow: (id) =>
+        vanished
+          ? Effect.succeed({
+              window: null,
+              diagnostics: { ...makeWindowDiagnostics(id), resolutionError: "not_found" },
+            })
+          : Effect.map(inner.getWindow(id), (window) => ({ window })),
+    }));
+    const id = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    await seedWorkspace(h, [id]);
+    vanished = true;
+    const result = await h.run({ type: "getWindow", windowId: id });
+    if (result.type !== "window") throw new Error("expected window inspection");
+    expect(result.window).toBeNull();
+    expect(result.cachedWindow?.id).toBe(id);
+    expect(result.diagnostics?.resolutionError).toBe("not_found");
   });
 });
 

@@ -47,7 +47,9 @@ export function compactCommandResult(result: CommandResult) {
     case "window":
       return {
         currentWorkspace: result.currentWorkspace ?? null,
-        window: result.window === null ? null : windowRow(result.window),
+        window: result.window,
+        ...(result.cachedWindow === undefined ? {} : { cachedWindow: result.cachedWindow }),
+        ...(result.diagnostics === undefined ? {} : { diagnostics: result.diagnostics }),
       };
     case "workspaces":
       return { workspaces: result.workspaces.map(workspaceRow) };

@@ -1,4 +1,5 @@
 export * from "./schema.js";
+export * from "./window-inspection.js";
 export * from "./platform.js";
 export * from "./world.js";
 

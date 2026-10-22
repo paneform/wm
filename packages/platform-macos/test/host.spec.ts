@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { makeWindowDiagnostics } from "../../layout/test/helpers/window-diagnostics.ts";
 import { Either, Effect, Exit, Fiber, Stream } from "effect";
 import { PassThrough } from "node:stream";
 import { createMacOsSidecarAdapter } from "../src/host.ts";
@@ -169,6 +170,94 @@ describe("MacOsSidecarAdapter permission ops", () => {
     adapter.stop();
   });
 
+  test("PID inspection preserves raw minimized windows outside normalized inventory", async () => {
+    const { spawn, fake } = makeSpawn();
+    const adapter = Effect.runSync(createMacOsSidecarAdapter({ spawn, sidecarPath: "/x" }));
+    fake.emit(READY);
+    const diagnostics = {
+      ...makeWindowDiagnostics(null, 65900),
+      rawWindows: [
+        {
+          index: 0,
+          identity: { pid: 65900, pidErrorCode: 0, matchesTarget: false },
+          queries: [
+            {
+              scope: "window",
+              attribute: "AXMinimized",
+              errorCode: 0,
+              errorName: "success",
+              valueType: "boolean",
+              value: true,
+            },
+            {
+              scope: "window",
+              attribute: "AXMinimized.settable",
+              errorCode: 0,
+              errorName: "success",
+              valueType: "boolean",
+              value: true,
+            },
+            {
+              scope: "window",
+              attribute: "AXPosition",
+              errorCode: -25202,
+              errorName: "invalid_ui_element",
+              valueType: "none",
+              value: null,
+            },
+          ],
+        },
+      ],
+    };
+    fake.overrides.set("inspectApplication", (reqId) => ({
+      reqId,
+      result: { window: null, diagnostics },
+    }));
+    const result = await Effect.runPromise(adapter.inspectApplication!(65900));
+    expect(fake.requests.at(-1)).toMatchObject({ op: "inspectApplication", pid: 65900 });
+    expect(result.diagnostics).toEqual(diagnostics);
+    adapter.stop();
+  });
+
+  test("inspection preserves raw AX failure data through the native request boundary", async () => {
+    const { spawn, fake } = makeSpawn();
+    const adapter = Effect.runSync(createMacOsSidecarAdapter({ spawn, sidecarPath: "/x" }));
+    fake.emit(READY);
+    fake.overrides.set("inspectWindow", (reqId) => ({
+      reqId,
+      result: { window: null, diagnostics: makeWindowDiagnostics() },
+    }));
+    const result = await Effect.runPromise(adapter.inspectWindow!("window:1"));
+    expect(fake.requests.at(-1)).toMatchObject({ op: "inspectWindow", id: "window:1" });
+    expect(result.diagnostics?.queries[1]).toMatchObject({
+      errorCode: -25204,
+      errorName: "cannot_complete",
+      value: null,
+    });
+    expect(
+      fake.requests.some((request) =>
+        ["focusWindow", "setWindowFrame", "requestPermissions"].includes(request.op),
+      ),
+    ).toBe(false);
+    adapter.stop();
+  });
+
+  test("malformed AX error codes fail inspection validation instead of becoming trusted diagnostics", async () => {
+    const { spawn, fake } = makeSpawn();
+    const adapter = Effect.runSync(createMacOsSidecarAdapter({ spawn, sidecarPath: "/x" }));
+    fake.emit(READY);
+    const diagnostics = makeWindowDiagnostics();
+    fake.overrides.set("inspectWindow", (reqId) => ({
+      reqId,
+      result: {
+        window: null,
+        diagnostics: { ...diagnostics, queries: [{ ...diagnostics.queries[0], errorCode: "0" }] },
+      },
+    }));
+    const exit = await Effect.runPromiseExit(adapter.inspectWindow!("window:1"));
+    expect(Exit.isFailure(exit)).toBe(true);
+    adapter.stop();
+  });
   test("idle event consumers can be interrupted during shutdown", async () => {
     const { spawn, fake } = makeSpawn();
     const adapter = Effect.runSync(createMacOsSidecarAdapter({ spawn, sidecarPath: "/x" }));

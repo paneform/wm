@@ -173,6 +173,33 @@ final class GeometryAdapter {
             instanceId: meta.instanceId)
     }
 
+    // MARK: Diagnostic inspection
+    func inspectWindow(id: String, meta: WindowMeta?) -> WindowInspectionValue {
+        var element = records[id]?.element
+        if let element { setMessagingTimeout(element, AXDiagnosticReader.timeout) }
+        var resolutionError: String?
+        if let meta {
+            do { element = try resolve(meta, requireFrameRead: false, timeout: AXDiagnosticReader.timeout) } catch {
+                resolutionError = (error as? AdapterError)?.wireCode ?? "read_failed"
+            }
+        } else {
+            resolutionError = "not_found"
+        }
+        if let element { setMessagingTimeout(element, AXDiagnosticReader.timeout) }
+        defer { if let element { setMessagingTimeout(element, 1.5) } }
+        let window: WindowValue?
+        if resolutionError == nil, let meta, let element {
+            window = readObservation(meta: meta, element: element, focusTimeout: AXDiagnosticReader.timeout)
+        } else {
+            window = nil
+        }
+        if window == nil && resolutionError == nil { resolutionError = "readback_unavailable" }
+        return WindowInspectionValue(
+            window: window,
+            diagnostics: WindowInspector.collect(
+                windowId: id, meta: meta, element: element, resolutionError: resolutionError))
+    }
+
     // MARK: Geometry writes
 
     enum Component: Equatable {
