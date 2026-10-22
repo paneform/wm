@@ -1,4 +1,5 @@
 import { commandDocs } from "@paneform/layout";
+import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   commandNavigation,
@@ -7,6 +8,8 @@ import {
   commandHref,
   isCommandNavActive,
   searchEntries,
+  conceptLinks,
+  guideLinks,
   type CommandNavNode,
 } from "../src/lib/docs/navigation.js";
 
@@ -25,6 +28,14 @@ const flatten = (nodes: readonly CommandNavNode[]): CommandNavNode[] =>
   nodes.flatMap((node) => [node, ...flatten(node.children)]);
 
 describe("command documentation navigation", () => {
+  it("links concept guides to existing routes and exposes them in docs search", () => {
+    expect(conceptLinks.some((link) => link.href === "/wm/docs/concepts/platform-behavior/")).toBe(true);
+    for (const link of guideLinks) {
+      const route = new URL(`../src/routes${link.href}`, import.meta.url);
+      expect(["+page.svx", "+page.svelte"].some((page) => existsSync(new URL(page, route))), link.href).toBe(true);
+      expect(searchEntries.some((entry) => entry.href === link.href && entry.title === link.title)).toBe(true);
+    }
+  });
   it("alphabetizes every level of the command navigation", () => {
     for (const siblings of [
       commandNavigation,

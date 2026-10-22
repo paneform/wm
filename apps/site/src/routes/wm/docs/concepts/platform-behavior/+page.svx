@@ -1,0 +1,93 @@
+<svelte:head>
+  <title>Platform behavior · Paneform WM</title>
+  <meta name="description" content="What to expect when your Mac sleeps, applications limit their window sizes, or wm cannot finish a layout change." />
+</svelte:head>
+
+<p class="docs-breadcrumb">Docs / Concepts / Platform behavior</p>
+
+# Working with your desktop
+
+wm remembers which workspaces your windows belong to and arranges them for you. It also
+checks what applications actually did after asking them to move, resize, or take focus.
+Sometimes an application responds slowly, limits its window size, or temporarily stops
+reporting its windows. Here's what to expect in those situations.
+
+## Windows keep their workspace through interruptions
+
+If your Mac sleeps or an application temporarily stops responding, wm may lose sight of
+some windows. That does not mean you closed them. wm remembers their workspace
+assignments and avoids trying to arrange windows it cannot currently read.
+
+When wm can see the same windows again, they return to their assigned workspaces. There
+is no time limit on that remembered placement while wm is running. A long sleep should
+not make a returning window join whichever workspace happens to be active.
+
+For example, if you leave OpenSCAD on workspace 3 and put your Mac to sleep while viewing
+workspace C, the same OpenSCAD window should still belong to workspace 3 after wake.
+An application that takes longer to respond may become manageable later than the rest
+of the desktop.
+
+## New windows follow your placement rules
+
+A returning window keeps its previous assignment, including a workspace you chose
+manually. A genuinely new window follows your [configured assignment rules](/wm/docs/configuration/).
+If no rule matches, wm places it in your current workspace.
+
+If you focus a new window that is assigned to another workspace, wm reveals that
+workspace. Simply discovering a window in the background does not switch workspaces.
+
+Closing a window and opening a new one starts a new assignment. Reopening the same
+document does not necessarily restore the old workspace: matching titles alone are not
+enough to identify a returning window.
+
+Use [window assignment](/wm/docs/commands/windows/assign/) to choose a workspace yourself.
+
+## Applications can limit their window sizes
+
+Some applications will not resize below a minimum size, will not grow beyond a maximum,
+or use fixed-size windows. Others animate toward a requested size rather than changing
+immediately.
+
+wm checks the resulting size instead of assuming the application accepted its request.
+It may try another supported way to arrange the window or adjust the layout to a size
+the application allows. When wm establishes a reliable size limit, it can use that
+information in later layouts.
+
+This means a layout may take a moment to settle or differ from an evenly divided grid.
+wm cannot force an application to support a size it refuses.
+
+## Focus follows the window you're using
+
+When you select a window outside wm—for example, by switching applications—wm follows
+that window to its workspace. An inactive application cannot select your workspace just
+because it still considers one of its own windows focused.
+
+When a command asks to focus a window, wm checks whether that window actually received
+focus. Bringing an application forward is not always enough: the application may select
+a different window, or the requested window may no longer be available.
+
+## A change can fail without losing your assignments
+
+Moving several windows requires several requests to applications. An application can
+stop responding partway through a workspace change, so wm cannot make every desktop
+change happen at once.
+
+wm makes a bounded number of attempts rather than retrying indefinitely. If a compound
+command fails, wm tries to undo moves it already made. That recovery can also fail if an
+application is still unresponsive, so the visible desktop may need another check before
+it matches your intended layout.
+
+A failed command means wm could not complete and verify the requested result. It does
+not, by itself, mean that your windows were closed or that their workspace assignments
+should be forgotten.
+
+## When you want to arrange things yourself
+
+You can [pause wm](/wm/docs/commands/system/pause/) to stop automatic window management
+while you make manual changes. [Resume](/wm/docs/commands/system/resume/) when you're
+ready for wm to check the desktop and apply its layout again.
+
+If an application is slow to recover after wake, let it become responsive before
+retrying a failed command. You can also [request a fresh layout check](/wm/docs/commands/system/reconcile/).
+That gives wm another chance to read the current windows; it cannot make an unresponsive
+application respond.

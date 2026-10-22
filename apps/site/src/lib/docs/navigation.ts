@@ -96,11 +96,16 @@ export function isCommandNavActive(node: CommandNavNode, currentHref: string): b
     !node.children.some((child) => child.href === currentHref)
   );
 }
+export const conceptLinks = [
+  { title: "Workspaces and layout", href: `${docsBase}/concepts/` },
+  { title: "Platform behavior", href: `${docsBase}/concepts/platform-behavior/` },
+] as const;
 export const guideLinks = [
   { title: "Installation", href: `${docsBase}/getting-started/` },
-  { title: "Workspaces and layout", href: `${docsBase}/concepts/` },
+  conceptLinks[0],
   { title: "Configuration", href: `${docsBase}/configuration/` },
   { title: "CLI listing", href: `${docsBase}/reference/cli/` },
+  conceptLinks[1],
 ] as const;
 function commandSearchEntries(
   nodes: readonly CommandNavNode[],

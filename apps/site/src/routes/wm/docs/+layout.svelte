@@ -3,7 +3,7 @@
   import { afterNavigate } from "$app/navigation";
   import { onMount, tick } from "svelte";
   import { setContext } from "svelte";
-  import { commandNavigation, docsBase, guideLinks, searchEntries } from "$lib/docs/navigation.js";
+  import { commandNavigation, conceptLinks, docsBase, guideLinks, searchEntries } from "$lib/docs/navigation.js";
   import CommandNavigation from "$lib/docs/CommandNavigation.svelte";
   import SiteHeader from "$lib/hero/SiteHeader.svelte";
   import SiteFooter from "$lib/hero/SiteFooter.svelte";
@@ -57,7 +57,7 @@
     <button type="button" class="docs-mobile-nav" aria-expanded={navigationOpen} onclick={() => (navigationOpen = !navigationOpen)}>{navigationOpen ? "Close navigation" : "Browse documentation"}</button>
     <nav class:open={navigationOpen} class="docs-sidebar" aria-label="Documentation">
       <div class="docs-nav-group"><p>Getting started</p><a class:active={page.url.pathname === docsBase + "/"} href={docsBase + "/"} onclick={() => (navigationOpen = false)}>Overview</a><a class:active={page.url.pathname === guideLinks[0].href} href={guideLinks[0].href} onclick={() => (navigationOpen = false)}>Installation</a></div>
-      <div class="docs-nav-group"><p>Concepts</p><a class:active={page.url.pathname === guideLinks[1].href} href={guideLinks[1].href} onclick={() => (navigationOpen = false)}>Workspaces and layout</a></div>
+      <div class="docs-nav-group"><p>Concepts</p>{#each conceptLinks as link}<a class:active={page.url.pathname === link.href} href={link.href} onclick={() => (navigationOpen = false)}>{link.title}</a>{/each}</div>
       <div class="docs-nav-group docs-command-links"><p><a href={docsBase + "/commands/"}>Commands</a></p>
         <CommandNavigation nodes={commandNavigation} currentHref={page.url.pathname + page.url.hash} onnavigate={() => (navigationOpen = false)} />
       </div>
