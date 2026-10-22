@@ -35,13 +35,14 @@ final class KeyMonitor {
   private var swallowHotkeys = true
   private var tap: CFMachPort?
   private var source: CFRunLoopSource?
-  private var pressedModifiers: Set<KeyModifier> = []
 
   init(onAction: @escaping @Sendable (String) -> Void) {
     self.onAction = onAction
   }
 
-  func configure(_ values: [String: String], alwaysSwallowing: [String] = []) throws {
+  func configure(
+    _ values: [String: String], alwaysSwallowing: [String] = [], captureKeyboard: Bool = true
+  ) throws {
     var parsed: [(KeyChord, String)] = []
     var chords = Set<KeyChord>()
     for (source, action) in values.sorted(by: { $0.key < $1.key }) {
@@ -50,10 +51,10 @@ final class KeyMonitor {
       parsed.append((chord, action))
     }
     let parsedAlwaysSwallowed = try alwaysSwallowing.map(Self.parse)
-    if !parsed.isEmpty && tap == nil { try start() }
+    if captureKeyboard && !parsed.isEmpty && tap == nil { try start() }
     bindings = Dictionary(grouping: parsed, by: { $0.0.keyCode })
     alwaysSwallowed = Set(parsedAlwaysSwallowed)
-    if parsed.isEmpty { stop() }
+    if parsed.isEmpty || !captureKeyboard { stop() }
   }
 
   func setHotkeySwallowing(_ enabled: Bool) {
@@ -88,36 +89,41 @@ final class KeyMonitor {
     if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
     source = nil
     tap = nil
-    pressedModifiers.removeAll()
   }
 
-  fileprivate func handle(type: CGEventType, event: CGEvent) -> Bool {
+  func handle(type: CGEventType, event: CGEvent) -> Bool {
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-      pressedModifiers.removeAll()
       if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
       return false
     }
     let code = event.getIntegerValueField(.keyboardEventKeycode)
     if type == .flagsChanged {
-      updateModifier(code: code, flags: event.flags)
       return false
     }
     guard type == .keyDown else { return false }
-    guard let binding = Self.matchingBinding(
-      code: code,
-      isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0,
-      candidates: bindings[code] ?? [],
-      pressed: pressedModifiers
-    ) else { return false }
+    guard
+      let binding = Self.matchingBinding(
+        code: code,
+        isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0,
+        candidates: bindings[code] ?? [],
+        pressed: Self.modifiers(from: event.flags)
+      )
+    else { return false }
     onAction(binding.1)
     return Self.shouldSwallow(
       chord: binding.0, swallowHotkeys: swallowHotkeys, alwaysSwallowed: alwaysSwallowed)
   }
 
-  private func updateModifier(code: Int64, flags: CGEventFlags) {
-    guard let modifier = Self.modifierCodes[code] else { return }
-    let down = Self.isPressed(modifier, flags: flags)
-    if down { pressedModifiers.insert(modifier) } else { pressedModifiers.remove(modifier) }
+  /// Each key-down is authoritative. Lost modifier events must not turn OS
+  /// Command shortcuts into wm Shift bindings or swallow ordinary typing.
+  static func modifiers(from flags: CGEventFlags) -> Set<KeyModifier> {
+    var pressed = Set<KeyModifier>()
+    for (mask, generic, sides) in modifierGroups where flags.contains(mask) {
+      let active = sides.filter { isPressed($0, flags: flags) }
+      if active.isEmpty { pressed.insert(generic) } else { pressed.formUnion(active) }
+    }
+    if flags.contains(.maskSecondaryFn) { pressed.insert(.fn) }
+    return pressed
   }
 
   static func matches(expected: Set<KeyModifier>, pressed: Set<KeyModifier>) -> Bool {
@@ -214,9 +220,11 @@ final class KeyMonitor {
     return flags.rawValue & UInt64(deviceMask) != 0
   }
 
-  private static let modifierCodes: [Int64: KeyModifier] = [
-    54: .rcommand, 55: .lcommand, 56: .lshift, 58: .loption, 59: .lcontrol,
-    60: .rshift, 61: .roption, 62: .rcontrol, 63: .fn,
+  private static let modifierGroups: [(CGEventFlags, KeyModifier, [KeyModifier])] = [
+    (.maskShift, .shift, [.lshift, .rshift]),
+    (.maskControl, .control, [.lcontrol, .rcontrol]),
+    (.maskAlternate, .option, [.loption, .roption]),
+    (.maskCommand, .command, [.lcommand, .rcommand]),
   ]
 
   private static let keyCodes: [String: Int64] = [
