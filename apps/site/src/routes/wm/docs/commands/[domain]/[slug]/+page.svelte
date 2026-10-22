@@ -2,6 +2,7 @@
   import { commandDocs } from "@paneform/layout";
   import { playbackSteps } from "@paneform/layout-browser";
   import DemoStage from "$lib/docs/DemoStage.svelte";
+  import WindowObservationDetails from "$lib/docs/WindowObservationDetails.svelte";
   import { demoDefinitions, demosForCommand } from "$lib/docs/demo-data.js";
   import { payloadTooltips } from "$lib/docs/payload-tooltip.js";
   import { commandHref, commandBreadcrumbs } from "$lib/docs/navigation.js";
@@ -34,13 +35,18 @@
 {#if invocations.some((row) => row.fields !== undefined && row.fields.length > 0)}
   <p class="payload-legend">Payload fields: <span class="required">required</span> · <span class="optional">optional</span> — hover a line for details.</p>
 {/if}
-<p class="note">CLI output shows useful summary fields by default. Add <code>--verbose</code> for the full response and diagnostic details. WebSocket results retain their full structured data.</p>
+{#if doc.slug === 'windows/observe'}
+  <p class="note">CLI output includes live facts, cached comparison, and available platform diagnostics by default. Add <code>--verbose</code> to retain the transport envelope.</p>
+{:else}
+  <p class="note">CLI output shows useful summary fields by default. Add <code>--verbose</code> for the full response and diagnostic details. WebSocket results retain their full structured data.</p>
+{/if}
 <h2 id="arguments">Arguments</h2>
 {#if argumentsList.length > 0}
   <table><tbody><tr><th>Text (CLI · scenario · keybind)</th><th>WebSocket</th><th>Status</th><th>Description</th></tr>
     {#each argumentsList as argument}<tr><td data-label="Text">{#if argument.text !== null}<code>{argument.text}</code>{:else}<span class="argument-none">—</span>{/if}</td><td data-label="WebSocket"><code>{argument.wire}</code></td><td data-label="Status"><span class="option-chip" class:required={argument.required} class:optional={!argument.required}>{argument.required ? 'required' : 'optional'}</span></td><td data-label="Description">{argument.description}</td></tr>{/each}
   </tbody></table>
 {:else}<p>This command has no arguments.</p>{/if}
+{#if doc.slug === 'windows/observe'}<WindowObservationDetails />{/if}
 {#if doc.errors.length}
   <h2 id="errors">Errors</h2>
   <table><tbody><tr><th>Code</th><th>Meaning</th><th>What to do</th></tr>
