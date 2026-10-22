@@ -1,21 +1,21 @@
 {
-  "name": "wm",
-  "version": "2.0.0-alpha.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "build": "pnpm -r build",
-    "test": "pnpm -r test",
-    "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck"
-  },
-  "devDependencies": {
-    "@oxlint/plugins": "1.80.0",
-    "esbuild": "0.28.2",
-    "oxlint": "1.80.0"
-  },
-  "engines": {
-    "node": ">=24"
-  },
-  "packageManager": "pnpm@11.24.0"
+	"name": "wm",
+	"version": "0.1.0-alpha.15",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "pnpm -r build",
+		"test": "pnpm -r test",
+		"lint": "pnpm -r lint",
+		"typecheck": "pnpm -r typecheck"
+	},
+	"devDependencies": {
+		"@oxlint/plugins": "1.80.0",
+		"esbuild": "0.28.2",
+		"oxlint": "1.80.0"
+	},
+	"engines": {
+		"node": ">=24"
+	},
+	"packageManager": "pnpm@11.24.0"
 }

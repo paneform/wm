@@ -8,6 +8,12 @@ ICON_DOCUMENT="$ROOT/assets/wm-clean.icon"
 NODE_RUNTIME="${WM_NODE_RUNTIME:-$(command -v node)}"
 PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH
+PACKAGE_VERSION="$(plutil -extract version raw -expect string -o - "$ROOT/package.json")"
+BUNDLE_VERSION="${PACKAGE_VERSION%%[-+]*}"
+[[ "$BUNDLE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+  echo "invalid package version: $PACKAGE_VERSION" >&2
+  exit 1
+}
 APP_ROOT="$HOME/.local/libexec/wm"
 APP="${WM_APP_PATH:-$APP_ROOT/wm.app}"
 SIGNING_SELECTOR="${WM_CODESIGN_IDENTITY:-Developer ID Application: Allan Deutsch (WCW44PJWTC)}"
@@ -157,7 +163,7 @@ if [[ ! -f "$RESOURCES/Assets.car" ]] && ! find "$RESOURCES" -maxdepth 1 -name '
   echo "asset compiler did not generate app icon resources" >&2
   exit 1
 fi
-cat >"$CONTENTS/Info.plist" <<'EOF'
+cat >"$CONTENTS/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -166,13 +172,14 @@ cat >"$CONTENTS/Info.plist" <<'EOF'
   <key>CFBundleDisplayName</key><string>wm</string>
   <key>CFBundleExecutable</key><string>wm</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.0.1</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>$BUNDLE_VERSION</string>
+  <key>CFBundleVersion</key><string>$BUNDLE_VERSION</string>
   <key>LSUIElement</key><true/>
   <key>NSAccessibilityUsageDescription</key><string>WM manages and focuses application windows.</string>
   <key>NSScreenCaptureUsageDescription</key><string>WM reads window metadata for window management.</string>
 </dict></plist>
 EOF
+plutil -insert PaneformVersion -string "$PACKAGE_VERSION" "$CONTENTS/Info.plist"
 /usr/libexec/PlistBuddy -c "Merge $ICON_INFO" "$CONTENTS/Info.plist"
 plutil -lint "$CONTENTS/Info.plist" >/dev/null
 codesign --verify --strict "$RUNTIME"
