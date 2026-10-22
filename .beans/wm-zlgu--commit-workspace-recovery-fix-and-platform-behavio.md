@@ -1,7 +1,7 @@
 ---
 # wm-zlgu
 title: Commit workspace recovery fix and platform behavior doc
-status: in-progress
+status: done
 type: task
 priority: normal
 created_at: 2026-10-13T23:30:10Z
@@ -53,4 +53,4 @@ Commit series:
 6. docs(site): observe output explanation on the command page via WindowObservationDetails.svelte.
 7. build(wm): CFBundle version stamping from package.json and the new scripts/deploy-local-wm.sh.
 
-Validation of the exact final tree before committing: root lint, typecheck and build pass; pnpm -r test passes (site 304, wm 67, platform-macos transport 21); swift test passes 44 tests including the new KeyMonitor and WindowInspection suites. Status updated after commits verify.
+Validation of the exact final tree before committing: root lint, typecheck and build pass; pnpm -r test passes (site 304, wm 67, platform-macos transport 21); swift test passes 44 tests including the new KeyMonitor and WindowInspection suites. All seven commits created and verified; the working tree retains only the user's untracked scratch files.
