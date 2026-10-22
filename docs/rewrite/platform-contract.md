@@ -117,6 +117,8 @@ Engine → sidecar:
 { "op": "getTopology" }
 { "op": "getWindows" }
 { "op": "getWindow", "id": "window:cg:123" }
+{ "op": "inspectWindow", "id": "window:cg:123" } // read-only live window and AX diagnostics
+{ "op": "inspectApplication", "pid": 123 } // raw AXWindows, including filtered/minimized windows
 { "op": "setWindowFrame", "id": "...", "frame": {...}, "mode": "frame" | "position" | "size" }
 { "op": "focusWindow", "id": "..." }
 { "op": "executeBatch", "operations": [{ "operationId": "reveal:1", "kind": "setFrame", "windowId": "...", "frame": {...}, "expectedIdentity": {...} }, { "operationId": "focus:1", "kind": "focus", "windowId": "...", "expectedIdentity": {...}, "dependsOn": ["reveal:1"] }] }
@@ -132,6 +134,20 @@ Engine → sidecar:
 out of scope: it would add protocol and rollback ordering complexity without reducing
 the command's completion latency, because the engine cannot commit until all results
 have settled.
+
+`inspectWindow` returns `{ window, diagnostics }`. Diagnostics include the granted
+reader identity/permissions, target registration, NSWorkspace foreground PID,
+resolution errors, and scoped raw AX queries. Every query includes numeric/readable
+error status, value type, and a JSON-safe value (`null` on failure). No activation,
+geometry writes, permission requests, UI text contents, or pointer serialization
+are performed. The engine preserves a separate cached observation for comparison.
+`inspectApplication` accepts a positive process ID, bypasses normalized inventory,
+and returns `window: null` with `diagnostics.target.windowId: null`. Both inspection
+operations include `diagnostics.rawWindows`: unfiltered AXWindows elements with
+response-local index, PID/error/target-match identity, and per-window query status.
+Application AXWindows remains a count-valued query; errors and malformed values
+are not treated as a successful empty array. Window queries also include
+AXMinimized.settable alongside position and size settable checks.
 
 Sidecar → engine:
 

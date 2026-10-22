@@ -38,6 +38,15 @@ keybindings and scenario steps share one portable TypeScript parser in
 Omitted targets mean the focused window or workspace, resolved at execution.
 `wm window float --toggle` floats a tiled window or tiles a floating one;
 the state is read at execution, like other toggle commands.
+`wm window focus --window <id>` focuses the window and the workspace that contains
+it, revealing that workspace if it is parked. Clicking a managed window, switching
+to it with Cmd+Tab, or selecting it from the Dock also focuses its workspace.
+Global window focus comes from the frontmost application's focused-window
+reference; focus flags from inactive applications do not select command targets.
+For external activation of a parked workspace, wm restores the selected window
+to its intended frame first, then parks the old workspace and reveals the other
+members. An unchanged window size uses a position-only write.
+
 Assignment follows and focuses the assigned window by default. `--no-follow`
 keeps the source workspace visible; when assigning its focused window, focus
 moves to a remaining source window if one exists. Target selection never changes
@@ -99,6 +108,68 @@ The shared command specification also supplies CLI help, documentation examples
 and the playground's guided command choices.
 
 ## Compact and verbose CLI output
+
+### Observe a window
+
+`wm window observe --window <id>` performs a fresh read through the native host.
+It is read-only and remains available while wm is paused. The response includes:
+
+- `window`: live window facts and committed workspace membership; `null` if the
+  native window cannot currently be read.
+- `cachedWindow`: the engine observation captured before the native read, for
+  comparison. Observation does not replace that cached state.
+- `diagnostics` on macOS: reader PID, bundle identity and privacy grants; target
+  app registration/activation policy; NSWorkspace foreground PID before and after
+  queries; resolution errors; and individual AX query results.
+
+Each query reports its `scope`, `attribute`, numeric `errorCode`, readable
+`errorName`, `valueType`, and `value`. Failed queries have `value: null`; unsupported
+attributes are not interpreted as `false`. Window-local `AXFocused`/`AXMain`,
+application `AXFrontmost`/`AXFocusedWindow`, and system-wide `AXFocusedApplication`/
+`AXFocusedUIElement` are separate. Element values contain PID and target-match
+facts, not pointers or text-field contents.
+
+Details are included without `--verbose`; adding it preserves the transport
+envelope. Adapters without native diagnostics still return a fresh window read.
+Queries run sequentially, so this is a best-effort inspection rather than an
+atomic macOS snapshot.
+
+#### Platform-specific details: macOS
+
+Use `wm window observe --pid <pid>` when a minimized or filtered window is absent
+from wm's inventory. Choose either `--pid` or `--window`. PID observation leaves
+`window` and `cachedWindow` null and exposes application evidence in `diagnostics`.
+It does not select or focus a window, and requires native application-inspection
+support from the platform adapter.
+
+The application `AXWindows` query includes its raw status and returned count.
+`diagnostics.rawWindows` contains each returned element before inventory filtering:
+its array index, PID query status, target match, and individual window queries.
+Indexes are local to this response, not stable window IDs. Windows are not dropped
+because a geometry query fails. A failed or unsupported list read differs from a
+successful list containing zero windows; inspect the query's status and value type.
+
+`AXMinimized.settable`, `AXPosition.settable`, and `AXSize.settable` report whether
+the app says those attributes can be changed. A successful true minimized result
+means restoring from the Dock can be requested by setting `AXMinimized=false`;
+it does not prove the write will succeed. Observe performs no restoration write.
+Restoration is distinct from resizing, zooming, full-screen mode, and focus.
+
+Apple API references:
+
+| Data | API documentation |
+| --- | --- |
+| Raw application windows | [AXUIElementCreateApplication](https://developer.apple.com/documentation/applicationservices/1459374-axuielementcreateapplication), [AXWindows](https://developer.apple.com/documentation/applicationservices/kaxwindowsattribute) |
+| Attribute values and raw errors | [AXUIElementCopyAttributeValue](https://developer.apple.com/documentation/applicationservices/1462085-axuielementcopyattributevalue), [Accessibility attributes](https://developer.apple.com/documentation/applicationservices/axattributeconstants_h) |
+| Minimized state and settable checks | [AXMinimized](https://developer.apple.com/documentation/applicationservices/kaxminimizedattribute), [AXUIElementIsAttributeSettable](https://developer.apple.com/documentation/applicationservices/1459972-axuielementisattributesettable) |
+| Restoration operation (not performed by observe) | [AXUIElementSetAttributeValue](https://developer.apple.com/documentation/applicationservices/1460434-axuielementsetattributevalue) |
+| Window/app focus | [AXFocused](https://developer.apple.com/documentation/applicationservices/kaxfocusedattribute), [AXFrontmost](https://developer.apple.com/documentation/applicationservices/kaxfrontmostattribute), [AXFocusedWindow](https://developer.apple.com/documentation/applicationservices/kaxfocusedwindowattribute) |
+| Global focus | [AXUIElementCreateSystemWide](https://developer.apple.com/documentation/applicationservices/1462095-axuielementcreatesystemwide), [AXFocusedApplication](https://developer.apple.com/documentation/applicationservices/kaxfocusedapplicationattribute), [AXFocusedUIElement](https://developer.apple.com/documentation/applicationservices/kaxfocuseduielementattribute) |
+| App registration and foreground PID | [NSRunningApplication](https://developer.apple.com/documentation/appkit/nsrunningapplication), [NSWorkspace.frontmostApplication](https://developer.apple.com/documentation/appkit/nsworkspace/frontmostapplication) |
+| Element identity | [AXUIElementGetPid](https://developer.apple.com/documentation/applicationservices/1460337-axuielementgetpid) |
+| Observer grants | [AXIsProcessTrusted](https://developer.apple.com/documentation/applicationservices/1460720-axisprocesstrusted), [CGPreflightScreenCaptureAccess](https://developer.apple.com/documentation/coregraphics/cgpreflightscreencaptureaccess()) |
+
+### Other command output
 
 CLI commands print compact JSON by default. Add `--verbose` to any command to
 retain the full response, including the protocol envelope, geometry, layout
