@@ -145,6 +145,7 @@ final class InventoryService {
 
     private func publishFocus(_ id: String?) {
         guard id != lastFocusedId else { return }
+        FocusLatencyTrace.record("focus_observed", windowId: id)
         lastWindows = lastWindows.mapValues { window in
             var updated = window
             updated.focused = window.id == id

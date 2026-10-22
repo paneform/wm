@@ -227,7 +227,9 @@ final class GeometryAdapter {
                 for (index, component) in components.enumerated() {
                     // Identity BEFORE the write: never mutate a replacement window.
                     try validateIdentity(element: element, meta: meta, expected: expectedIdentity)
+                    if component == .position { FocusLatencyTrace.record("position_begin", windowId: meta.id) }
                     try writeComponent(component, requested, element: element)
+                    if component == .position { FocusLatencyTrace.record("position_end", windowId: meta.id) }
                     if index + 1 < components.count {
                         try await Task.sleep(for: .milliseconds(interWriteDelayMs))
                     }

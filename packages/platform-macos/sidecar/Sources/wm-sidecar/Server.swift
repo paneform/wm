@@ -251,6 +251,7 @@ final class SidecarServer {
     guard let meta = inventory.metadata(for: id) else {
       return sendError(request, code: "not_found", detail: "unknown window \(id)")
     }
+    FocusLatencyTrace.record("geometry_received", windowId: id)
     let components: [GeometryAdapter.Component] =
       mode == "position"
       ? [.position]
