@@ -1,6 +1,6 @@
-.git
-.beans
-.beans.yml
+/.git
+/.beans
+/.beans.yml
 .env*
 **/.env*
 .vercel
@@ -14,8 +14,8 @@ packages/layout-browser/dist
 packages/layout-browser/playground-dist
 packages/platform-macos
 apps/wm
-assets
-docs
-tools
+/assets
+/docs
+/tools
 *.tsbuildinfo
 **/*.tsbuildinfo
