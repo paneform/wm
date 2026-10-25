@@ -9,9 +9,8 @@ NODE_RUNTIME="${WM_NODE_RUNTIME:-$(command -v node)}"
 PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH
 PACKAGE_VERSION="$(plutil -extract version raw -expect string -o - "$ROOT/package.json")"
-BUNDLE_VERSION="${PACKAGE_VERSION%%[-+]*}"
-[[ "$BUNDLE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-  echo "invalid package version: $PACKAGE_VERSION" >&2
+[[ "$PACKAGE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+  echo "package version must be numeric major.minor.patch: $PACKAGE_VERSION" >&2
   exit 1
 }
 APP_ROOT="$HOME/.local/libexec/wm"
@@ -172,8 +171,8 @@ cat >"$CONTENTS/Info.plist" <<EOF
   <key>CFBundleDisplayName</key><string>wm</string>
   <key>CFBundleExecutable</key><string>wm</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>$BUNDLE_VERSION</string>
-  <key>CFBundleVersion</key><string>$BUNDLE_VERSION</string>
+  <key>CFBundleShortVersionString</key><string>$PACKAGE_VERSION</string>
+  <key>CFBundleVersion</key><string>$PACKAGE_VERSION</string>
   <key>LSUIElement</key><true/>
   <key>NSAccessibilityUsageDescription</key><string>WM manages and focuses application windows.</string>
   <key>NSScreenCaptureUsageDescription</key><string>WM reads window metadata for window management.</string>
