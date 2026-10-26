@@ -1761,6 +1761,79 @@ describe("multi-display focus isolation", () => {
   });
 });
 
+describe("focusing an empty workspace (issue #5)", () => {
+  const EMPTY_WS_CONFIG: ConfigSource = {
+    load: () => Effect.succeed({ defaults: {}, workspaces: [{ name: "empty" }] }),
+    changes: () => Stream.empty,
+  };
+
+  test("retires the previous focus intent and leaves the parked window parked", async () => {
+    const h = await bootstrap(
+      [{ id: "display:solo", primary: true }],
+      undefined,
+      undefined,
+      false,
+      EMPTY_WS_CONFIG,
+    );
+    const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    await seedWorkspace(h, [w1]);
+    // Authoritative focus of w1, as an external activation (cmd+tab) does.
+    h.fake.focusWindowExternal(w1);
+    h.fake.emitFocusEvent(w1);
+    await new Promise((r) => setTimeout(r, 20));
+    expect((await h.snapshot()).focusedWindow).toBe(w1);
+
+    await h.run({ type: "focusWorkspace", name: "empty" });
+
+    const snap = await h.snapshot();
+    expect(snap.focusedWorkspace).toBe("empty");
+    // The OS keeps w1 as its key window (nothing else took focus), but ws1
+    // must stay parked: a stale intent re-revealing it is the flicker bug.
+    expect(workspaceOf(snap, "1")?.visibleOnDisplay).toBeNull();
+
+    const parkedFrame = h.fake.frameOf(w1);
+    expect(parkedFrame).not.toBeNull();
+    // Reconcile passes must not fight the park: zero writes to the parked
+    // window, and its frame never leaves the parking spot.
+    const writesAfterPark = h.fake.writes().length;
+    for (let i = 0; i < 3; i += 1) {
+      await h.run({ type: "reconcile" });
+      const revealWrites = h.fake
+        .writes()
+        .slice(writesAfterPark)
+        .filter((write) => write.windowId === w1);
+      expect(revealWrites).toEqual([]);
+      expect(h.fake.frameOf(w1)).toEqual(parkedFrame);
+    }
+    expect(workspaceOf(await h.snapshot(), "1")?.visibleOnDisplay).toBeNull();
+    expect((await h.snapshot()).focusedWorkspace).toBe("empty");
+  });
+
+  test("cmd+tab to the parked window still reveals its workspace afterwards", async () => {
+    const h = await bootstrap(
+      [{ id: "display:solo", primary: true }],
+      undefined,
+      undefined,
+      false,
+      EMPTY_WS_CONFIG,
+    );
+    const w1 = h.fake.addWindow(makeWindow({ x: 100, y: 100 }));
+    await seedWorkspace(h, [w1]);
+    h.fake.focusWindowExternal(w1);
+    await h.run({ type: "reconcile" });
+    await h.run({ type: "focusWorkspace", name: "empty" });
+    expect(workspaceOf(await h.snapshot(), "1")?.visibleOnDisplay).toBeNull();
+
+    // Genuine external activation: the platform focuses the parked window.
+    h.fake.focusWindowExternal(w1);
+    h.fake.emitFocusEvent(w1);
+    await new Promise((r) => setTimeout(r, 40));
+    const snap = await h.snapshot();
+    expect(snap.focusedWorkspace).toBe("1");
+    expect(snap.focusedWindow).toBe(w1);
+  });
+});
+
 describe("displaced workspace rollback on multi-display moves (round 3 issue 2)", () => {
   test("populated displaced workspace fully rolls back with original park display", async () => {
     const h = await bootstrap();

@@ -1941,7 +1941,13 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           id === undefined ||
           batch.removals.has(id) ||
           workspace === undefined ||
-          workspace.visibleOnDisplay !== null
+          workspace.visibleOnDisplay !== null ||
+          // A parked intent workspace is only revealed when focus selection
+          // AGREES (fresh signal for that window, or a command focused one of
+          // its members). A deliberate workspace focus — e.g. an empty
+          // workspace — must not be overridden by the stale previous intent,
+          // or the parked window flickers between parked and tiled frames.
+          workspace.name !== world.focusedWorkspace
         )
           return;
         const displayId = workspaceFocusDisplay(world, workspace.name);
@@ -4168,6 +4174,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       (w0: World): World => {
         let w = ensureWorkspaceIn(w0, name);
         w = { ...w, focusedWorkspace: name };
+        // An empty destination has no member to focus: retire the previous
+        // focus intent. Parking the old workspace while its window stays the
+        // intent would re-reveal it every pass (empty-workspace flicker).
+        if (workspaceFocusMember(w, name) === null) w = { ...w, focusIntent: null };
         buffer.push({ topic: "focus", payload: { workspace: name } });
         if (displayId !== null) w = revealIn(w, intents, name, displayId);
         return w;
