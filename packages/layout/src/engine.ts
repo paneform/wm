@@ -123,6 +123,7 @@ import {
   ObservationStoreError,
   type ObservationSnapshot,
   type ObservationStore,
+  type WorkspacePersistentState,
 } from "./observation-store.js";
 import {
   inferInitialTree,
@@ -206,6 +207,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     let observationStoreFailed = loadedObservations._tag === "Left";
     let observationRevision = "memory";
     let initialLearning = emptyLearningStore();
+    let initialWorkspaceState: WorkspacePersistentState | undefined;
     if (loadedObservations._tag === "Right" && loadedObservations.right !== null) {
       try {
         if (
@@ -215,6 +217,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           throw new ObservationStoreError("invalid", "observation revision is invalid");
         }
         initialLearning = learningFromObservationDocument(loadedObservations.right.document);
+        initialWorkspaceState = loadedObservations.right.document.workspaceState;
         observationRevision = loadedObservations.right.revision;
       } catch {
         observationStoreFailed = true;
@@ -238,6 +241,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
     let learning: LearningStore = initialLearning;
     let persistedLearning: LearningStore = initialLearning;
     let learningDirty = false;
+    /** Last workspace section written to the store; dirty detection for restarts. */
+    let lastSavedWorkspaceStateJson: string | null =
+      initialWorkspaceState === undefined ? null : JSON.stringify(initialWorkspaceState);
     const tombstones = new Map<WindowId, TombstoneRecord>();
     const knownInstances = new Map<WindowId, WindowObservation>();
     const overrides = { managed: new Set<WindowId>(), unmanaged: new Set<WindowId>() };
@@ -510,9 +516,30 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
       syncProfiles();
     };
 
+    /**
+     * Durable workspace arrangement for restarts: focus plus where each
+     * workspace was last revealed. Compared by signature so pure reconcile
+     * passes never rewrite the store.
+     */
+    const workspaceStateFromWorld = (): WorkspacePersistentState => ({
+      focusedWorkspace: world.focusedWorkspace,
+      workspaces: [...world.workspaces.values()]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((workspace) => ({
+          name: workspace.name,
+          visibleOnDisplay: workspace.visibleOnDisplay,
+          pinnedDisplayOverride: workspace.pinnedDisplayOverride,
+        })),
+    });
+
     const persistLearning = (): Effect.Effect<void, ObservationStoreError> => {
-      if (!learningDirty || observationStore === undefined) {
+      const workspaceState = workspaceStateFromWorld();
+      const workspaceStateJson = JSON.stringify(workspaceState);
+      const workspaceStateDirty = workspaceStateJson !== lastSavedWorkspaceStateJson;
+      if (!learningDirty && !workspaceStateDirty) return Effect.void;
+      if (observationStore === undefined) {
         learningDirty = false;
+        lastSavedWorkspaceStateJson = workspaceStateJson;
         return Effect.void;
       }
       return Effect.gen(function* () {
@@ -520,7 +547,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
           const base = persistedLearning;
           const local = learning;
           const document = yield* Effect.try({
-            try: () => observationDocumentFromLearning(local),
+            try: () => observationDocumentFromLearning(local, workspaceState),
             catch: (error) =>
               error instanceof ObservationStoreError
                 ? error
@@ -544,6 +571,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             persistedLearning = learning;
             observationRevision = saved.right.revision;
             learningDirty = false;
+            lastSavedWorkspaceStateJson = workspaceStateJson;
             observationStoreFailed = false;
             syncProfiles();
             return;
@@ -566,6 +594,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
             persistedLearning = installed;
             observationRevision = committed.revision;
             learningDirty = false;
+            lastSavedWorkspaceStateJson = workspaceStateJson;
             observationStoreFailed = true;
             syncProfiles();
             setHealth("degraded", "observation_store_durability");
@@ -1847,6 +1876,9 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               return { ok: false, error: new CommandError(result.failure) };
             }
             if (result.converged) {
+              // Flush durable workspace arrangement changes driven by this
+              // cycle (external focus selection, rule reveals/parks).
+              yield* persistLearningBestEffort();
               return { ok: true };
             }
           }
@@ -3092,15 +3124,7 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
               ctx.appliedActions = applied;
               ctx.finalDraft = finalDraft;
               yield* Effect.uninterruptible(
-                Effect.gen(function* () {
-                  yield* Effect.mapError(
-                    persistLearning(),
-                    (error) =>
-                      new CommandError({
-                        code: "internal_error",
-                        message: `observation persistence failed: ${error.message}`,
-                      }),
-                  );
+                Effect.sync(() => {
                   ctx.committed = true;
                 }),
               );
@@ -3116,6 +3140,10 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                     profiles: new Map(learning.profiles),
                     epoch: ctx.finalDraft.epoch + 1,
                   };
+                  // Persistence is deliberately NOT on the command path: the
+                  // store save is synchronous, fsync-heavy IO (~16ms measured)
+                  // and would tax every hotkey. Durable state flushes at the
+                  // next converged reconcile and at engine stop instead.
                   for (const restore of ctx.shutdownRestores) {
                     shutdownRestoreIntents.set(restore.windowId, {
                       frame: restore.frame,
@@ -5057,6 +5085,43 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
         const windows = new Map(observations.map((observation) => [observation.id, observation]));
         lastObservedFocusId = observations.find((observation) => observation.focused)?.id ?? null;
         world = { ...world, topology, windows };
+        // Durable workspace arrangement (v2 observation documents): restore
+        // focus and visibility before admission so placement and the
+        // reveal-focused-workspace rule agree with the pre-restart desktop.
+        // v1 documents (section absent) skip restoration and keep the
+        // previous default-focused-startup behavior.
+        if (initialWorkspaceState !== undefined) {
+          const connected = new Set(topology.displays.map((display) => display.id));
+          const claimed = new Set<DisplayId>();
+          const workspaces = new Map(world.workspaces);
+          for (const entry of initialWorkspaceState.workspaces) {
+            const existing = workspaces.get(entry.name) ?? emptyWorkspace(entry.name);
+            const visibleOnDisplay =
+              entry.visibleOnDisplay !== null &&
+              connected.has(entry.visibleOnDisplay) &&
+              !claimed.has(entry.visibleOnDisplay)
+                ? entry.visibleOnDisplay
+                : null;
+            if (visibleOnDisplay !== null) claimed.add(visibleOnDisplay);
+            workspaces.set(entry.name, {
+              ...existing,
+              visibleOnDisplay,
+              pinnedDisplayOverride:
+                entry.pinnedDisplayOverride !== null && connected.has(entry.pinnedDisplayOverride)
+                  ? entry.pinnedDisplayOverride
+                  : null,
+            });
+          }
+          const restoredFocus = initialWorkspaceState.focusedWorkspace;
+          world = {
+            ...world,
+            workspaces,
+            focusedWorkspace:
+              restoredFocus === null || workspaces.has(restoredFocus)
+                ? restoredFocus
+                : world.focusedWorkspace,
+          };
+        }
         for (const observation of observations) {
           firstSeen.set(observation.id, observation.frame);
           knownInstances.set(observation.id, observation);
@@ -5532,6 +5597,8 @@ export const createEngine = (options: EngineOptions): Effect.Effect<Engine> =>
                   pendingCycle = null;
                 }
                 const restoration = yield* runExclusive(restoreParkedWindows());
+                // Last-chance flush of the durable workspace arrangement.
+                yield* persistLearningBestEffort();
                 shutdownReport = yield* collectShutdownReport(restoration);
               }),
             ),

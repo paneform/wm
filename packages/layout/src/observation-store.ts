@@ -5,7 +5,9 @@ import type { Confidence, Profile, ProfileKey } from "./world.js";
 import type { Effect, Stream } from "effect";
 import { Schema } from "effect";
 
-export const OBSERVATION_SCHEMA_VERSION = 1 as const;
+export const OBSERVATION_SCHEMA_VERSION = 2 as const;
+/** Documents written before workspace state existed; decodable, section absent. */
+export const OBSERVATION_SCHEMA_VERSION_V1 = 1 as const;
 
 const PENDING_IDS = ["width:min", "width:max", "height:min", "height:max"] as const;
 type PendingId = (typeof PENDING_IDS)[number];
@@ -26,6 +28,24 @@ export interface ObservationDocument {
   readonly schemaVersion: typeof OBSERVATION_SCHEMA_VERSION;
   readonly profiles: readonly Profile[];
   readonly pending: readonly StoredPendingEvidence[];
+  /**
+   * Durable workspace arrangement for intelligent restarts. Absent in v1
+   * documents (and when the stored section is invalid): restarts then fall
+   * back to inference instead of restoring focus/visibility.
+   */
+  readonly workspaceState?: WorkspacePersistentState;
+}
+
+export interface StoredWorkspaceEntry {
+  readonly name: string;
+  /** Display the workspace was last revealed on; null while parked. */
+  readonly visibleOnDisplay: string | null;
+  readonly pinnedDisplayOverride: string | null;
+}
+
+export interface WorkspacePersistentState {
+  readonly focusedWorkspace: string | null;
+  readonly workspaces: readonly StoredWorkspaceEntry[];
 }
 
 export interface ObservationSnapshot {
@@ -106,12 +126,24 @@ const SamplesSchema = Schema.Struct({
   "height:min": Schema.optional(Schema.Array(FinitePositive).pipe(Schema.maxItems(16))),
   "height:max": Schema.optional(Schema.Array(FinitePositive).pipe(Schema.maxItems(16))),
 });
+const StoredWorkspaceEntrySchema = Schema.Struct({
+  name: NonEmptyString,
+  visibleOnDisplay: Schema.NullOr(NonEmptyString),
+  pinnedDisplayOverride: Schema.NullOr(NonEmptyString),
+});
+const WorkspacePersistentStateSchema = Schema.Struct({
+  focusedWorkspace: Schema.NullOr(NonEmptyString),
+  workspaces: Schema.Array(StoredWorkspaceEntrySchema).pipe(Schema.maxItems(10_000)),
+});
 const ObservationDocumentSchema = Schema.Struct({
-  schemaVersion: Schema.Literal(OBSERVATION_SCHEMA_VERSION),
+  schemaVersion: Schema.Literal(OBSERVATION_SCHEMA_VERSION, OBSERVATION_SCHEMA_VERSION_V1),
   profiles: Schema.Array(ProfileSchema).pipe(Schema.maxItems(10_000)),
   pending: Schema.Array(Schema.Struct({ key: ProfileKeySchema, samples: SamplesSchema })).pipe(
     Schema.maxItems(10_000),
   ),
+  // Deliberately untyped here: an invalid section is dropped by
+  // decodeWorkspacePersistentState instead of failing the whole document.
+  workspaceState: Schema.optional(Schema.Unknown),
 });
 
 const validateConstraints = (constraints: Constraints): Constraints => {
@@ -132,6 +164,30 @@ const validateConstraints = (constraints: Constraints): Constraints => {
   return constraints;
 };
 
+/**
+ * Validate the workspace section in isolation. Returns undefined when the
+ * section is absent or malformed: restarts then skip workspace restoration
+ * instead of rejecting the whole document (learning still loads).
+ */
+export function decodeWorkspacePersistentState<Input>(
+  value: Input,
+): WorkspacePersistentState | undefined {
+  try {
+    const decoded = Schema.decodeUnknownSync(WorkspacePersistentStateSchema, {
+      onExcessProperty: "error",
+    })(value);
+    const names = new Set<string>();
+    for (const entry of decoded.workspaces) {
+      if (names.has(entry.name)) return undefined;
+      names.add(entry.name);
+    }
+    if (decoded.focusedWorkspace !== null && !names.has(decoded.focusedWorkspace)) return undefined;
+    return decoded;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Validate untrusted durable data before it enters the engine. */
 export function decodeObservationDocument<Input>(value: Input): ObservationDocument {
   let decoded: Schema.Schema.Type<typeof ObservationDocumentSchema>;
@@ -145,6 +201,13 @@ export function decodeObservationDocument<Input>(value: Input): ObservationDocum
       `unsupported observation document schema: ${String(error)}`,
     );
   }
+  // v1 documents predate workspace state; normalize the version so the
+  // in-memory shape always reflects the current schema. The section decodes
+  // leniently: malformed durable data skips restoration, never learning.
+  const workspaceState =
+    decoded.schemaVersion === OBSERVATION_SCHEMA_VERSION
+      ? decodeWorkspacePersistentState(decoded.workspaceState)
+      : undefined;
 
   const profileKeys = new Set<string>();
   const profiles = decoded.profiles.map((decodedProfile): Profile => {
@@ -187,7 +250,9 @@ export function decodeObservationDocument<Input>(value: Input): ObservationDocum
     return { key, samples };
   });
 
-  return { schemaVersion: OBSERVATION_SCHEMA_VERSION, profiles, pending };
+  return workspaceState === undefined
+    ? { schemaVersion: OBSERVATION_SCHEMA_VERSION, profiles, pending }
+    : { schemaVersion: OBSERVATION_SCHEMA_VERSION, profiles, pending, workspaceState };
 }
 
 const keyFromString = (value: string): ProfileKey => {
@@ -220,7 +285,10 @@ const keyFromString = (value: string): ProfileKey => {
   return key;
 };
 
-export function observationDocumentFromLearning(store: LearningStore): ObservationDocument {
+export function observationDocumentFromLearning(
+  store: LearningStore,
+  workspaceState?: WorkspacePersistentState,
+): ObservationDocument {
   const profiles = [...store.profiles.values()].sort((a, b) =>
     profileKeyString(a.key).localeCompare(profileKeyString(b.key)),
   );
@@ -237,12 +305,15 @@ export function observationDocumentFromLearning(store: LearningStore): Observati
         samples,
       };
     });
-  return decodeObservationDocument({
-    schemaVersion: OBSERVATION_SCHEMA_VERSION,
-    profiles,
-    pending,
-  });
-}
+    const base = {
+      schemaVersion: OBSERVATION_SCHEMA_VERSION,
+      profiles,
+      pending,
+    };
+    return decodeObservationDocument(
+      workspaceState === undefined ? base : { ...base, workspaceState },
+    );
+  }
 
 export function learningFromObservationDocument<Input>(value: Input): LearningStore {
   const document = decodeObservationDocument(value);

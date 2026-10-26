@@ -48,14 +48,14 @@ describe("observation documents", () => {
     };
     expect(() =>
       decodeObservationDocument({
-        schemaVersion: 1,
+        schemaVersion: 2,
         profiles: [profile, profile],
         pending: [],
       }),
     ).toThrow(ObservationStoreError);
     expect(() =>
       decodeObservationDocument({
-        schemaVersion: 1,
+        schemaVersion: 2,
         profiles: [],
         pending: [{ key, samples: { "width:max": [Number.NaN] } }],
       }),
@@ -64,14 +64,69 @@ describe("observation documents", () => {
 
   test("rejects unsupported schema versions", () => {
     expect(() =>
-      decodeObservationDocument({ schemaVersion: 2, profiles: [], pending: [] }),
+      decodeObservationDocument({ schemaVersion: 3, profiles: [], pending: [] }),
     ).toThrow(/unsupported observation document schema/);
+  });
+
+  test("v1 documents decode without a workspace section", () => {
+    const decoded = decodeObservationDocument({ schemaVersion: 1, profiles: [], pending: [] });
+    expect(decoded.schemaVersion).toBe(2);
+    expect(decoded.workspaceState).toBeUndefined();
+  });
+
+  describe("workspace state section", () => {
+    const section = {
+      focusedWorkspace: "T",
+      workspaces: [
+        { name: "1", visibleOnDisplay: "display:a", pinnedDisplayOverride: null },
+        { name: "T", visibleOnDisplay: "display:b", pinnedDisplayOverride: "display:b" },
+      ],
+    };
+
+    test("round-trips a valid section through encode and decode", () => {
+      const store = emptyLearningStore();
+      const document = observationDocumentFromLearning(store, section);
+      expect(document.schemaVersion).toBe(2);
+      expect(decodeObservationDocument(document).workspaceState).toEqual(section);
+      // Encoding without a section omits it entirely.
+      expect(
+        decodeObservationDocument(observationDocumentFromLearning(store)).workspaceState,
+      ).toBeUndefined();
+    });
+
+    test("drops a malformed section instead of rejecting the document", () => {
+      const cases: unknown[] = [
+        // Duplicate workspace names.
+        {
+          focusedWorkspace: null,
+          workspaces: [
+            { name: "1", visibleOnDisplay: null, pinnedDisplayOverride: null },
+            { name: "1", visibleOnDisplay: null, pinnedDisplayOverride: null },
+          ],
+        },
+        // Focused workspace references an unknown entry.
+        { focusedWorkspace: "ghost", workspaces: [] },
+        // Malformed entry shape.
+        { focusedWorkspace: null, workspaces: [{ name: "" }] },
+        // Wrong section shape entirely.
+        { focused: "T" },
+      ];
+      for (const workspaceState of cases) {
+        const decoded = decodeObservationDocument({
+          schemaVersion: 2,
+          profiles: [],
+          pending: [],
+          workspaceState,
+        });
+        expect(decoded.workspaceState).toBeUndefined();
+      }
+    });
   });
 
   test("rejects contradictory resolved constraints", () => {
     expect(() =>
       decodeObservationDocument({
-        schemaVersion: 1,
+        schemaVersion: 2,
         profiles: [
           {
             key,
@@ -89,7 +144,7 @@ describe("observation documents", () => {
 
   test("merges independent concurrent fields on the same profile", () => {
     const document = (overrides: Partial<Profile>): ObservationDocument => ({
-      schemaVersion: 1 as const,
+      schemaVersion: 2 as const,
       profiles: [
         {
           key,
@@ -130,7 +185,7 @@ describe("observation documents", () => {
 
   test("merges compatible concurrent creation of the same profile", () => {
     const local = learningFromObservationDocument({
-      schemaVersion: 1,
+      schemaVersion: 2,
       profiles: [
         {
           key,
@@ -144,7 +199,7 @@ describe("observation documents", () => {
       pending: [],
     });
     const remote = learningFromObservationDocument({
-      schemaVersion: 1,
+      schemaVersion: 2,
       profiles: [
         {
           key,

@@ -30,7 +30,7 @@ const CONFIG: ConfigSource = {
 };
 
 const profileDocument = (fingerprint: string, maxWidth: number): ObservationDocument => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   profiles: [
     {
       key: {
